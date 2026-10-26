@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7fb">
+    <title>CommBurn — Editor vetorial</title>
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="CommBurn início"><span class="brand-mark" aria-hidden="true">C</span><span>CommBurn</span></a>
+      <nav class="menu-bar" aria-label="Menu principal">
+        <details class="menu"><summary>Arquivo</summary><div class="menu-popover">
+          <button type="button" data-action="new">Novo trabalho</button>
+          <button type="button" data-action="import-svg">Importar SVG</button>
+          <button type="button" data-action="export">Exportar SVG</button>
+        </div></details>
+        <details class="menu"><summary>Inserir</summary><div class="menu-popover">
+          <button type="button" data-action="add-text">Adicionar texto</button>
+          <button type="button" data-action="add-rect">Adicionar retângulo</button>
+        </div></details>
+      </nav>
+      <div class="topbar-end">
+        <span class="unit-pill"><span class="status-dot"></span> Milímetros</span>
+        <button class="button button-primary" type="button" data-action="export"><span aria-hidden="true">↓</span> Exportar SVG</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="sidebar" aria-label="Ferramentas do trabalho">
+        <section class="panel tool-panel" data-ui-module="action-toolbar" data-extension-slot="toolbar-tools">
+          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌘</span><div><h2>Ação</h2><p>Escolha como interagir com os objetos</p></div></div>
+          <div class="tool-grid" id="action-toolbar" role="toolbar" aria-label="Ferramentas de objeto"></div>
+          <p class="tool-status" id="tool-status" role="status">Selecionar: clique em um objeto.</p>
+        </section>
+        <section class="panel" data-ui-module="svg-import" data-extension-slot="document-settings">
+          <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2>Importar vetor</h2><p>SVG seguro, convertido em objetos editáveis</p></div></div>
+          <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importar formas e caminhos SVG para a camada ativa.">Importar arquivo SVG</button>
+        </section>
+
+        <section class="panel" data-ui-module="document-settings" data-extension-slot="document-settings">
+          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">▦</span><div><h1>Área de trabalho</h1><p>Dimensões reais do material</p></div></div>
+          <div class="field-row">
+            <label class="field">Largura<span class="input-with-unit"><input id="width" type="number" min="0.1" step="1" value="180"><span>mm</span></span></label>
+            <label class="field">Altura<span class="input-with-unit"><input id="height" type="number" min="0.1" step="1" value="120"><span>mm</span></span></label>
+          </div>
+          <button class="button button-secondary full-width" type="button" id="orientation"><span class="button-icon icon-violet" aria-hidden="true">↻</span> Alternar orientação</button>
+        </section>
+
+        <section class="panel" data-ui-module="coordinate-settings" data-extension-slot="coordinate-settings">
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌖</span><div><h2>Posição e sentido</h2><p>Definidos por você, sem sensores</p></div></div>
+          <label class="field">Origem das coordenadas<select id="origin">
+            <option value="top-left">Canto superior esquerdo</option><option value="top-right">Canto superior direito</option>
+            <option value="bottom-left">Canto inferior esquerdo</option><option value="bottom-right">Canto inferior direito</option>
+          </select></label>
+          <div class="toggle-row">
+            <label class="toggle"><input id="flip-x" type="checkbox"><span class="toggle-track"></span> Inverter eixo X</label>
+            <label class="toggle"><input id="flip-y" type="checkbox"><span class="toggle-track"></span> Inverter eixo Y</label>
+          </div>
+          <p class="help-text">Origem e eixos são aplicados à exportação. O desenho do texto permanece legível.</p>
+        </section>
+
+        <section class="panel layers-panel" data-ui-module="layers" data-extension-slot="layers" aria-labelledby="layers-title">
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">▤</span><div><h2 id="layers-title">Camadas de trabalho</h2><p>Operação, potência e avanço independentes</p></div></div>
+          <div class="layers-list" id="layers-list" aria-label="Lista de camadas"></div>
+          <button class="button button-secondary full-width layer-add" id="add-layer" type="button" data-tooltip="Adicionar uma camada de gravação, corte ou preenchimento.">+ Nova camada</button>
+          <p class="help-text">Camadas desativadas não são enviadas; camadas ocultas não aparecem no desenho.</p>
+        </section>
+
+        <section class="panel" data-ui-module="object-defaults" data-extension-slot="object-creation">
+          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌖</span><div><h2>Posição inicial</h2><p>Usada ao criar texto ou forma</p></div></div>
+          <div class="field-row">
+            <label class="field">X<span class="input-with-unit"><input id="new-x" type="number" step="0.1" value="10"><span>mm</span></span></label>
+            <label class="field">Y<span class="input-with-unit"><input id="new-y" type="number" step="0.1" value="20"><span>mm</span></span></label>
+          </div>
+        </section>
+
+        <section class="panel" data-ui-module="text-creation" data-extension-slot="object-creation">
+          <div class="panel-heading"><span class="section-icon icon-pink" aria-hidden="true">T</span><div><h2>Criar texto</h2><p>Escreva e posicione sua mensagem</p></div></div>
+          <label class="field">Texto<textarea id="text-content" rows="3" placeholder="Digite seu texto..."></textarea></label>
+          <label class="field">Fonte<select id="font-family"><option value="sans-serif">Sem serifa</option><option value="serif">Com serifa</option><option value="monospace">Monoespaçada</option></select></label>
+          <label class="field">Tamanho do texto<span class="input-with-unit"><input id="font-size" type="number" min="0.1" step="0.1" value="8"><span>mm</span></span></label>
+          <button class="button button-secondary full-width" id="add-text" type="button" data-tooltip="Criar um novo objeto de texto. Atalho Ctrl+Enter.">Adicionar texto</button>
+        </section>
+
+        <section class="panel" data-ui-module="shape-creation" data-extension-slot="object-creation">
+          <div class="panel-heading"><span class="section-icon icon-green" aria-hidden="true">▱</span><div><h2>Criar forma</h2><p>Tipo e dimensões editáveis em mm</p></div></div>
+          <label class="field">Forma<select id="new-shape-type"><option value="rect">Retângulo</option><option value="ellipse">Elipse</option><option value="line">Linha</option></select></label>
+          <div class="field-row">
+            <label class="field">Largura<span class="input-with-unit"><input id="new-shape-width" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
+            <label class="field">Altura<span class="input-with-unit"><input id="new-shape-height" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
+          </div>
+          <p class="help-text" id="shape-help">O retângulo precisa de largura e altura maiores que zero.</p>
+          <button class="button button-secondary full-width" id="add-shape" type="button" data-tooltip="Criar a forma com o tipo e as dimensões acima.">Adicionar forma</button>
+        </section>
+
+        <section class="panel inspector-panel" id="object-inspector" data-ui-module="object-inspector" data-extension-slot="object-inspector" hidden>
+          <div class="panel-heading"><span class="section-icon icon-violet icon-blue" aria-hidden="true">⚙</span><div><h2>Propriedades do objeto</h2><p id="inspector-kind">Objeto selecionado</p></div></div>
+          <div id="text-inspector-fields">
+            <label class="field">Texto<textarea id="object-text" rows="2"></textarea></label>
+            <label class="field">Fonte<select id="object-font"><option value="sans-serif">Sem serifa</option><option value="serif">Com serifa</option><option value="monospace">Monoespaçada</option></select></label>
+          </div>
+          <label class="field" id="path-inspector-fields" hidden>Traçado SVG editável<textarea id="object-path" rows="5" spellcheck="false"></textarea></label>
+          <div class="field-row">
+            <label class="field">Posição X<span class="input-with-unit"><input id="object-x" type="number" step="0.1"><span>mm</span></span></label>
+            <label class="field">Posição Y<span class="input-with-unit"><input id="object-y" type="number" step="0.1"><span>mm</span></span></label>
+          </div>
+          <div class="field-row shape-properties" id="shape-properties">
+            <label class="field">Largura<span class="input-with-unit"><input id="object-width" type="number" min="0" step="0.1"><span>mm</span></span></label>
+            <label class="field">Altura<span class="input-with-unit"><input id="object-height" type="number" min="0" step="0.1"><span>mm</span></span></label>
+          </div>
+          <div class="field-row">
+            <label class="field">Rotação<input id="object-rotation" type="number" step="1"><span class="unit-note">graus</span></label>
+            <label class="field">Inclinação X<input id="object-skew-x" type="number" min="-79" max="79" step="1"><span class="unit-note">graus</span></label>
+          </div>
+          <label class="field">Inclinação Y<input id="object-skew-y" type="number" min="-79" max="79" step="1"><span class="unit-note">graus</span></label>
+          <label class="field">Camada<select id="object-layer"></select></label>
+          <div class="editor-actions"><button class="button button-secondary" id="duplicate-selection" type="button">Duplicar</button><button class="button button-danger" id="remove-selection" type="button">Remover</button></div>
+        </section>
+
+        <section class="panel machine-panel">
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌁</span><div><h2>Máquina · GRBL</h2><p>Conexão serial local e opcional</p></div></div>
+          <p class="machine-warning">Controle limitado a controladores compatíveis com GRBL. Confirme firmware, limites, foco, exaustão e proteção ocular para sua máquina antes de conectar.</p>
+          <label class="field">Porta / caminho serial
+            <span class="port-row"><input id="serial-path" list="serial-port-options" placeholder="/dev/ttyACM0 ou COM3"><datalist id="serial-port-options"></datalist><button class="button button-secondary" id="refresh-ports" type="button" aria-label="Atualizar portas">↻</button></span>
+          </label>
+          <label class="field">Baud rate<select id="baud-rate"><option>115200</option><option>230400</option><option>57600</option><option>250000</option></select></label>
+          <label class="field">Velocidade máxima S configurada na máquina<input id="machine-smax" type="number" min="1" step="1" placeholder="Confira $30 no controlador"></label>
+          <div class="machine-actions">
+            <button class="button button-secondary" id="connect-machine" type="button">Conectar</button>
+            <button class="button button-danger" id="disconnect-machine" type="button" disabled>Desconectar</button>
+          </div>
+          <p class="machine-state" id="machine-state" role="status">Desconectado</p>
+          <label class="safety-check"><input id="safety-confirmed" type="checkbox"><span>Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
+          <button class="button button-primary full-width" id="start-machine-job" type="button" disabled>Enviar contornos à máquina</button>
+          <button class="button button-danger full-width" id="hold-machine-job" type="button" disabled>Parar envio e solicitar pausa</button>
+          <p class="help-text">O adaptador atual aceita retângulos sem transformação; preenchimento raster e passes são controlados por camada. Textos, elipses, linhas e formas transformadas são recusados. A pausa não substitui o botão de emergência.</p>
+        </section>
+      </aside>
+
+      <section class="canvas-area" aria-label="Pré-visualização do trabalho">
+        <div class="canvas-toolbar" data-ui-module="canvas-header" data-extension-slot="canvas-header"><div class="document-name"><span class="document-icon" aria-hidden="true">◇</span><span>Trabalho sem título</span><span class="saved-badge">Rascunho</span></div><div class="canvas-actions"><span>Área</span><span class="zoom-value" id="canvas-size">180 × 120 mm</span><button class="button button-secondary shortcut-help" id="shortcut-help" type="button" data-tooltip="Ver atalhos de teclado.">Atalhos <kbd>?</kbd></button></div></div>
+        <div class="stage">
+          <div class="board-frame" id="board-frame" data-ui-module="canvas" data-extension-slot="canvas">
+            <div class="ruler ruler-top" id="ruler-x" aria-hidden="true"></div>
+            <div class="ruler ruler-left" id="ruler-y" aria-hidden="true"></div>
+            <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial"><g id="objects"></g></svg>
+          </div>
+          <div class="stage-note"><span class="status-dot"></span> Escala e medidas em milímetros</div>
+        </div>
+        <footer class="statusbar"><span id="selection-status">Nenhum objeto selecionado</span><span id="active-tool-status">Selecionar · V</span><span>CommBurn · Rascunho inicial</span></footer>
+      </section>
+    </main>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <input id="svg-file-input" type="file" accept=".svg,image/svg+xml" hidden>
+    <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar atalhos">×</button></form>
+      <h2 id="shortcuts-title">Atalhos de teclado</h2>
+      <p>Atalhos de edição não interceptam a digitação em campos de texto.</p>
+      <table><tbody id="shortcuts-list"></tbody></table>
+    </dialog>
+    <script src="./vendor/svgson.js"></script>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
