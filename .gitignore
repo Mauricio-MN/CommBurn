@@ -1,5 +1,8 @@
 # Compiled class file
 *.class
+node_modules/
+.commburn-server.pid
+.commburn-server.log
 
 # Log file
 *.log
