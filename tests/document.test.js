@@ -67,7 +67,7 @@ test("GRBL jobs reject text, out-of-area geometry, and invalid machine settings"
   const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 };
   assert.throws(() => renderGrblJob({
     elements: [{ type: "text", xMm: 1, yMm: 1, text: "No path", fontSizeMm: 2 }]
-  }, settings), /rectangles only/);
+  }, settings), /editable vector paths/);
   assert.throws(() => renderGrblJob({
     widthMm: 10, heightMm: 10,
     elements: [{ type: "rect", xMm: 8, yMm: 1, widthMm: 4, heightMm: 2 }]
@@ -134,7 +134,7 @@ test("embedded raster images remain metric and are rejected by the GRBL adapter"
   assert.throws(() => createDocument({
     elements: [{ type: "image", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1, imageDataUri: "https://example.invalid/image.png" }]
   }), /embedded PNG, JPEG, or WebP/);
-  assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /rectangles only/);
+  assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /editable vector paths/);
 });
 
 test("embedded SVG visual objects are preserved by SVG export and rejected by GRBL", () => {
@@ -164,7 +164,7 @@ test("embedded SVG visual objects are preserved by SVG export and rejected by GR
   assert.throws(() => createDocument({
     elements: [{ type: "svg-image", xMm: 0, yMm: 0, widthMm: 10, heightMm: 10, svgDataUri: unsafeOuter }]
   }), /active or external content/);
-  assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /rectangles only/);
+  assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /editable vector paths/);
 });
 
 test("GRBL rejects rotated, warped, and non-rectangular objects", () => {
@@ -174,5 +174,45 @@ test("GRBL rejects rotated, warped, and non-rectangular objects", () => {
   }, settings), /untransformed rectangles/);
   assert.throws(() => renderGrblJob({
     elements: [{ type: "ellipse", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10 }]
-  }, settings), /rectangles only/);
+  }, settings), /editable vector paths/);
+});
+
+test("GRBL traces editable SVG paths and applies each vector's engraving power", () => {
+  const gcode = renderGrblJob({
+    widthMm: 20,
+    heightMm: 20,
+    layers: [{ id: "engrave", operation: "engrave", powerPercent: 10 }],
+    elements: [{
+      id: "stroke",
+      type: "path",
+      xMm: 2,
+      yMm: 3,
+      widthMm: 4,
+      heightMm: 0,
+      pathData: "M 0 0 L 4 0",
+      powerPercent: 35,
+      layerId: "engrave"
+    }]
+  }, { maxSpindleSpeed: 1000 });
+
+  assert.match(gcode, /G0 X2 Y3\nM4 S350/);
+  assert.match(gcode, /G1 X6 Y3/);
+});
+
+test("GRBL flattens cubic SVG path curves into metric line segments", () => {
+  const gcode = renderGrblJob({
+    widthMm: 20,
+    heightMm: 20,
+    elements: [{
+      type: "path",
+      xMm: 2,
+      yMm: 3,
+      widthMm: 5,
+      heightMm: 3,
+      pathData: "M 0 0 C 0 5 5 5 5 0"
+    }]
+  }, { maxSpindleSpeed: 1000 });
+
+  assert.ok((gcode.match(/G1 X/g) ?? []).length > 8);
+  assert.match(gcode, /G0 X2 Y3/);
 });

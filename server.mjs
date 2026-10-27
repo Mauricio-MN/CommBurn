@@ -22,7 +22,7 @@ const contentTypes = {
   ".svg": "image/svg+xml; charset=utf-8"
 };
 const securityHeaders = {
-  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY"
@@ -150,7 +150,9 @@ const server = createServer(async (request, response) => {
   if (requestedPath !== "/index.html"
     && requestedPath !== "/vendor/svgson.js"
     && !/^\/src\/[a-zA-Z0-9_/-]+\.(?:js|css)$/.test(requestedPath)
-    && !/^\/node_modules\/svg-pathdata\/lib\/[a-zA-Z0-9_.-]+\.js$/.test(requestedPath)) {
+    && !/^\/node_modules\/svg-pathdata\/lib\/[a-zA-Z0-9_.-]+\.js$/.test(requestedPath)
+    && requestedPath !== "/node_modules/@jodit/image-editor/dist/jodit-image-editor.js"
+    && requestedPath !== "/node_modules/imagetracerjs/imagetracer_v1.2.6.js") {
     response.writeHead(404).end("Not found");
     return;
   }

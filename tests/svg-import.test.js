@@ -47,7 +47,10 @@ test("CommBurn SVG round-trip restores layer colors, operations, parameters, and
     widthMm: 50,
     heightMm: 40,
     layers: [
-      { id: "cut-blue", name: "Corte azul", operation: "cut", color: "#123abc", feedMmPerMinute: 120, passes: 2 },
+      {
+        id: "cut-blue", name: "Corte azul", operation: "cut", color: "#123abc",
+        feedMmPerMinute: 120, passes: 2, fillAlgorithm: "crosshatch", objectOrder: "nearest"
+      },
       { id: "photo-layer", name: "Imagem", operation: "engrave", color: "#ef7800" }
     ],
     elements: [
@@ -55,6 +58,10 @@ test("CommBurn SVG round-trip restores layer colors, operations, parameters, and
       {
         id: "photo", type: "image", xMm: 5, yMm: 6, widthMm: 20, heightMm: 10,
         imageDataUri: onePixelPng, layerId: "photo-layer"
+      },
+      {
+        id: "tone-path", type: "path", xMm: 25, yMm: 15, widthMm: 5, heightMm: 5,
+        pathData: "M 0 0 L 5 5", powerPercent: 42, layerId: "cut-blue"
       }
     ]
   });
@@ -66,9 +73,12 @@ test("CommBurn SVG round-trip restores layer colors, operations, parameters, and
   assert.equal(cutLayer.operation, "cut");
   assert.equal(cutLayer.feedMmPerMinute, 120);
   assert.equal(cutLayer.passes, 2);
+  assert.equal(cutLayer.fillAlgorithm, "crosshatch");
+  assert.equal(cutLayer.objectOrder, "nearest");
   assert.equal(imported.elements.find((element) => element.id === "restored-1").layerId, cutLayer.id);
-  assert.equal(imported.elements.find((element) => element.id === "restored-2").layerId, imageLayer.id);
+  assert.equal(imported.elements.find((element) => element.id === "restored-3").layerId, imageLayer.id);
   assert.equal(imported.elements.find((element) => element.type === "image").imageDataUri, onePixelPng);
+  assert.equal(imported.elements.find((element) => element.id === "restored-2").powerPercent, 42);
   assert.match(renderSvg(imported), /data-color="#123abc"/);
 });
 

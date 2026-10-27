@@ -3,6 +3,17 @@ const OPERATIONS = [
   { value: "cut", label: "Corte" },
   { value: "fill", label: "Preenchimento" }
 ];
+const FILL_ALGORITHMS = [
+  { value: "horizontal-serpentine", label: "Horizontal serpentina" },
+  { value: "vertical-serpentine", label: "Vertical serpentina" },
+  { value: "crosshatch", label: "Cruzado (horizontal + vertical)" },
+  { value: "horizontal-unidirectional", label: "Horizontal unidirecional" }
+];
+const OBJECT_ORDERS = [
+  { value: "document", label: "Ordem da lista" },
+  { value: "nearest", label: "Mais próximo primeiro" },
+  { value: "center-out", label: "Centro para bordas" }
+];
 
 export class LayersPanel {
   constructor(root, { onSelect, onAdd, onUpdate, onDelete, onDuplicate }) {
@@ -70,6 +81,11 @@ export class LayersPanel {
       fillField.hidden = layer.operation !== "fill";
       fillField.dataset.fillSetting = "";
       settings.append(fillField);
+      const algorithmField = this.createField("Algoritmo de preenchimento", this.createSelect("fillAlgorithm", layer.fillAlgorithm, FILL_ALGORITHMS));
+      algorithmField.hidden = layer.operation !== "fill";
+      algorithmField.dataset.fillSetting = "";
+      settings.append(algorithmField);
+      settings.append(this.createField("Ordem dos objetos", this.createSelect("objectOrder", layer.objectOrder, OBJECT_ORDERS)));
 
       const switches = document.createElement("div");
       switches.className = "layer-switches";
