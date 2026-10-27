@@ -13,8 +13,11 @@
       <nav class="menu-bar" aria-label="Menu principal">
         <details class="menu"><summary>Arquivo</summary><div class="menu-popover">
           <button type="button" data-action="new">Novo trabalho</button>
-          <button type="button" data-action="import-svg">Importar SVG ou imagem</button>
+          <button type="button" data-action="import-svg">Importar SVG, imagem ou projeto</button>
+          <button type="button" data-action="export-project">Salvar projeto editável</button>
           <button type="button" data-action="export">Exportar SVG</button>
+          <button type="button" data-action="preview-machine">Pré-visualizar processamento GRBL</button>
+          <button type="button" data-action="export-gcode">Exportar G-code GRBL</button>
         </div></details>
         <details class="menu"><summary>Inserir</summary><div class="menu-popover">
           <button type="button" data-action="add-text">Adicionar texto</button>
@@ -110,7 +113,15 @@
             <label class="field">Texto<textarea id="object-text" rows="2"></textarea></label>
             <label class="field">Fonte<select id="object-font"><option value="sans-serif">Sem serifa</option><option value="serif">Com serifa</option><option value="monospace">Monoespaçada</option></select></label>
           </div>
-          <label class="field" id="path-inspector-fields" hidden>Traçado SVG editável<textarea id="object-path" rows="5" spellcheck="false"></textarea></label>
+          <div id="path-inspector-fields" hidden>
+            <p class="help-text">Edite nós e alças em uma janela visual dedicada.</p>
+            <button class="button button-secondary full-width" id="open-path-editor" type="button">Abrir subeditor de traçado</button>
+          </div>
+          <div id="image-inspector-fields" hidden>
+            <p class="help-text">Edite, recorte, redimensione e aplique filtros antes de vetorizar.</p>
+            <button class="button button-secondary full-width" id="edit-image" type="button">Editar imagem</button>
+            <button class="button button-secondary full-width" id="open-image-vectorizer" type="button">Converter imagem para gravação vetorial</button>
+          </div>
           <div class="field-row">
             <label class="field">Posição X<span class="input-with-unit"><input id="object-x" type="number" step="0.1"><span>mm</span></span></label>
             <label class="field">Posição Y<span class="input-with-unit"><input id="object-y" type="number" step="0.1"><span>mm</span></span></label>
@@ -145,7 +156,7 @@
           <label class="safety-check"><input id="safety-confirmed" type="checkbox"><span>Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
           <button class="button button-primary full-width" id="start-machine-job" type="button" disabled>Enviar contornos à máquina</button>
           <button class="button button-danger full-width" id="hold-machine-job" type="button" disabled>Parar envio e solicitar pausa</button>
-          <p class="help-text">O adaptador atual aceita retângulos sem transformação; preenchimento raster e passes são controlados por camada. Textos, imagens, elipses, linhas e formas transformadas são recusados. A pausa não substitui o botão de emergência.</p>
+          <p class="help-text">O adaptador aceita retângulos e traçados SVG editáveis sem transformação. Texto, imagem raster original, elipses, linhas e formas transformadas ainda não são aceitos; converta imagens para trajetórias antes da prévia. A pausa não substitui o botão de emergência.</p>
         </section>
       </aside>
 
@@ -163,7 +174,70 @@
       </section>
     </main>
     <div id="notice" class="notice" role="status" aria-live="polite"></div>
-    <input id="svg-file-input" type="file" accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp" hidden>
+    <input id="svg-file-input" type="file" accept=".svg,.json,image/*,application/json" hidden>
+    <dialog id="image-edit-dialog" class="image-edit-dialog" aria-labelledby="image-edit-title">
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar editor de imagem">×</button></form>
+      <h2 id="image-edit-title">Editar imagem</h2>
+      <p>Recorte, redimensione, gire, aplique filtros e ajuste tons. A imagem editada será incorporada ao trabalho em milímetros.</p>
+      <div id="image-editor-container" class="image-editor-container"></div>
+      <p id="image-editor-status" class="machine-preview-stats" role="status">Carregando editor de imagem…</p>
+      <div class="image-import-dimensions">
+        <label class="field">Largura no trabalho<span class="input-with-unit"><input id="image-import-width" type="number" min="0.1" step="any"><span>mm</span></span></label>
+        <label class="field">Altura no trabalho<span class="input-with-unit"><input id="image-import-height" type="number" min="0.1" step="any"><span>mm</span></span></label>
+      </div>
+      <div class="preview-actions">
+        <button class="button button-secondary" id="cancel-image-edit" type="button">Cancelar</button>
+        <button class="button button-primary" id="apply-image-edit" type="button" disabled>Aplicar e importar</button>
+      </div>
+    </dialog>
+    <dialog id="machine-preview-dialog" class="machine-preview-dialog" aria-labelledby="machine-preview-title">
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar prévia">×</button></form>
+      <h2 id="machine-preview-title">Prévia do processamento GRBL</h2>
+      <p>Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.</p>
+      <svg id="machine-path-preview" class="machine-path-preview" role="img" aria-label="Trajetórias de trabalho e deslocamentos rápidos"></svg>
+      <p id="machine-preview-stats" class="machine-preview-stats"></p>
+      <details class="gcode-details"><summary>Ver comandos G-code</summary><pre id="machine-preview-code"></pre></details>
+      <div class="preview-actions">
+        <button class="button button-secondary" type="button" data-action="export-gcode">Exportar G-code</button>
+        <form method="dialog"><button class="button button-primary" type="submit">Fechar</button></form>
+      </div>
+    </dialog>
+    <dialog id="image-vector-dialog" class="image-vector-dialog" aria-labelledby="image-vector-title">
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar conversor de imagem">×</button></form>
+      <h2 id="image-vector-title">Vetorizar imagem</h2>
+      <p>Escolha gravação tonal por riscos/pontos ou contornos vetoriais coloridos. O traçado por cores cria contornos editáveis; a imagem fonte será substituída ao aplicar e pode ser recuperada com Desfazer.</p>
+      <div class="image-vector-settings">
+        <label class="field">Método<select id="image-vector-mode"><option value="lines">Gravação tonal · riscos</option><option value="dots">Gravação tonal · pontos</option><option value="trace">Contornos coloridos · ImageTracer</option></select></label>
+        <label class="field" data-image-setting="laser">Espaçamento de gravação<span class="input-with-unit"><input id="image-vector-pitch" type="number" min="0.1" step="0.1" value="1"><span>mm</span></span></label>
+        <label class="field" data-image-setting="laser">Cor de referência<input id="image-vector-color" type="color" value="#000000"></label>
+        <label class="field" data-image-setting="laser">Tolerância de cor<input id="image-vector-tolerance" type="number" min="0" max="441.7" step="any" value="0"><span class="unit-note">0 desativa o filtro; distância RGB máxima 441,7</span></label>
+        <label class="field" data-image-setting="trace" hidden>Quantidade de cores<input id="image-vector-colors" type="number" min="2" max="24" step="1" value="8"></label>
+        <label class="field" data-image-setting="trace" hidden>Remover detalhes menores<input id="image-vector-pathomit" type="number" min="0" max="1000" step="1" value="8"><span class="unit-note">pixels</span></label>
+        <label class="field" data-image-setting="trace" hidden>Suavização de linhas<input id="image-vector-line-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+        <label class="field" data-image-setting="trace" hidden>Ajuste de curvas<input id="image-vector-curve-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+        <label class="field">Potência mínima<input id="image-vector-min-power" type="number" min="0" max="100" step="1" value="8"><span class="unit-note">%; tons mais claros são omitidos</span></label>
+        <label class="field">Potência máxima<input id="image-vector-max-power" type="number" min="1" max="100" step="1" value="35"><span class="unit-note">%</span></label>
+      </div>
+      <canvas id="image-vector-preview" class="image-vector-preview" aria-label="Prévia da vetorização"></canvas>
+      <p id="image-vector-stats" class="machine-preview-stats" role="status">Ajuste os parâmetros para gerar a prévia.</p>
+      <div class="preview-actions">
+        <form method="dialog"><button class="button button-secondary" type="submit">Cancelar</button></form>
+        <button class="button button-primary" id="apply-image-vector" type="button" disabled>Substituir imagem pelos vetores</button>
+      </div>
+    </dialog>
+    <dialog id="path-editor-dialog" class="path-editor-dialog" aria-labelledby="path-editor-title">
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar subeditor">×</button></form>
+      <h2 id="path-editor-title">Subeditor de traçado SVG</h2>
+      <p>Arraste nós e alças de curva ou ajuste as coordenadas locais. Curvas importadas são normalizadas para segmentos cúbicos editáveis.</p>
+      <div class="path-editor-layout">
+        <svg id="path-editor-canvas" class="path-editor-canvas" role="img" aria-label="Prévia vetorial com nós e alças editáveis"></svg>
+        <div id="path-editor-nodes" class="path-editor-nodes" aria-label="Coordenadas dos nós"></div>
+      </div>
+      <div class="preview-actions">
+        <form method="dialog"><button class="button button-secondary" type="submit">Cancelar</button></form>
+        <button class="button button-primary" type="button" data-path-save>Aplicar alterações</button>
+      </div>
+    </dialog>
     <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar atalhos">×</button></form>
       <h2 id="shortcuts-title">Atalhos de teclado</h2>

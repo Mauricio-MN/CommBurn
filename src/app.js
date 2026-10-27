@@ -1,14 +1,76 @@
-import { createDocument, renderSvg } from "./core/document.js";
+import { createDocument, planGrblJob, renderSvg } from "./core/document.js";
+import { vectorizePixels } from "./core/image-vectorize.js";
+import { importTracedImageSvg } from "./core/image-trace.js";
+import { parseProject, serializeProject } from "./core/project.js";
+import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
 import { CanvasController } from "./ui/canvas-controller.js";
 import { DocumentHistory } from "./ui/history.js";
 import { installShortcuts, SHORTCUTS } from "./ui/shortcuts.js";
 import { connectToolbar } from "./ui/toolbar.js";
 import { installTooltips } from "./ui/tooltips.js";
 import { LayersPanel } from "./ui/layers-panel.js";
+import { PathEditor } from "./ui/path-editor.js";
 import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "./core/svg-import.js";
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 
 const byId = (id) => document.getElementById(id);
+const IMAGE_EDITOR_PT_BR = {
+  id: "pt-BR",
+  name: "Português (Brasil)",
+  messages: {
+    Save: "Salvar",
+    "Save as": "Salvar como",
+    "Failed to load the image": "Não foi possível carregar a imagem",
+    Colour: "Cor",
+    Font: "Fonte",
+    "Add text": "Adicionar texto",
+    Focus: "Foco",
+    Radial: "Radial",
+    Linear: "Linear",
+    Intensity: "Intensidade",
+    Radius: "Raio",
+    "Zoom out": "Reduzir zoom",
+    "Zoom in": "Aumentar zoom",
+    Reset: "Redefinir",
+    Undo: "Desfazer",
+    Redo: "Refazer",
+    Adjust: "Ajustar",
+    Finetune: "Ajuste fino",
+    Filters: "Filtros",
+    Watermark: "Marca d'água",
+    Annotate: "Anotar",
+    Resize: "Redimensionar",
+    Crop: "Recortar",
+    Rotate: "Girar",
+    "Flip X": "Inverter X",
+    "Flip Y": "Inverter Y",
+    Brightness: "Brilho",
+    Contrast: "Contraste",
+    Saturation: "Saturação",
+    Blur: "Desfoque",
+    Warmth: "Temperatura",
+    Original: "Original",
+    Invert: "Inverter cores",
+    "Black & White": "Preto e branco",
+    Sepia: "Sépia",
+    Solarize: "Solarizar",
+    Width: "Largura",
+    Height: "Altura",
+    px: "px",
+    "Aspect ratio locked": "Proporção bloqueada",
+    "Aspect ratio unlocked": "Proporção livre",
+    "Reset size": "Redefinir tamanho",
+    Size: "Tamanho",
+    Left: "Esquerda",
+    Center: "Centro",
+    Right: "Direita",
+    Delete: "Excluir",
+    Text: "Texto",
+    "Watermark text": "Texto da marca d'água",
+    "Add watermark": "Adicionar marca d'água",
+    "Reset all changes? You can still undo afterwards.": "Redefinir todas as alterações? Ainda será possível desfazer depois."
+  }
+};
 const widthInput = byId("width");
 const heightInput = byId("height");
 const originInput = byId("origin");
@@ -40,11 +102,18 @@ let nextId = 1;
 let copiedElements = [];
 let pasteSequence = 0;
 let activeTool = "select";
+let imageVectorSourceId = null;
+let imageVectorResult = null;
+let imageVectorPreviewSequence = 0;
+let imageTraceCancellation = null;
+let rasterImageEditor = null;
+let pendingImageEdit = null;
 let noticeTimer;
 let machineConnected = false;
 let machineBusy = false;
 let statusPollTimer;
 const history = new DocumentHistory(currentDocument);
+const pathEditor = new PathEditor(byId("path-editor-dialog"));
 
 function readDocument() {
   return createDocument({
@@ -100,6 +169,12 @@ function syncInspector() {
   const selected = currentDocument.elements.find((element) => element.id === selectedId);
   const isMultiple = selectedElements.length > 1;
   inspector.hidden = selectedElements.length === 0;
+  const isText = selected?.type === "text";
+  const isPath = selected?.type === "path";
+  const isImage = selected?.type === "image";
+  byId("text-inspector-fields").hidden = !isText;
+  byId("path-inspector-fields").hidden = !isPath;
+  byId("image-inspector-fields").hidden = !isImage;
   byId("single-selection-fields").hidden = isMultiple;
   byId("multi-selection-message").hidden = !isMultiple;
   renderLayers();
@@ -115,13 +190,8 @@ function syncInspector() {
   }
 
   byId("inspector-kind").textContent = `${selected.type} · ${selected.id}`;
-  const isText = selected.type === "text";
-  const isPath = selected.type === "path";
-  byId("text-inspector-fields").hidden = !isText;
-  byId("path-inspector-fields").hidden = !isPath;
   byId("shape-properties").hidden = isText;
   byId("object-text").value = isText ? selected.text : "";
-  byId("object-path").value = isPath ? selected.pathData : "";
   byId("object-font").value = selected.fontFamily ?? "sans-serif";
   byId("object-x").value = selected.xMm;
   byId("object-y").value = selected.yMm;
@@ -136,6 +206,11 @@ function syncInspector() {
   }
   byId("object-layer").replaceChildren(...currentDocument.layers.map((layer) => new Option(layer.name, layer.id)));
   byId("object-layer").value = selected.layerId;
+  const imageLayer = currentDocument.layers.find((layer) => layer.id === selected.layerId);
+  byId("open-image-vectorizer").disabled = !isImage || layerLocked || imageLayer?.operation !== "engrave";
+  byId("open-image-vectorizer").title = imageLayer?.operation === "engrave"
+    ? "Converter esta imagem em trajetórias vetoriais com potência variável."
+    : "A conversão tonal exige uma camada configurada como Gravação.";
   removeButton.disabled = layerLocked;
   byId("duplicate-selection").disabled = layerLocked;
 }
@@ -378,13 +453,75 @@ function addShape() {
 
 function exportSvg() {
   const svg = renderSvg(readDocument());
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+  downloadFile(svg, "commburn-trabalho.svg", "image/svg+xml;charset=utf-8");
+  showNotice("SVG exportado com medidas em milímetros.");
+}
+
+function downloadFile(contents, filename, type) {
+  const url = URL.createObjectURL(new Blob([contents], { type }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = "commburn-trabalho.svg";
+  link.download = filename;
   link.click();
-  URL.revokeObjectURL(url);
-  showNotice("SVG exportado com medidas em milímetros.");
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportProject() {
+  const source = serializeProject(readDocument());
+  downloadFile(source, "commburn-trabalho.commburn.json", "application/json;charset=utf-8");
+  showNotice("Projeto editável salvo com camadas e objetos.");
+}
+
+function createMachinePlan() {
+  return planGrblJob(readDocument(), {
+    maxSpindleSpeed: numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE)
+  });
+}
+
+function drawMachinePreview(plan) {
+  const svg = byId("machine-path-preview");
+  const documentModel = readDocument();
+  svg.setAttribute("viewBox", `0 0 ${documentModel.widthMm} ${documentModel.heightMm}`);
+  svg.style.aspectRatio = `${documentModel.widthMm} / ${documentModel.heightMm}`;
+  svg.replaceChildren();
+  const layerColors = new Map(documentModel.layers.map((layer) => [layer.id, layer.color]));
+  for (const plannedPath of plan.paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const [first, ...rest] = plannedPath.points;
+    path.setAttribute("d", `M${first.xMm} ${first.yMm}${rest.map((point) => ` L${point.xMm} ${point.yMm}`).join("")}`);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", plannedPath.kind === "travel" ? "#8994a4" : layerColors.get(plannedPath.layerId));
+    path.setAttribute("stroke-width", plannedPath.kind === "travel" ? "0.35" : "0.6");
+    path.setAttribute("vector-effect", "non-scaling-stroke");
+    if (plannedPath.kind === "travel") path.setAttribute("stroke-dasharray", "3 2");
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = plannedPath.kind === "travel"
+      ? "Deslocamento rápido entre trajetórias; laser desligado"
+      : `${plannedPath.operation} · ${plannedPath.elementId} · passe ${plannedPath.pass}`;
+    path.append(title);
+    svg.append(path);
+  }
+  const stats = plan.stats;
+  byId("machine-preview-stats").textContent =
+    `${stats.workPathCount} trajetórias de trabalho · ${stats.rapidMoveCount} saltos rápidos · `
+    + `${stats.workDistanceMm.toFixed(1)} mm de trabalho · ${stats.travelDistanceMm.toFixed(1)} mm de deslocamento conhecido`;
+  byId("machine-preview-code").textContent = plan.gcode;
+}
+
+function showMachinePreview() {
+  try {
+    const plan = createMachinePlan();
+    drawMachinePreview(plan);
+    byId("machine-preview-dialog").showModal();
+  } catch (error) {
+    showNotice(`Não foi possível gerar a prévia GRBL: ${error.message}`);
+  }
+}
+
+function exportGcode() {
+  const plan = createMachinePlan();
+  downloadFile(plan.gcode, "commburn-trabalho.gcode", "text/plain;charset=utf-8");
+  showNotice("G-code GRBL exportado. Confira a origem e os limites da máquina antes de executar.");
 }
 
 async function importSvgFile(file) {
@@ -449,6 +586,26 @@ async function importSvgFile(file) {
   showNotice(`SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`);
 }
 
+async function importProjectFile(file) {
+  if (file.size === 0 || file.size > 50 * 1024 * 1024) {
+    throw new RangeError("O projeto deve ter entre 1 byte e 50 MB.");
+  }
+  const imported = parseProject(await file.text());
+  currentDocument = imported;
+  activeLayerId = imported.layers[0].id;
+  selectedIds = [];
+  selectedId = null;
+  widthInput.value = imported.widthMm;
+  heightInput.value = imported.heightMm;
+  originInput.value = imported.origin.corner;
+  flipXInput.checked = imported.origin.flipX;
+  flipYInput.checked = imported.origin.flipY;
+  history.reset(imported);
+  syncInspector();
+  renderPreview();
+  showNotice("Projeto CommBurn carregado e validado.");
+}
+
 function encodeSvgDataUri(source) {
   const bytes = new TextEncoder().encode(source);
   if (bytes.length > 10 * 1024 * 1024) throw new RangeError("O SVG sanitizado deve ter no máximo 10 MB.");
@@ -459,64 +616,458 @@ function encodeSvgDataUri(source) {
   return `data:image/svg+xml;base64,${btoa(binary)}`;
 }
 
-async function importImageFile(file) {
-  if (!file) return;
-  const mimeByExtension = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
-  const extension = file.name.toLowerCase().split(".").at(-1);
-  const mimeType = ["image/png", "image/jpeg", "image/webp"].includes(file.type)
-    ? file.type
-    : mimeByExtension[extension];
-  if (!mimeType) {
-    throw new Error("Escolha uma imagem PNG, JPEG ou WebP.");
-  }
-  if (file.size === 0 || file.size > 10 * 1024 * 1024) {
-    throw new RangeError("A imagem deve ter entre 1 byte e 10 MB.");
-  }
-  const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
-  if (!layer || layer.locked) throw new Error("Selecione uma camada desbloqueada para importar objetos.");
+function imageBlobFromDataUri(dataUri) {
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUri);
+  if (!match) throw new TypeError("A imagem incorporada tem um formato inválido.");
+  const binary = atob(match[2]);
+  return new Blob([Uint8Array.from(binary, (character) => character.charCodeAt(0))], { type: `image/${match[1]}` });
+}
 
-  const bitmap = await createImageBitmap(file);
-  let imageDataUri;
-  const pixelWidth = bitmap.width;
-  const pixelHeight = bitmap.height;
+function blobToDataUri(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result !== "string") reject(new Error("Não foi possível codificar a imagem editada."));
+      else resolve(reader.result);
+    }, { once: true });
+    reader.addEventListener("error", () => reject(reader.error ?? new Error("Não foi possível codificar a imagem editada.")), { once: true });
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function openImageEditor(file = null) {
+  let target;
+  let sourceBlob;
+  let layerId;
+  if (file) {
+    if (file.size === 0 || file.size > 25 * 1024 * 1024) {
+      throw new RangeError("A imagem deve ter entre 1 byte e 25 MB.");
+    }
+    const extension = file.name.toLowerCase().split(".").at(-1);
+    const mimeByExtension = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+      bmp: "image/bmp", avif: "image/avif", tif: "image/tiff", tiff: "image/tiff"
+    };
+    if ((file.type && !file.type.startsWith("image/")) || (!file.type && !mimeByExtension[extension])) {
+      throw new TypeError("Escolha um arquivo de imagem compatível com o navegador.");
+    }
+    const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
+    if (!layer || layer.locked) throw new Error("Selecione uma camada desbloqueada para importar objetos.");
+    layerId = layer.id;
+    target = { mode: "import", layerId };
+    sourceBlob = file.type ? file : new Blob([file], { type: mimeByExtension[extension] });
+  } else {
+    const source = currentDocument.elements.find((element) => element.id === selectedId);
+    if (!source || source.type !== "image") throw new Error("Selecione uma imagem raster para editar.");
+    const layer = currentDocument.layers.find((candidate) => candidate.id === source.layerId);
+    if (!layer || layer.locked) throw new Error("Desbloqueie a camada da imagem antes de editá-la.");
+    target = { mode: "edit", elementId: source.id, layerId: source.layerId };
+    sourceBlob = imageBlobFromDataUri(source.imageDataUri);
+  }
+
+  pendingImageEdit = target;
+  byId("apply-image-edit").disabled = true;
+  byId("image-editor-status").textContent = "Carregando imagem no editor…";
+  byId("image-edit-dialog").showModal();
   try {
-    imageDataUri = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.addEventListener("load", () => {
-        if (typeof reader.result !== "string") reject(new Error("Não foi possível ler a imagem."));
-        else resolve(reader.result.replace(/^data:[^;]+;/, `data:${mimeType};`));
-      }, { once: true });
-      reader.addEventListener("error", () => reject(reader.error ?? new Error("Não foi possível ler a imagem.")), { once: true });
-      reader.readAsDataURL(new Blob([file], { type: mimeType }));
+    rasterImageEditor = new RasterImageEditor({
+      container: byId("image-editor-container"),
+      locale: IMAGE_EDITOR_PT_BR.id,
+      locales: [IMAGE_EDITOR_PT_BR],
+      maxSourcePixels: 20_000_000,
+      previewMaxSize: 1600
     });
+    await rasterImageEditor.fromBlob(sourceBlob);
+    const dimensions = rasterImageEditor.state.source;
+    if (!dimensions || !dimensions.width || !dimensions.height) {
+      throw new RangeError("O editor não encontrou dimensões válidas para a imagem.");
+    }
+    if (dimensions.width * dimensions.height > 20_000_000) {
+      throw new RangeError("A imagem excede o limite de 20 milhões de pixels.");
+    }
+
+    const existing = target.mode === "edit"
+      ? currentDocument.elements.find((element) => element.id === target.elementId)
+      : null;
+    if (existing) {
+      byId("image-import-width").value = existing.widthMm;
+      byId("image-import-height").value = existing.heightMm;
+    } else {
+      const mmPerPixel = 25.4 / 96;
+      const fit = Math.min(1,
+        currentDocument.widthMm / (dimensions.width * mmPerPixel),
+        currentDocument.heightMm / (dimensions.height * mmPerPixel));
+      byId("image-import-width").value = Math.max(0.1, Number((dimensions.width * mmPerPixel * fit).toFixed(2)));
+      byId("image-import-height").value = Math.max(0.1, Number((dimensions.height * mmPerPixel * fit).toFixed(2)));
+    }
+    byId("image-editor-status").textContent =
+      `${dimensions.width} × ${dimensions.height} px · ajuste o tamanho final do objeto em milímetros.`;
+    byId("apply-image-edit").disabled = false;
+  } catch (error) {
+    byId("image-edit-dialog").close();
+    throw error;
+  }
+}
+
+async function applyImageEdit() {
+  if (!rasterImageEditor || !pendingImageEdit) throw new Error("Abra uma imagem no editor antes de aplicar.");
+  const widthInputMm = byId("image-import-width");
+  const heightInputMm = byId("image-import-height");
+  const widthMm = Number(widthInputMm.value);
+  const heightMm = Number(heightInputMm.value);
+  if (!widthInputMm.checkValidity() || !heightInputMm.checkValidity()
+    || !Number.isFinite(widthMm) || !Number.isFinite(heightMm) || widthMm <= 0 || heightMm <= 0) {
+    throw new RangeError("Informe largura e altura positivas em milímetros.");
+  }
+  byId("apply-image-edit").disabled = true;
+  try {
+    const imageBlob = await rasterImageEditor.toBlob({ type: "image/png" });
+    if (imageBlob.size > 25 * 1024 * 1024) {
+      throw new RangeError("A imagem editada excede 25 MB; reduza suas dimensões no editor.");
+    }
+    const bitmap = await createImageBitmap(imageBlob);
+    const pixelWidth = bitmap.width;
+    const pixelHeight = bitmap.height;
+    bitmap.close();
+    if (!pixelWidth || !pixelHeight || pixelWidth * pixelHeight > 20_000_000) {
+      throw new RangeError("A imagem editada precisa ter dimensões válidas e no máximo 20 milhões de pixels.");
+    }
+    const imageDataUri = await blobToDataUri(imageBlob);
+    const layer = currentDocument.layers.find((candidate) => candidate.id === pendingImageEdit.layerId);
+    if (!layer || layer.locked) throw new Error("Desbloqueie a camada de destino antes de aplicar a imagem.");
+    if (pendingImageEdit.mode === "edit") {
+      const source = currentDocument.elements.find((element) => element.id === pendingImageEdit.elementId);
+      if (!source || source.type !== "image") throw new Error("A imagem selecionada não está mais no documento.");
+      currentDocument = createDocument({
+        ...readDocument(),
+        elements: currentDocument.elements.map((element) => element.id === source.id
+          ? { ...element, imageDataUri, widthMm, heightMm }
+          : element)
+      });
+      selectedIds = [source.id];
+      selectedId = source.id;
+    } else {
+      const element = {
+        id: `image-${nextId++}`,
+        type: "image",
+        xMm: 0,
+        yMm: 0,
+        widthMm,
+        heightMm,
+        imageDataUri,
+        preserveAspectRatio: "xMidYMid meet",
+        rotationDeg: 0,
+        skewXDeg: 0,
+        skewYDeg: 0,
+        layerId: layer.id
+      };
+      currentDocument = createDocument({ ...readDocument(), elements: [...currentDocument.elements, element] });
+      selectedIds = [element.id];
+      selectedId = element.id;
+    }
+    const editMode = pendingImageEdit.mode;
+    activeLayerId = layer.id;
+    syncInspector();
+    renderPreview();
+    commitHistory();
+    byId("image-edit-dialog").close();
+    showNotice(editMode === "edit"
+      ? "Imagem editada e atualizada no documento."
+      : "Imagem editada, incorporada e dimensionada em milímetros.");
+  } finally {
+    if (rasterImageEditor) byId("apply-image-edit").disabled = false;
+  }
+}
+
+function imageConversionOptions(element) {
+  const readNumber = (id, label) => {
+    const input = byId(id);
+    const value = Number(input.value);
+    if (!input.value.trim() || !Number.isFinite(value) || !input.checkValidity()) {
+      throw new RangeError(`${label} deve estar dentro do intervalo indicado.`);
+    }
+    return value;
+  };
+  const pitchMm = readNumber("image-vector-pitch", "Espaçamento");
+  const minimumPowerPercent = readNumber("image-vector-min-power", "Potência mínima");
+  const maximumPowerPercent = readNumber("image-vector-max-power", "Potência máxima");
+  const colorTolerance = readNumber("image-vector-tolerance", "Tolerância de cor");
+  const mode = byId("image-vector-mode").value;
+  return {
+    xMm: element.xMm,
+    yMm: element.yMm,
+    widthMm: element.widthMm,
+    heightMm: element.heightMm,
+    pitchMm,
+    mode,
+    layerId: element.layerId,
+    idPrefix: `vector-${crypto.randomUUID()}`,
+    targetColor: byId("image-vector-color").value,
+    colorTolerance,
+    minimumPowerPercent,
+    maximumPowerPercent,
+    traceOptions: mode === "trace" ? {
+      numberofcolors: readNumber("image-vector-colors", "Quantidade de cores"),
+      pathomit: readNumber("image-vector-pathomit", "Remoção de detalhes"),
+      ltres: readNumber("image-vector-line-tolerance", "Suavização de linhas"),
+      qtres: readNumber("image-vector-curve-tolerance", "Ajuste de curvas"),
+      colorsampling: 2,
+      colorquantcycles: 3,
+      layering: 0,
+      rightangleenhance: true,
+      scale: 1,
+      roundcoords: 1,
+      viewbox: true
+    } : null
+  };
+}
+
+function cancelImageTracePreview() {
+  imageTraceCancellation?.();
+}
+
+function traceImageData(imageData, width, height, options) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./ui/image-trace-worker.js", import.meta.url));
+    let settled = false;
+    const finish = (error, svg) => {
+      if (settled) return;
+      settled = true;
+      worker.terminate();
+      if (imageTraceCancellation === cancel) imageTraceCancellation = null;
+      if (error) reject(error);
+      else resolve(svg);
+    };
+    const cancel = () => finish(new Error("A prévia de vetorização foi cancelada."));
+    imageTraceCancellation = cancel;
+    worker.addEventListener("message", ({ data }) => {
+      if (data.error) finish(new Error(data.error));
+      else if (typeof data.svg !== "string") finish(new Error("O vetorizador não retornou um SVG."));
+      else finish(null, data.svg);
+    }, { once: true });
+    worker.addEventListener("error", (event) => {
+      event.preventDefault();
+      finish(new Error(event.message || "Falha ao executar o vetorizador local."));
+    }, { once: true });
+    try {
+      const pixels = imageData.data.slice();
+      worker.postMessage({ pixels: pixels.buffer, width, height, options }, [pixels.buffer]);
+    } catch (error) {
+      finish(error);
+    }
+  });
+}
+
+async function vectorizeImageElement(element) {
+  if (element.rotationDeg !== 0 || element.skewXDeg !== 0 || element.skewYDeg !== 0) {
+    throw new RangeError("Redefina rotação e distorção da imagem antes de converter.");
+  }
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(element.imageDataUri);
+  if (!match) throw new TypeError("A imagem incorporada tem um formato inválido.");
+  const binary = atob(match[2]);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const bitmap = await createImageBitmap(new Blob([bytes], { type: `image/${match[1]}` }));
+  if (bitmap.width * bitmap.height > 20_000_000) {
+    bitmap.close();
+    throw new RangeError("A imagem excede o limite de 20 milhões de pixels para conversão.");
+  }
+  const options = imageConversionOptions(element);
+  const pixelWidth = Math.max(1, Math.ceil(element.widthMm / options.pitchMm));
+  const pixelHeight = Math.max(1, Math.ceil(element.heightMm / options.pitchMm));
+  if (pixelWidth * pixelHeight > 2_000_000) {
+    bitmap.close();
+    throw new RangeError("A prévia ultrapassaria 2 milhões de amostras; aumente o espaçamento.");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = pixelWidth;
+  canvas.height = pixelHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    bitmap.close();
+    throw new Error("O navegador não disponibilizou o canvas necessário para processar a imagem.");
+  }
+  try {
+    context.imageSmoothingQuality = "high";
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, pixelWidth, pixelHeight);
+    context.drawImage(bitmap, 0, 0, pixelWidth, pixelHeight);
   } finally {
     bitmap.close();
   }
-  if (!pixelWidth || !pixelHeight) throw new RangeError("A imagem precisa ter dimensões válidas.");
+  const pixels = context.getImageData(0, 0, pixelWidth, pixelHeight);
+  if (options.mode === "trace") {
+    const traceSvg = await traceImageData(pixels, pixelWidth, pixelHeight, options.traceOptions);
+    if (!globalThis.svgson?.parseSync || !globalThis.svgson?.stringify) {
+      throw new Error("O parser SVG local não foi carregado para converter os contornos.");
+    }
+    const tree = globalThis.svgson.parseSync(validateSvgSource(traceSvg));
+    const sourceLayer = currentDocument.layers.find((layer) => layer.id === element.layerId);
+    const imported = importTracedImageSvg(tree, {
+      widthMm: element.widthMm,
+      heightMm: element.heightMm,
+      minimumPowerPercent: options.minimumPowerPercent,
+      maximumPowerPercent: options.maximumPowerPercent,
+      sourceLayer,
+      idPrefix: `trace-${crypto.randomUUID()}`
+    });
+    const previewTree = {
+      ...tree,
+      attributes: { ...tree.attributes, width: `${pixelWidth}px`, height: `${pixelHeight}px` },
+      children: tree.children.map((node) => node.type === "element" && node.name === "path"
+        ? {
+          ...node,
+          attributes: {
+            ...node.attributes,
+            fill: "none",
+            stroke: node.attributes.fill ?? node.attributes.stroke
+          }
+        }
+        : node)
+    };
+    return {
+      mode: "trace",
+      elements: imported.elements,
+      layers: imported.layers,
+      preview: {
+        svg: globalThis.svgson.stringify(previewTree),
+        width: pixelWidth,
+        height: pixelHeight
+      },
+      stats: { ...imported.stats, pixelWidth, pixelHeight }
+    };
+  }
+  return vectorizePixels(pixels.data, pixelWidth, pixelHeight, options);
+}
 
-  const mmPerPixel = 25.4 / 96;
-  const fit = Math.min(1, currentDocument.widthMm / (pixelWidth * mmPerPixel), currentDocument.heightMm / (pixelHeight * mmPerPixel));
-  const element = {
-    id: `image-${nextId++}`,
-    type: "image",
-    xMm: 0,
-    yMm: 0,
-    widthMm: pixelWidth * mmPerPixel * fit,
-    heightMm: pixelHeight * mmPerPixel * fit,
-    imageDataUri,
-    preserveAspectRatio: "xMidYMid meet",
-    rotationDeg: 0,
-    skewXDeg: 0,
-    skewYDeg: 0,
-    layerId: activeLayerId
-  };
-  currentDocument = createDocument({ ...readDocument(), elements: [...currentDocument.elements, element] });
-  selectedIds = [element.id];
-  selectedId = element.id;
-  syncInspector();
-  renderPreview();
-  commitHistory();
-  showNotice("Imagem incorporada ao documento e dimensionada em milímetros (96 dpi).");
+async function drawTracePreview(preview) {
+  const canvas = byId("image-vector-preview");
+  canvas.width = preview.width;
+  canvas.height = preview.height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("O navegador não disponibilizou o canvas de prévia.");
+  const previewUrl = URL.createObjectURL(new Blob([preview.svg], { type: "image/svg+xml" }));
+  try {
+    const image = new Image();
+    image.src = previewUrl;
+    await image.decode();
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, preview.width, preview.height);
+    context.drawImage(image, 0, 0, preview.width, preview.height);
+  } finally {
+    URL.revokeObjectURL(previewUrl);
+  }
+}
+
+async function updateImageVectorPreview() {
+  const sequence = ++imageVectorPreviewSequence;
+  cancelImageTracePreview();
+  imageVectorResult = null;
+  byId("apply-image-vector").disabled = true;
+  const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
+  if (!source || source.type !== "image") return;
+  try {
+    const result = await vectorizeImageElement(source);
+    if (sequence !== imageVectorPreviewSequence) return;
+    if (result.preview.svg) {
+      await drawTracePreview(result.preview);
+    } else {
+      const canvas = byId("image-vector-preview");
+      canvas.width = result.preview.width;
+      canvas.height = result.preview.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("O navegador não disponibilizou o canvas de prévia.");
+      context.putImageData(new ImageData(result.preview.data, result.preview.width, result.preview.height), 0, 0);
+    }
+    if (sequence !== imageVectorPreviewSequence) return;
+    imageVectorResult = result;
+    byId("image-vector-stats").textContent = result.mode === "trace"
+      ? `${result.stats.pathCount} contornos em ${result.stats.colorCount} cores · ${result.stats.pixelWidth} × ${result.stats.pixelHeight} amostras.`
+      : `${result.stats.pathCount} trajetórias · ${result.stats.pixelWidth} × ${result.stats.pixelHeight} amostras · potência variável por tom.`;
+    byId("apply-image-vector").disabled = false;
+  } catch (error) {
+    if (sequence !== imageVectorPreviewSequence) return;
+    byId("image-vector-stats").textContent = `Conversão indisponível: ${error.message}`;
+  }
+}
+
+function syncImageVectorSettings() {
+  const traceMode = byId("image-vector-mode").value === "trace";
+  for (const setting of document.querySelectorAll("[data-image-setting]")) {
+    setting.hidden = setting.dataset.imageSetting === "trace" ? !traceMode : traceMode;
+  }
+}
+
+function openImageVectorizer() {
+  try {
+    const source = currentDocument.elements.find((element) => element.id === selectedId);
+    if (!source || source.type !== "image") throw new Error("Selecione uma imagem raster incorporada.");
+    const layer = currentDocument.layers.find((candidate) => candidate.id === source.layerId);
+    if (!layer || layer.locked) throw new Error("Desbloqueie a camada da imagem antes de convertê-la.");
+    if (layer.operation !== "engrave") throw new Error("A conversão tonal exige uma camada configurada como Gravação.");
+    imageVectorSourceId = source.id;
+    byId("image-vector-dialog").showModal();
+    syncImageVectorSettings();
+    void updateImageVectorPreview();
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function applyImageVectorization() {
+  try {
+    const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
+    const layer = currentDocument.layers.find((candidate) => candidate.id === source?.layerId);
+    if (!source || source.type !== "image" || !imageVectorResult) throw new Error("Gere uma prévia válida antes de aplicar.");
+    if (!layer || layer.locked || layer.operation !== "engrave") throw new Error("A camada de gravação não está disponível.");
+    const resultMode = imageVectorResult.mode;
+    const convertedIds = imageVectorResult.elements.map((element) => element.id);
+    currentDocument = createDocument({
+      ...readDocument(),
+      layers: [...currentDocument.layers, ...(imageVectorResult.layers ?? [])],
+      elements: [
+        ...currentDocument.elements.filter((element) => element.id !== source.id),
+        ...imageVectorResult.elements
+      ]
+    });
+    selectedIds = convertedIds.length ? [convertedIds.at(-1)] : [];
+    selectedId = convertedIds.at(-1) ?? null;
+    activeLayerId = currentDocument.elements.find((element) => element.id === selectedId)?.layerId ?? layer.id;
+    syncInspector();
+    renderPreview();
+    commitHistory();
+    byId("image-vector-dialog").close();
+    showNotice(resultMode === "trace"
+      ? `${convertedIds.length} contorno(s) vetorial(is) criado(s) em camadas por cor.`
+      : `${convertedIds.length} trajetória(s) vetorial(is) criada(s) com potência variável.`);
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function openPathEditor() {
+  const selected = currentDocument.elements.find((element) => element.id === selectedId);
+  if (!selected || selected.type !== "path") {
+    showNotice("Selecione um traçado vetorial editável.");
+    return;
+  }
+  try {
+    pathEditor.open(selected.pathData, selected.widthMm, selected.heightMm, (pathData, widthMm, heightMm) => {
+      try {
+        const elements = currentDocument.elements.map((element) =>
+          element.id === selected.id ? { ...element, pathData, widthMm, heightMm } : element
+        );
+        currentDocument = createDocument({ ...currentDocument, elements });
+        syncInspector();
+        renderPreview();
+        commitHistory();
+      } catch (error) {
+        showNotice(error.message);
+        return false;
+      }
+    });
+  } catch (error) {
+    showNotice(error.message);
+  }
 }
 
 function newDocument() {
@@ -562,8 +1113,6 @@ function updateSelectedFromInput(input) {
     updateSelected({ text: input.value }, true, false);
   } else if (input.id === "object-font") {
     updateSelected({ fontFamily: input.value });
-  } else if (input.id === "object-path") {
-    updateSelected({ pathData: input.value });
   }
 }
 
@@ -768,6 +1317,8 @@ function addLayer() {
     powerPercent: 10,
     passes: 1,
     fillSpacingMm: 1,
+    fillAlgorithm: "horizontal-serpentine",
+    objectOrder: "document",
     enabled: true,
     visible: true,
     locked: false,
@@ -888,6 +1439,39 @@ installShortcuts({
 });
 byId("shortcut-help").addEventListener("click", showShortcuts);
 byId("shortcuts-dialog").querySelector(".dialog-close").addEventListener("click", () => byId("shortcuts-dialog").close());
+byId("open-path-editor").addEventListener("click", openPathEditor);
+byId("edit-image").addEventListener("click", () => {
+  void openImageEditor().catch((error) => showNotice(error.message));
+});
+byId("open-image-vectorizer").addEventListener("click", openImageVectorizer);
+byId("apply-image-vector").addEventListener("click", applyImageVectorization);
+byId("apply-image-edit").addEventListener("click", () => {
+  void applyImageEdit().catch((error) => showNotice(error.message));
+});
+byId("cancel-image-edit").addEventListener("click", () => byId("image-edit-dialog").close());
+byId("image-edit-dialog").addEventListener("close", () => {
+  rasterImageEditor?.destroy();
+  rasterImageEditor = null;
+  pendingImageEdit = null;
+  byId("image-editor-container").replaceChildren();
+  byId("apply-image-edit").disabled = true;
+});
+byId("image-vector-dialog").addEventListener("close", () => {
+  imageVectorPreviewSequence += 1;
+  cancelImageTracePreview();
+  imageVectorResult = null;
+  imageVectorSourceId = null;
+});
+for (const id of [
+  "image-vector-mode", "image-vector-pitch", "image-vector-color", "image-vector-tolerance",
+  "image-vector-min-power", "image-vector-max-power", "image-vector-colors", "image-vector-pathomit",
+  "image-vector-line-tolerance", "image-vector-curve-tolerance"
+]) {
+  byId(id).addEventListener("input", () => {
+    if (id === "image-vector-mode") syncImageVectorSettings();
+    void updateImageVectorPreview();
+  });
+}
 installTooltips();
 new ResizeObserver(() => resizeBoard()).observe(stage);
 
@@ -898,10 +1482,13 @@ for (const button of document.querySelectorAll('[data-action="import-svg"]')) {
 byId("svg-file-input").addEventListener("change", async (event) => {
   try {
     const file = event.target.files[0];
+    if (!file) return;
     if (file?.type === "image/svg+xml" || file?.name.toLowerCase().endsWith(".svg")) {
       await importSvgFile(file);
+    } else if (file?.type === "application/json" || file?.name.toLowerCase().endsWith(".json")) {
+      await importProjectFile(file);
     } else {
-      await importImageFile(file);
+      await openImageEditor(file);
     }
   } catch (error) {
     showNotice(error.message);
@@ -912,6 +1499,18 @@ byId("svg-file-input").addEventListener("change", async (event) => {
 for (const button of document.querySelectorAll('[data-action="export"]')) button.addEventListener("click", () => {
   try { exportSvg(); } catch (error) { showNotice(error.message); }
 });
+for (const button of document.querySelectorAll('[data-action="export-project"]')) button.addEventListener("click", () => {
+  try { exportProject(); } catch (error) { showNotice(error.message); }
+});
+for (const button of document.querySelectorAll('[data-action="preview-machine"]')) {
+  button.addEventListener("click", showMachinePreview);
+}
+for (const button of document.querySelectorAll('[data-action="export-gcode"]')) {
+  button.addEventListener("click", () => {
+    try { exportGcode(); } catch (error) { showNotice(`Não foi possível exportar G-code: ${error.message}`); }
+  });
+}
+byId("machine-preview-dialog").querySelector(".dialog-close").addEventListener("click", () => byId("machine-preview-dialog").close());
 for (const button of document.querySelectorAll('[data-action="add-text"]')) button.addEventListener("click", () => byId("add-text").click());
 for (const button of document.querySelectorAll('[data-action="add-rect"]')) button.addEventListener("click", () => byId("add-shape").click());
 

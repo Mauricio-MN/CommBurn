@@ -13,7 +13,7 @@ const GEOMETRY_ATTRIBUTES = {
   circle: new Set(["cx", "cy", "r", "transform"]),
   ellipse: new Set(["cx", "cy", "rx", "ry", "transform"]),
   line: new Set(["x1", "y1", "x2", "y2", "transform"]),
-  path: new Set(["d", "transform"]),
+  path: new Set(["d", "transform", "data-power-percent"]),
   polygon: new Set(["points", "transform"]),
   polyline: new Set(["points", "transform"]),
   text: new Set(["x", "y", "font-size", "font-family", "text-anchor", "dominant-baseline", "transform"]),
@@ -23,6 +23,7 @@ const ROOT_ATTRIBUTES = new Set(["xmlns", "xmlns:xlink", "width", "height", "vie
 const LAYER_ATTRIBUTES = new Set([
   "data-layer-id", "data-layer-name", "data-operation", "data-color",
   "data-feed-mm-per-minute", "data-power-percent", "data-passes", "data-fill-spacing-mm",
+  "data-fill-algorithm", "data-object-order",
   "data-enabled", "data-visible", "data-locked"
 ]);
 const BASIC_COLORS = {
@@ -429,6 +430,8 @@ function layerFromGroup(attributes, index, prefix) {
       powerPercent: number(attributes["data-power-percent"], "layer power", DEFAULT_LAYER.powerPercent),
       passes: number(attributes["data-passes"], "layer passes", DEFAULT_LAYER.passes),
       fillSpacingMm: number(attributes["data-fill-spacing-mm"], "layer fill spacing", DEFAULT_LAYER.fillSpacingMm),
+      fillAlgorithm: attributes["data-fill-algorithm"] ?? DEFAULT_LAYER.fillAlgorithm,
+      objectOrder: attributes["data-object-order"] ?? DEFAULT_LAYER.objectOrder,
       enabled: booleanAttribute(attributes["data-enabled"], "layer enabled", true),
       visible: booleanAttribute(attributes["data-visible"], "layer visible", true),
       locked: booleanAttribute(attributes["data-locked"], "layer locked", false)
@@ -782,6 +785,9 @@ export function importSvgTree(root, {
       id, layerId: commBurnLayer || forceLayerId
         ? inheritedLayerId
         : fallbackLayerIdForElement(node.name, a, style, inheritedLayerId, layers, colorLayers, defaultLayer, idPrefix, forceLayerId),
+      ...(a["data-power-percent"] === undefined
+        ? {}
+        : { powerPercent: number(a["data-power-percent"], "object power") }),
       rotationDeg: 0, skewXDeg: 0, skewYDeg: 0
     };
     const elementTransform = multiplyTransforms(inheritedTransform, parseTransform(a.transform));

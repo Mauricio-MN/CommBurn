@@ -15,6 +15,11 @@ export class DocumentHistory {
     return true;
   }
 
+  reset(document) {
+    this.#snapshots = [JSON.stringify(document)];
+    this.#index = 0;
+  }
+
   undo() {
     if (this.#index <= 0) return null;
     this.#index -= 1;

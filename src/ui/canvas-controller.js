@@ -19,6 +19,25 @@ function getCenter(document, element) {
   return { xMm: xMm + element.widthMm / 2, yMm: yMm + element.heightMm / 2 };
 }
 
+function getSelectionBounds(elements) {
+  const bounds = elements.map((element) => {
+    const widthMm = element.widthMm ?? element.fontSizeMm;
+    const heightMm = element.heightMm ?? element.fontSizeMm;
+    return {
+      left: element.xMm,
+      top: element.yMm - (element.type === "text" ? element.fontSizeMm : 0),
+      right: element.xMm + widthMm,
+      bottom: element.yMm - (element.type === "text" ? element.fontSizeMm : 0) + heightMm
+    };
+  });
+  return {
+    left: Math.min(...bounds.map((bound) => bound.left)),
+    top: Math.min(...bounds.map((bound) => bound.top)),
+    right: Math.max(...bounds.map((bound) => bound.right)),
+    bottom: Math.max(...bounds.map((bound) => bound.bottom))
+  };
+}
+
 function angleBetween(center, point) {
   return Math.atan2(point.y - center.yMm, point.x - center.xMm) * 180 / Math.PI;
 }
@@ -75,7 +94,7 @@ export class CanvasController {
     const selectedIds = this.callbacks.getSelectedIds();
     if (!selectedIds.includes(id)) return;
     const selected = document.elements.filter((candidate) => selectedIds.includes(candidate.id));
-    if (tool !== "move" && selected.length > 1) {
+    if (!["move", "size"].includes(tool) && selected.length > 1) {
       this.callbacks.notify("Rotação e distorção de vários objetos ainda não estão disponíveis.");
       return;
     }
@@ -85,7 +104,11 @@ export class CanvasController {
     }
 
     const point = toCanvasPoint(this.svg, event);
-    const center = getCenter(document, element);
+    const bounds = getSelectionBounds(selected);
+    const center = tool === "size"
+      ? { xMm: (bounds.left + bounds.right) / 2, yMm: (bounds.top + bounds.bottom) / 2 }
+      : getCenter(document, element);
+    const startDistance = Math.hypot(point.x - center.xMm, point.y - center.yMm);
     this.interaction = {
       type: "transform",
       pointerId: event.pointerId,
@@ -94,6 +117,8 @@ export class CanvasController {
       tool,
       startPoint: point,
       center,
+      startDistance,
+      scaleReference: Math.max(bounds.right - bounds.left, bounds.bottom - bounds.top, 0.1),
       startX: element.xMm,
       startY: element.yMm,
       startRotation: element.rotationDeg,
@@ -137,7 +162,23 @@ export class CanvasController {
           xMm: element.xMm + deltaX * (action.flipX ? -1 : 1),
           yMm: element.yMm + deltaY * (action.flipY ? -1 : 1)
         }
-      })));
+      })), false);
+    } else if (action.tool === "size") {
+      const currentDistance = Math.hypot(point.x - action.center.xMm, point.y - action.center.yMm);
+      const scale = Math.max(0.01, 1 + (currentDistance - action.startDistance) / action.scaleReference);
+      this.callbacks.updateMany(action.selected.map((element) => {
+        const patch = {
+          xMm: action.center.xMm + (element.xMm - action.center.xMm) * scale,
+          yMm: action.center.yMm + (element.yMm - action.center.yMm) * scale
+        };
+        if (element.type === "text") {
+          patch.fontSizeMm = element.fontSizeMm * scale;
+        } else {
+          patch.widthMm = element.widthMm * scale;
+          patch.heightMm = element.heightMm * scale;
+        }
+        return { id: element.id, patch };
+      }), false);
     } else if (action.tool === "rotate") {
       const angleDelta = angleBetween(action.center, point) - action.startAngle;
       const normalizedDelta = ((angleDelta + 180) % 360 + 360) % 360 - 180;

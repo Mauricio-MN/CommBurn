@@ -1,4 +1,11 @@
 const LAYER_OPERATIONS = new Set(["engrave", "cut", "fill"]);
+export const FILL_ALGORITHMS = Object.freeze([
+  "horizontal-serpentine",
+  "vertical-serpentine",
+  "crosshatch",
+  "horizontal-unidirectional"
+]);
+export const OBJECT_ORDERS = Object.freeze(["document", "nearest", "center-out"]);
 function finitePositive(value, label) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new RangeError(`${label} must be a finite number greater than zero`);
@@ -14,6 +21,8 @@ export const DEFAULT_LAYER = Object.freeze({
   powerPercent: 10,
   passes: 1,
   fillSpacingMm: 1,
+  fillAlgorithm: "horizontal-serpentine",
+  objectOrder: "document",
   enabled: true,
   visible: true,
   locked: false,
@@ -43,6 +52,14 @@ export function normalizeLayers(inputLayers = [DEFAULT_LAYER]) {
     if (!Number.isSafeInteger(passes) || passes < 1 || passes > 100) {
       throw new RangeError(`Layer ${id} passes must be an integer between 1 and 100`);
     }
+    const fillAlgorithm = layer.fillAlgorithm ?? "horizontal-serpentine";
+    if (!FILL_ALGORITHMS.includes(fillAlgorithm)) {
+      throw new RangeError(`Layer ${id} has unsupported fill algorithm: ${fillAlgorithm}`);
+    }
+    const objectOrder = layer.objectOrder ?? "document";
+    if (!OBJECT_ORDERS.includes(objectOrder)) {
+      throw new RangeError(`Layer ${id} has unsupported object order: ${objectOrder}`);
+    }
     const enabled = layer.enabled ?? true;
     const visible = layer.visible ?? true;
     const locked = layer.locked ?? false;
@@ -60,6 +77,8 @@ export function normalizeLayers(inputLayers = [DEFAULT_LAYER]) {
       powerPercent,
       passes,
       fillSpacingMm: finitePositive(layer.fillSpacingMm ?? 1, `Layer ${id} fillSpacingMm`),
+      fillAlgorithm,
+      objectOrder,
       enabled,
       visible,
       locked,

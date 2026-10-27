@@ -9,6 +9,8 @@
     "start": "node server.mjs"
   },
   "dependencies": {
+    "imagetracerjs": "^1.2.6",
+    "@jodit/image-editor": "^0.2.5",
     "serialport": "^13.0.0",
     "svg-pathdata": "^6.0.3",
     "svgson": "^5.3.1"

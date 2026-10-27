@@ -43,7 +43,7 @@ function normalizeImageDataUri(value, id) {
   } catch (error) {
     throw new TypeError(`Element ${id} imageDataUri has invalid base64 data`, { cause: error });
   }
-  if (bytes.length > 10 * 1024 * 1024) throw new RangeError(`Element ${id} imageDataUri exceeds 10 MB`);
+  if (bytes.length > 25 * 1024 * 1024) throw new RangeError(`Element ${id} imageDataUri exceeds 25 MB`);
   const signature = [...bytes.slice(0, 12)].map((byte) => byte.charCodeAt(0));
   const validSignature = match[1] === "png"
     ? signature.slice(0, 8).join(",") === "137,80,78,71,13,10,26,10"
@@ -165,7 +165,16 @@ function normalizeElement(element, index, defaultLayerId) {
     const widthMm = positiveOrZero(element.widthMm ?? bounds.maxX - bounds.minX, `Element ${id} widthMm`);
     const heightMm = positiveOrZero(element.heightMm ?? bounds.maxY - bounds.minY, `Element ${id} heightMm`);
     if (widthMm === 0 && heightMm === 0) throw new RangeError(`Element ${id} path must have a positive width or height`);
-    return { id, type: "path", xMm, yMm, widthMm, heightMm, pathData: element.pathData, layerId, ...transforms };
+    const powerPercent = element.powerPercent;
+    if (powerPercent !== undefined
+      && (typeof powerPercent !== "number" || !Number.isFinite(powerPercent) || powerPercent <= 0 || powerPercent > 100)) {
+      throw new RangeError(`Element ${id} powerPercent must be greater than zero and at most 100`);
+    }
+    return {
+      id, type: "path", xMm, yMm, widthMm, heightMm, pathData: element.pathData, layerId,
+      ...(powerPercent === undefined ? {} : { powerPercent }),
+      ...transforms
+    };
   }
   if (element.type === "image") {
     return {
@@ -277,7 +286,8 @@ export function renderSvg(input) {
           point.flipY ? document.heightMm - element.yMm : element.yMm);
       const pathTransform = transformAttribute(element, point.xMm - (point.flipX ? element.widthMm / 2 : -element.widthMm / 2),
         point.yMm - (point.flipY ? element.heightMm / 2 : -element.heightMm / 2));
-      nodesByLayer.get(layer.id).push(`<path id="${escapeXml(element.id)}" d="${escapeXml(path.encode())}" fill="${fill}" stroke="${layer.color}"${pathTransform}/>`);
+      const power = element.powerPercent === undefined ? "" : ` data-power-percent="${element.powerPercent}"`;
+      nodesByLayer.get(layer.id).push(`<path id="${escapeXml(element.id)}" d="${escapeXml(path.encode())}" fill="${fill}" stroke="${layer.color}"${power}${pathTransform}/>`);
       continue;
     }
     if (element.type === "image") {
@@ -291,7 +301,7 @@ export function renderSvg(input) {
     nodesByLayer.get(layer.id).push(`<rect id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" fill="${fill}" stroke="${layer.color}"${transform}/>`);
   }
   const layerGroups = document.layers.map((layer) =>
-    `<g data-layer-id="${escapeXml(layer.id)}" data-layer-name="${escapeXml(layer.name)}" data-operation="${layer.operation}" data-color="${layer.color}" data-feed-mm-per-minute="${layer.feedMmPerMinute}" data-power-percent="${layer.powerPercent}" data-passes="${layer.passes}" data-fill-spacing-mm="${layer.fillSpacingMm}" data-enabled="${layer.enabled}" data-visible="${layer.visible}" data-locked="${layer.locked}">${nodesByLayer.get(layer.id).join("\n")}</g>`
+    `<g data-layer-id="${escapeXml(layer.id)}" data-layer-name="${escapeXml(layer.name)}" data-operation="${layer.operation}" data-color="${layer.color}" data-feed-mm-per-minute="${layer.feedMmPerMinute}" data-power-percent="${layer.powerPercent}" data-passes="${layer.passes}" data-fill-spacing-mm="${layer.fillSpacingMm}" data-fill-algorithm="${layer.fillAlgorithm}" data-object-order="${layer.objectOrder}" data-enabled="${layer.enabled}" data-visible="${layer.visible}" data-locked="${layer.locked}">${nodesByLayer.get(layer.id).join("\n")}</g>`
   );
 
   return [
@@ -305,7 +315,188 @@ export function renderSvg(input) {
   ].join("\n");
 }
 
-export function renderGrblJob(input, settings) {
+function distanceBetween(start, end) {
+  return Math.hypot(end.xMm - start.xMm, end.yMm - start.yMm);
+}
+
+function mapPoints(document, points) {
+  return points.map(([xMm, yMm]) => mapDocumentPoint(document, xMm, yMm));
+}
+
+function flattenVectorPath(element) {
+  const source = new SVGPathData(element.pathData);
+  const bounds = source.getBounds();
+  const scaleX = bounds.maxX === bounds.minX ? 1 : element.widthMm / (bounds.maxX - bounds.minX);
+  const scaleY = bounds.maxY === bounds.minY ? 1 : element.heightMm / (bounds.maxY - bounds.minY);
+  const commands = source.toAbs().normalizeHVZ().normalizeST().qtToC().aToC().commands;
+  const paths = [];
+  let points = null;
+  let current = null;
+  let subpathStart = null;
+  const toDocumentPoint = ([x, y]) => [
+    element.xMm + (x - bounds.minX) * scaleX,
+    element.yMm + (y - bounds.minY) * scaleY
+  ];
+  for (const command of commands) {
+    if (command.type === SVGPathData.MOVE_TO) {
+      if (points?.length > 1) paths.push(points);
+      current = [command.x, command.y];
+      subpathStart = current;
+      points = [toDocumentPoint(current)];
+    } else if (command.type === SVGPathData.LINE_TO) {
+      if (!points) throw new RangeError(`Path ${element.id} must start with a move command`);
+      current = [command.x, command.y];
+      points.push(toDocumentPoint(current));
+    } else if (command.type === SVGPathData.CURVE_TO) {
+      if (!points || !current) throw new RangeError(`Path ${element.id} must start with a move command`);
+      const control1 = [command.x1, command.y1];
+      const control2 = [command.x2, command.y2];
+      const end = [command.x, command.y];
+      const length = distanceBetween(
+        { xMm: current[0], yMm: current[1] },
+        { xMm: control1[0], yMm: control1[1] }
+      ) + distanceBetween(
+        { xMm: control1[0], yMm: control1[1] },
+        { xMm: control2[0], yMm: control2[1] }
+      ) + distanceBetween(
+        { xMm: control2[0], yMm: control2[1] },
+        { xMm: end[0], yMm: end[1] }
+      );
+      const steps = Math.max(4, Math.min(200, Math.ceil(length * Math.max(scaleX, scaleY) / 0.25)));
+      for (let step = 1; step <= steps; step += 1) {
+        const t = step / steps;
+        const oneMinusT = 1 - t;
+        const point = [0, 1].map((axis) =>
+          oneMinusT ** 3 * current[axis]
+          + 3 * oneMinusT ** 2 * t * control1[axis]
+          + 3 * oneMinusT * t ** 2 * control2[axis]
+          + t ** 3 * end[axis]
+        );
+        points.push(toDocumentPoint(point));
+      }
+      current = end;
+    } else if (command.type === SVGPathData.CLOSE_PATH) {
+      if (points?.length > 1 && (current[0] !== subpathStart[0] || current[1] !== subpathStart[1])) {
+        points.push(toDocumentPoint(subpathStart));
+      }
+      if (points?.length > 1) paths.push(points);
+      points = null;
+      current = null;
+      subpathStart = null;
+    } else {
+      throw new RangeError(`Path ${element.id} has unsupported geometry for GRBL output`);
+    }
+  }
+  if (points?.length > 1) paths.push(points);
+  if (paths.flat().length > 100000) throw new RangeError(`Path ${element.id} creates too many GRBL segments`);
+  return paths;
+}
+
+function fillPaths(element, algorithm, spacingMm) {
+  const horizontal = [];
+  const vertical = [];
+  const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
+  const columnCount = Math.floor(element.widthMm / spacingMm) + 1;
+  const usesHorizontal = ["horizontal-serpentine", "horizontal-unidirectional", "crosshatch"].includes(algorithm);
+  const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
+  if ((usesHorizontal && rowCount > 50000) || (usesVertical && columnCount > 50000)
+    || ((usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0)) > 50000) {
+    throw new RangeError(`Fill spacing creates too many scan lines for element ${element.id}`);
+  }
+  if (usesHorizontal) {
+    for (let row = 0; row < rowCount; row += 1) {
+      const yMm = Math.min(element.yMm + row * spacingMm, element.yMm + element.heightMm);
+      const reverse = algorithm !== "horizontal-unidirectional" && row % 2 === 1;
+      horizontal.push(reverse
+        ? [[element.xMm + element.widthMm, yMm], [element.xMm, yMm]]
+        : [[element.xMm, yMm], [element.xMm + element.widthMm, yMm]]);
+    }
+  }
+  if (usesVertical) {
+    for (let column = 0; column < columnCount; column += 1) {
+      const xMm = Math.min(element.xMm + column * spacingMm, element.xMm + element.widthMm);
+      const reverse = column % 2 === 1;
+      vertical.push(reverse
+        ? [[xMm, element.yMm + element.heightMm], [xMm, element.yMm]]
+        : [[xMm, element.yMm], [xMm, element.yMm + element.heightMm]]);
+    }
+  }
+  return [...horizontal, ...vertical];
+}
+
+function createElementWorkPaths(document, layer, element) {
+  const outline = [
+    [element.xMm, element.yMm],
+    [element.xMm + element.widthMm, element.yMm],
+    [element.xMm + element.widthMm, element.yMm + element.heightMm],
+    [element.xMm, element.yMm + element.heightMm],
+    [element.xMm, element.yMm]
+  ];
+  if (layer.operation === "fill" && element.type !== "rect") {
+    throw new RangeError(`GRBL fill currently supports rectangles only; path ${element.id} must use engrave or cut`);
+  }
+  const sourcePaths = layer.operation === "fill"
+    ? fillPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
+    : element.type === "path"
+      ? flattenVectorPath(element)
+      : [outline];
+  if (sourcePaths.length * layer.passes > 100000) {
+    throw new RangeError(`Layer ${layer.name} creates too many tool paths`);
+  }
+  const workPaths = [];
+  for (let pass = 1; pass <= layer.passes; pass += 1) {
+    for (const points of sourcePaths) {
+      workPaths.push({
+        kind: "work",
+        elementId: element.id,
+        layerId: layer.id,
+        operation: layer.operation,
+        algorithm: layer.operation === "fill" ? layer.fillAlgorithm : "outline",
+        pass,
+        ...(element.powerPercent === undefined ? {} : { powerPercent: element.powerPercent }),
+        points: mapPoints(document, points)
+      });
+    }
+  }
+  return workPaths;
+}
+
+function orderLayerElements(document, layer, elements, workByElement, startPoint) {
+  if (layer.objectOrder === "document") return elements;
+  const distanceFromCenter = (element) => {
+    const centerX = element.xMm + element.widthMm / 2;
+    const centerY = element.yMm + element.heightMm / 2;
+    return Math.hypot(centerX - document.widthMm / 2, centerY - document.heightMm / 2);
+  };
+  if (layer.objectOrder === "center-out") {
+    return [...elements].sort((a, b) => distanceFromCenter(a) - distanceFromCenter(b));
+  }
+  if (elements.length > 2000) {
+    throw new RangeError(`Layer ${layer.name} has too many objects for nearest-neighbor ordering; use document order or center-out`);
+  }
+
+  const remaining = [...elements];
+  const ordered = [];
+  let current = startPoint ?? mapDocumentPoint(document, 0, 0);
+  while (remaining.length > 0) {
+    let nearestIndex = 0;
+    let nearestDistance = Infinity;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const firstPoint = workByElement.get(remaining[index].id)[0].points[0];
+      const distance = distanceBetween(current, firstPoint);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    }
+    const [next] = remaining.splice(nearestIndex, 1);
+    ordered.push(next);
+    current = workByElement.get(next.id).at(-1).points.at(-1);
+  }
+  return ordered;
+}
+
+export function planGrblJob(input, settings) {
   const document = createDocument(input);
   const feedOverride = settings.feedMmPerMinute === undefined
     ? null
@@ -319,14 +510,18 @@ export function renderGrblJob(input, settings) {
   const activeLayerIds = new Set(activeLayers.map((layer) => layer.id));
   const elements = document.elements.filter((element) => activeLayerIds.has(element.layerId));
   if (elements.length === 0) throw new RangeError("The job has no objects in enabled layers");
-  if (elements.some((element) => element.type !== "rect")) {
-    throw new RangeError("GRBL output currently supports rectangles only; text must be converted to paths first");
+  if (elements.some((element) => !["rect", "path"].includes(element.type))) {
+    throw new RangeError("GRBL supports rectangles and editable vector paths only; convert images to paths and outline text before export");
   }
   if (elements.some((element) => element.rotationDeg !== 0 || element.skewXDeg !== 0 || element.skewYDeg !== 0)) {
     throw new RangeError("GRBL output currently supports untransformed rectangles only");
   }
 
   const gcode = ["G21", "G90", "G94", "M5"];
+  const paths = [];
+  let previousPoint = null;
+  let travelDistanceMm = 0;
+  let workDistanceMm = 0;
   for (const layer of activeLayers) {
     const layerElements = elements.filter((element) => element.layerId === layer.id);
     if (layerElements.length === 0) continue;
@@ -334,47 +529,70 @@ export function renderGrblJob(input, settings) {
     const powerPercent = powerOverride ?? layer.powerPercent;
     const power = Math.round(maxSpindleSpeed * powerPercent / 100);
     for (const element of layerElements) {
-      const corners = [
+      const corners = mapPoints(document, [
         [element.xMm, element.yMm],
         [element.xMm + element.widthMm, element.yMm],
         [element.xMm + element.widthMm, element.yMm + element.heightMm],
         [element.xMm, element.yMm + element.heightMm]
-      ].map(([xMm, yMm]) => mapDocumentPoint(document, xMm, yMm));
+      ]);
       for (const point of corners) {
         if (point.xMm < 0 || point.xMm > document.widthMm || point.yMm < 0 || point.yMm > document.heightMm) {
           throw new RangeError(`Element ${element.id} extends outside the document work area`);
         }
       }
-      if (layer.operation === "fill") {
-        const rows = Math.floor(element.heightMm / layer.fillSpacingMm) + 1;
-        if (rows > 50000) throw new RangeError(`Layer ${layer.name} fill spacing creates too many scan lines`);
-        for (let pass = 0; pass < layer.passes; pass += 1) {
-          for (let row = 0; row < rows; row += 1) {
-            const yMm = Math.min(element.yMm + row * layer.fillSpacingMm, element.yMm + element.heightMm);
-            const startX = row % 2 === 0 ? element.xMm : element.xMm + element.widthMm;
-            const endX = row % 2 === 0 ? element.xMm + element.widthMm : element.xMm;
-            const start = mapDocumentPoint(document, startX, yMm);
-            const end = mapDocumentPoint(document, endX, yMm);
-            gcode.push("M5");
-            gcode.push(`G0 X${start.xMm} Y${start.yMm}`);
-            gcode.push(`M4 S${power}`);
-            gcode.push(`G1 F${feedMmPerMinute}`);
-            gcode.push(`G1 X${end.xMm} Y${end.yMm}`);
+    }
+    const workByElement = new Map(layerElements.map((element) => [
+      element.id,
+      createElementWorkPaths(document, layer, element)
+    ]));
+    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint);
+    for (const element of orderedElements) {
+      for (const workPath of workByElement.get(element.id)) {
+        if (paths.length >= 100000) throw new RangeError("The job creates too many tool paths and rapid moves");
+        const start = workPath.points[0];
+        if (previousPoint) {
+          const travelMm = distanceBetween(previousPoint, start);
+          if (travelMm > 0) {
+            if (paths.length >= 100000) throw new RangeError("The job creates too many tool paths and rapid moves");
+            paths.push({
+              kind: "travel",
+              elementId: element.id,
+              layerId: layer.id,
+              points: [previousPoint, start]
+            });
+            travelDistanceMm += travelMm;
           }
         }
-      } else {
-        for (let pass = 0; pass < layer.passes; pass += 1) {
-          gcode.push("M5");
-          gcode.push(`G0 X${corners[0].xMm} Y${corners[0].yMm}`);
-          gcode.push(`M4 S${power}`);
-          gcode.push(`G1 F${feedMmPerMinute}`);
-          for (const point of corners.slice(1)) gcode.push(`G1 X${point.xMm} Y${point.yMm}`);
-          gcode.push(`G1 X${corners[0].xMm} Y${corners[0].yMm}`);
-          gcode.push("M5");
+        gcode.push("M5");
+        gcode.push(`G0 X${start.xMm} Y${start.yMm}`);
+        const pathPower = workPath.powerPercent ?? powerPercent;
+        gcode.push(`M4 S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
+        gcode.push(`G1 F${feedMmPerMinute}`);
+        for (const point of workPath.points.slice(1)) {
+          gcode.push(`G1 X${point.xMm} Y${point.yMm}`);
         }
+        paths.push(workPath);
+        for (let index = 1; index < workPath.points.length; index += 1) {
+          workDistanceMm += distanceBetween(workPath.points[index - 1], workPath.points[index]);
+        }
+        previousPoint = workPath.points.at(-1);
+        if (layer.operation !== "fill") gcode.push("M5");
       }
     }
   }
   gcode.push("M5");
-  return `${gcode.join("\n")}\n`;
+  return {
+    gcode: `${gcode.join("\n")}\n`,
+    paths,
+    stats: {
+      workPathCount: paths.filter((path) => path.kind === "work").length,
+      rapidMoveCount: paths.filter((path) => path.kind === "travel").length,
+      workDistanceMm,
+      travelDistanceMm
+    }
+  };
+}
+
+export function renderGrblJob(input, settings) {
+  return planGrblJob(input, settings).gcode;
 }
