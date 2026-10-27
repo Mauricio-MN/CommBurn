@@ -1,6 +1,4 @@
 const LAYER_OPERATIONS = new Set(["engrave", "cut", "fill"]);
-const LAYER_COLORS = new Set(["#3978eb", "#e58a2d", "#32a77f", "#9665d8", "#d65d8c", "#5a718f"]);
-
 function finitePositive(value, label) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new RangeError(`${label} must be a finite number greater than zero`);
@@ -51,8 +49,8 @@ export function normalizeLayers(inputLayers = [DEFAULT_LAYER]) {
     if ([enabled, visible, locked].some((value) => typeof value !== "boolean")) {
       throw new TypeError(`Layer ${id} enabled, visible, and locked settings must be boolean`);
     }
-    const color = layer.color ?? DEFAULT_LAYER.color;
-    if (!LAYER_COLORS.has(color)) throw new RangeError(`Layer ${id} has an unsupported display color`);
+    const color = String(layer.color ?? DEFAULT_LAYER.color).toLowerCase();
+    if (!/^#[0-9a-f]{6}$/.test(color)) throw new RangeError(`Layer ${id} color must be a six-digit hexadecimal value`);
     ids.add(id);
     return {
       id,

@@ -1,5 +1,6 @@
 export const TOOLS = Object.freeze([
-  { id: "select", label: "Selecionar", key: "V", icon: "↖", description: "Seleciona objetos sem movê-los." },
+  { id: "select", label: "Selecionar", key: "V", icon: "↖", description: "Selecione um objeto ou arraste uma caixa; Shift+clique adiciona ou remove itens." },
+  { id: "multi-select", label: "Seleção múltipla", key: "Q", icon: "▧", description: "Adicione objetos à seleção clicando; arraste uma caixa para selecionar vários." },
   { id: "move", label: "Mover", key: "M", icon: "✥", description: "Arraste um objeto para reposicioná-lo em milímetros." },
   { id: "edit", label: "Editar", key: "E", icon: "✎", description: "Selecione um objeto e edite suas propriedades numéricas." },
   { id: "rotate", label: "Rotacionar", key: "R", icon: "⟳", description: "Arraste ao redor do objeto para definir seu ângulo." },

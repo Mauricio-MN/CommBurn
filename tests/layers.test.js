@@ -41,7 +41,7 @@ test("SVG groups objects by layer and honors visibility and fill display", () =>
     ]
   });
 
-  assert.match(svg, /data-layer-id="outline" data-operation="cut"/);
+  assert.match(svg, /data-layer-id="outline" data-layer-name="Corte" data-operation="cut"/);
   assert.match(svg, /<rect id="filled"[^>]*fill="#32a77f"/);
   assert.doesNotMatch(svg, /id="not-shown"/);
 });
@@ -84,6 +84,12 @@ test("layer configurations and object layer references are validated", () => {
   assert.throws(() => createDocument({
     elements: [{ type: "rect", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1, layerId: "missing" }]
   }), /references unknown layer/);
+  assert.equal(createDocument({
+    layers: [{ id: "custom", color: "#12aBcD" }]
+  }).layers[0].color, "#12abcd");
+  assert.throws(() => createDocument({
+    layers: [{ id: "invalid-color", color: "red" }]
+  }), /six-digit hexadecimal/);
 });
 
 test("GRBL filled layers reject unsafe scan-line counts", () => {

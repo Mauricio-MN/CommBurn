@@ -39,10 +39,10 @@ button, summary, select { cursor: pointer; }
 .button-icon { font-size: 17px; line-height: 1; }
 .full-width { width: 100%; }
 .workspace { display: grid; grid-template-columns: 308px minmax(0, 1fr); height: calc(100vh - 68px); height: calc(100dvh - 68px); min-height: 0; }
-.sidebar { display: flex; min-height: 0; flex-direction: column; gap: 13px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 17px 15px; background: #f9fafe; border-right: 1px solid var(--line); }
-.panel { padding: 15px; background: #fff; border: 1px solid #edf0f5; border-radius: 12px; box-shadow: 0 2px 6px rgb(35 51 82 / 2%); }
+.sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 13px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 17px 15px; background: #f9fafe; border-right: 1px solid var(--line); }
+.panel { min-width: 0; padding: 15px; background: #fff; border: 1px solid #edf0f5; border-radius: 12px; box-shadow: 0 2px 6px rgb(35 51 82 / 2%); }
 .field[hidden] { display: none; }
-.tool-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.tool-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px; }
 .tool-button { display: grid; min-width: 0; justify-items: center; gap: 4px; padding: 8px 3px; color: #5e6b80; background: #fff; border: 1px solid #e8edf4; border-radius: 8px; font-size: 9px; }
 .tool-button > span:first-child { color: #536fe0; font-size: 17px; line-height: 1; }
 .tool-button kbd, kbd { padding: 1px 4px; color: #718096; background: #f1f4f8; border: 1px solid #e3e8f0; border-radius: 4px; font: 9px ui-monospace, monospace; }
@@ -66,6 +66,7 @@ button, summary, select { cursor: pointer; }
 .field-row .field { margin: 0; }
 .field input, .field textarea, .field select { width: 100%; min-width: 0; color: #28354b; background: #fff; border: 1px solid #e4e9f0; border-radius: 7px; outline: none; font-size: 12px; font-weight: 450; }
 .field input, .field select { height: 35px; padding: 0 9px; }
+.field input[type="color"] { padding: 3px; }
 .field textarea { min-height: 64px; padding: 9px; resize: vertical; line-height: 1.45; }
 .field input:focus, .field textarea:focus, .field select:focus { border-color: #74a0f4; box-shadow: 0 0 0 3px #3978eb18; }
 .input-with-unit { display: flex; align-items: center; overflow: hidden; border: 1px solid #e4e9f0; border-radius: 7px; }
@@ -107,6 +108,7 @@ button, summary, select { cursor: pointer; }
 .artboard { grid-area: board; display: block; width: 100%; height: auto; aspect-ratio: var(--doc-ratio, 3 / 2); overflow: hidden; background: #fff; border: 1px solid #dce3ed; box-shadow: 0 9px 28px rgb(47 64 96 / 12%); touch-action: none; }
 .artboard [data-id] { cursor: pointer; }
 .artboard [data-id].selected { filter: drop-shadow(0 0 2px #3978eb); }
+.selection-marquee { fill: #3978eb20; stroke: #3978eb; stroke-dasharray: 4 2; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .ruler { position: relative; color: #778398; font-size: 9px; user-select: none; }
 .ruler-top { grid-area: x; display: flex; align-items: end; border-bottom: 1px solid #cfd7e3; }
 .ruler-left { grid-area: y; border-right: 1px solid #cfd7e3; }
@@ -123,22 +125,26 @@ button, summary, select { cursor: pointer; }
 .artboard[data-tool="rotate"] [data-id] { cursor: crosshair; }
 .artboard[data-tool="warp"] [data-id] { cursor: alias; }
 .stage-note { position: absolute; right: 22px; bottom: 17px; display: flex; align-items: center; gap: 6px; color: #7f8a9c; font-size: 10px; }
+.layers-panel, .layers-list { min-width: 0; max-width: 100%; }
 .layers-list { display: grid; gap: 9px; }
-.layer-card { padding: 9px; background: #fafbfd; border: 1px solid #e7ecf3; border-left: 3px solid var(--layer-color, #3978eb); border-radius: 8px; }
+.layer-card { min-width: 0; padding: 9px; background: #fafbfd; border: 1px solid #e7ecf3; border-left: 3px solid var(--layer-color, #3978eb); border-radius: 8px; }
 .layer-card.is-active { background: #f3f7ff; border-color: #b9cbed; }
-.layer-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.layer-header { display: flex; min-width: 0; align-items: center; gap: 6px; margin-bottom: 8px; }
 .layer-select { display: flex; flex: 1; min-width: 0; align-items: center; gap: 7px; padding: 3px; color: #344158; text-align: left; background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .layer-select > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-swatch { width: 11px; height: 11px; flex: 0 0 auto; border-radius: 4px; }
 .layer-count { display: grid; min-width: 20px; height: 20px; place-items: center; color: #778398; background: #edf1f6; border-radius: 10px; font-size: 9px; }
-.layer-remove { width: 26px; height: 26px; color: #a35c64; background: #fff; border: 1px solid #eadde0; border-radius: 6px; font-size: 17px; }
+.layer-duplicate, .layer-remove { width: 26px; height: 26px; flex: 0 0 26px; padding: 0; background: #fff; border-radius: 6px; }
+.layer-duplicate { color: #486db5; border: 1px solid #dce5f5; font-size: 15px; }
+.layer-duplicate:hover { background: #f0f5ff; }
+.layer-remove { color: #a35c64; border: 1px solid #eadde0; font-size: 17px; }
 .layer-remove:disabled { opacity: .45; cursor: not-allowed; }
-.layer-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.layer-field { gap: 4px; margin: 0; font-size: 9px; }
+.layer-settings { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.layer-field { min-width: 0; gap: 4px; margin: 0; font-size: 9px; overflow-wrap: anywhere; }
 .layer-field:first-child, .layer-field:nth-child(2), .layer-field[data-fill-setting] { grid-column: 1 / -1; }
-.layer-field input, .layer-field select { height: 30px; padding: 0 7px; font-size: 11px; }
+.layer-field input, .layer-field select { width: 100%; max-width: 100%; min-width: 0; height: 30px; padding: 0 7px; font-size: 11px; }
 .layer-switches { display: grid; gap: 5px; margin-top: 8px; }
-.layer-toggle { display: flex; align-items: center; gap: 6px; color: #68758a; font-size: 9px; cursor: pointer; }
+.layer-toggle { display: flex; min-width: 0; align-items: center; gap: 6px; color: #68758a; font-size: 9px; cursor: pointer; overflow-wrap: anywhere; }
 .layer-toggle input { width: 13px; height: 13px; margin: 0; accent-color: #3978eb; }
 .layer-add { margin-top: 9px; }
 .layer-card[data-locked="true"] { opacity: .7; }

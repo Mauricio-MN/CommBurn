@@ -10,3 +10,8 @@ test("each editor tool has one documented and keyboard-accessible shortcut", () 
   }
   assert.equal(new Set(TOOLS.map((tool) => tool.key)).size, TOOLS.length);
 });
+
+test("copy and paste shortcuts are documented for cross-layer object transfer", () => {
+  assert.ok(SHORTCUTS.some(({ keys }) => keys === "Ctrl+C"));
+  assert.ok(SHORTCUTS.some(({ keys }) => keys === "Ctrl+V"));
+});

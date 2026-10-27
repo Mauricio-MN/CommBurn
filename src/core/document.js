@@ -31,6 +31,64 @@ function escapeXml(value) {
     .replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
 
+function normalizeImageDataUri(value, id) {
+  if (typeof value !== "string") throw new TypeError(`Element ${id} imageDataUri must be an embedded PNG, JPEG, or WebP image`);
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || match[2].length % 4 !== 0) {
+    throw new TypeError(`Element ${id} imageDataUri must be an embedded PNG, JPEG, or WebP image`);
+  }
+  let bytes;
+  try {
+    bytes = atob(match[2]);
+  } catch (error) {
+    throw new TypeError(`Element ${id} imageDataUri has invalid base64 data`, { cause: error });
+  }
+  if (bytes.length > 10 * 1024 * 1024) throw new RangeError(`Element ${id} imageDataUri exceeds 10 MB`);
+  const signature = [...bytes.slice(0, 12)].map((byte) => byte.charCodeAt(0));
+  const validSignature = match[1] === "png"
+    ? signature.slice(0, 8).join(",") === "137,80,78,71,13,10,26,10"
+    : match[1] === "jpeg"
+      ? signature[0] === 255 && signature[1] === 216 && signature[2] === 255
+      : signature.slice(0, 4).join("") === "RIFF" && signature.slice(8, 12).join("") === "WEBP";
+  if (!validSignature) throw new TypeError(`Element ${id} imageDataUri does not match its image format`);
+  return value;
+}
+
+function normalizeSvgDataUri(value, id, nestingDepth = 0) {
+  if (typeof value !== "string") throw new TypeError(`Element ${id} svgDataUri must be an embedded sanitized SVG`);
+  const match = /^data:image\/svg\+xml;base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || match[1].length % 4 !== 0) {
+    throw new TypeError(`Element ${id} svgDataUri must be an embedded sanitized SVG`);
+  }
+  if (nestingDepth > 8) throw new RangeError(`Element ${id} svgDataUri exceeds the nested SVG limit`);
+  let source;
+  try {
+    const bytes = atob(match[1]);
+    if (bytes.length > 10 * 1024 * 1024) throw new RangeError(`Element ${id} svgDataUri exceeds 10 MB`);
+    source = new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes, (byte) => byte.charCodeAt(0)));
+  } catch (error) {
+    if (error instanceof RangeError) throw error;
+    throw new TypeError(`Element ${id} svgDataUri has invalid encoded XML`, { cause: error });
+  }
+  const unsafeMarkup = /<!DOCTYPE\b|<!ENTITY\b|<\s*(?:script|iframe|object|embed|audio|video|handler|listener)\b|\son[a-z]+\s*=|xml:base\s*=|&(?!(?:amp|lt|gt|quot|apos);)[A-Za-z_:][A-Za-z0-9_.:-]*;/i;
+  const externalReference = /(?:href|src)\s*=\s*["'](?!\s*(?:#|data:image\/(?:svg\+xml|png|jpeg|webp);base64,))|url\(\s*["']?(?!#|data:image\/(?:svg\+xml|png|jpeg|webp);base64,)|@import\b/i;
+  if (!/^<svg(?:\s|>)/i.test(source) || unsafeMarkup.test(source) || externalReference.test(source)) {
+    throw new TypeError(`Element ${id} svgDataUri contains unsupported active or external content`);
+  }
+  for (const nested of source.matchAll(/data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}/gi)) {
+    normalizeSvgDataUri(nested[0], id, nestingDepth + 1);
+  }
+  return value;
+}
+
+function normalizeImageAspect(value, id) {
+  const aspect = value ?? "xMidYMid meet";
+  if (aspect !== "none" && !/^x(?:Min|Mid|Max)Y(?:Min|Mid|Max) meet$/.test(aspect)) {
+    throw new RangeError(`Element ${id} has an unsupported image preserveAspectRatio`);
+  }
+  return aspect;
+}
+
 function normalizeOrigin(origin = {}) {
   const corner = origin.corner ?? "top-left";
   if (!ORIGIN_CORNERS.has(corner)) throw new RangeError(`Unsupported origin corner: ${corner}`);
@@ -108,6 +166,27 @@ function normalizeElement(element, index, defaultLayerId) {
     const heightMm = positiveOrZero(element.heightMm ?? bounds.maxY - bounds.minY, `Element ${id} heightMm`);
     if (widthMm === 0 && heightMm === 0) throw new RangeError(`Element ${id} path must have a positive width or height`);
     return { id, type: "path", xMm, yMm, widthMm, heightMm, pathData: element.pathData, layerId, ...transforms };
+  }
+  if (element.type === "image") {
+    return {
+      id, type: "image", xMm, yMm,
+      widthMm: positiveNumber(element.widthMm, `Element ${id} widthMm`),
+      heightMm: positiveNumber(element.heightMm, `Element ${id} heightMm`),
+      imageDataUri: normalizeImageDataUri(element.imageDataUri, id),
+      preserveAspectRatio: normalizeImageAspect(element.preserveAspectRatio, id),
+      layerId,
+      ...transforms
+    };
+  }
+  if (element.type === "svg-image") {
+    return {
+      id, type: "svg-image", xMm, yMm,
+      widthMm: positiveNumber(element.widthMm, `Element ${id} widthMm`),
+      heightMm: positiveNumber(element.heightMm, `Element ${id} heightMm`),
+      svgDataUri: normalizeSvgDataUri(element.svgDataUri, id),
+      layerId,
+      ...transforms
+    };
   }
   throw new RangeError(`Element ${id} has unsupported type: ${element.type}`);
 }
@@ -201,15 +280,23 @@ export function renderSvg(input) {
       nodesByLayer.get(layer.id).push(`<path id="${escapeXml(element.id)}" d="${escapeXml(path.encode())}" fill="${fill}" stroke="${layer.color}"${pathTransform}/>`);
       continue;
     }
+    if (element.type === "image") {
+      nodesByLayer.get(layer.id).push(`<image id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" href="${escapeXml(element.imageDataUri)}" preserveAspectRatio="${element.preserveAspectRatio}"${transform}/>`);
+      continue;
+    }
+    if (element.type === "svg-image") {
+      nodesByLayer.get(layer.id).push(`<image id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" href="${escapeXml(element.svgDataUri)}" preserveAspectRatio="xMidYMid meet"${transform}/>`);
+      continue;
+    }
     nodesByLayer.get(layer.id).push(`<rect id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" fill="${fill}" stroke="${layer.color}"${transform}/>`);
   }
   const layerGroups = document.layers.map((layer) =>
-    `<g data-layer-id="${escapeXml(layer.id)}" data-operation="${layer.operation}" data-color="${layer.color}">${nodesByLayer.get(layer.id).join("\n")}</g>`
+    `<g data-layer-id="${escapeXml(layer.id)}" data-layer-name="${escapeXml(layer.name)}" data-operation="${layer.operation}" data-color="${layer.color}" data-feed-mm-per-minute="${layer.feedMmPerMinute}" data-power-percent="${layer.powerPercent}" data-passes="${layer.passes}" data-fill-spacing-mm="${layer.fillSpacingMm}" data-enabled="${layer.enabled}" data-visible="${layer.visible}" data-locked="${layer.locked}">${nodesByLayer.get(layer.id).join("\n")}</g>`
   );
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${document.widthMm}mm" height="${document.heightMm}mm" viewBox="0 0 ${document.widthMm} ${document.heightMm}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" data-commburn-version="1" width="${document.widthMm}mm" height="${document.heightMm}mm" viewBox="0 0 ${document.widthMm} ${document.heightMm}">`,
     `<g fill="#172033" stroke-linecap="round" stroke-linejoin="round">`,
     ...layerGroups,
     `</g>`,

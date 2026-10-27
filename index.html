@@ -13,7 +13,7 @@
       <nav class="menu-bar" aria-label="Menu principal">
         <details class="menu"><summary>Arquivo</summary><div class="menu-popover">
           <button type="button" data-action="new">Novo trabalho</button>
-          <button type="button" data-action="import-svg">Importar SVG</button>
+          <button type="button" data-action="import-svg">Importar SVG ou imagem</button>
           <button type="button" data-action="export">Exportar SVG</button>
         </div></details>
         <details class="menu"><summary>Inserir</summary><div class="menu-popover">
@@ -32,11 +32,18 @@
         <section class="panel tool-panel" data-ui-module="action-toolbar" data-extension-slot="toolbar-tools">
           <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌘</span><div><h2>Ação</h2><p>Escolha como interagir com os objetos</p></div></div>
           <div class="tool-grid" id="action-toolbar" role="toolbar" aria-label="Ferramentas de objeto"></div>
-          <p class="tool-status" id="tool-status" role="status">Selecionar: clique em um objeto.</p>
+          <p class="tool-status" id="tool-status" role="status">Selecionar: clique, arraste uma caixa ou use Shift+clique.</p>
         </section>
         <section class="panel" data-ui-module="svg-import" data-extension-slot="document-settings">
-          <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2>Importar vetor</h2><p>SVG seguro, convertido em objetos editáveis</p></div></div>
-          <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importar formas e caminhos SVG para a camada ativa.">Importar arquivo SVG</button>
+          <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2>Importar vetor ou imagem</h2><p>SVG visual completo ou vetores editáveis</p></div></div>
+          <label class="field">Modo de importação SVG
+            <select id="svg-import-mode">
+              <option value="visual">Preservar aparência completa</option>
+              <option value="editable">Converter para vetores editáveis</option>
+            </select>
+          </label>
+          <p class="help-text">O modo visual conserva os recursos gráficos como um único objeto. Scripts e eventos são removidos; referências externas não são carregadas.</p>
+          <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importe SVG no modo visual ou converta a geometria editável; imagens raster são incorporadas.">Importar arquivo</button>
         </section>
 
         <section class="panel" data-ui-module="document-settings" data-extension-slot="document-settings">
@@ -97,6 +104,8 @@
 
         <section class="panel inspector-panel" id="object-inspector" data-ui-module="object-inspector" data-extension-slot="object-inspector" hidden>
           <div class="panel-heading"><span class="section-icon icon-violet icon-blue" aria-hidden="true">⚙</span><div><h2>Propriedades do objeto</h2><p id="inspector-kind">Objeto selecionado</p></div></div>
+          <p class="help-text multi-selection-message" id="multi-selection-message" hidden>Arraste para mover todos. Use Shift+clique ou uma caixa para ajustar a seleção; Delete e Duplicar atuam em todos.</p>
+          <div id="single-selection-fields">
           <div id="text-inspector-fields">
             <label class="field">Texto<textarea id="object-text" rows="2"></textarea></label>
             <label class="field">Fonte<select id="object-font"><option value="sans-serif">Sem serifa</option><option value="serif">Com serifa</option><option value="monospace">Monoespaçada</option></select></label>
@@ -116,6 +125,7 @@
           </div>
           <label class="field">Inclinação Y<input id="object-skew-y" type="number" min="-79" max="79" step="1"><span class="unit-note">graus</span></label>
           <label class="field">Camada<select id="object-layer"></select></label>
+          </div>
           <div class="editor-actions"><button class="button button-secondary" id="duplicate-selection" type="button">Duplicar</button><button class="button button-danger" id="remove-selection" type="button">Remover</button></div>
         </section>
 
@@ -135,7 +145,7 @@
           <label class="safety-check"><input id="safety-confirmed" type="checkbox"><span>Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
           <button class="button button-primary full-width" id="start-machine-job" type="button" disabled>Enviar contornos à máquina</button>
           <button class="button button-danger full-width" id="hold-machine-job" type="button" disabled>Parar envio e solicitar pausa</button>
-          <p class="help-text">O adaptador atual aceita retângulos sem transformação; preenchimento raster e passes são controlados por camada. Textos, elipses, linhas e formas transformadas são recusados. A pausa não substitui o botão de emergência.</p>
+          <p class="help-text">O adaptador atual aceita retângulos sem transformação; preenchimento raster e passes são controlados por camada. Textos, imagens, elipses, linhas e formas transformadas são recusados. A pausa não substitui o botão de emergência.</p>
         </section>
       </aside>
 
@@ -145,7 +155,7 @@
           <div class="board-frame" id="board-frame" data-ui-module="canvas" data-extension-slot="canvas">
             <div class="ruler ruler-top" id="ruler-x" aria-hidden="true"></div>
             <div class="ruler ruler-left" id="ruler-y" aria-hidden="true"></div>
-            <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial"><g id="objects"></g></svg>
+            <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial"><g id="objects"></g><rect id="selection-marquee" class="selection-marquee" visibility="hidden" pointer-events="none"/></svg>
           </div>
           <div class="stage-note"><span class="status-dot"></span> Escala e medidas em milímetros</div>
         </div>
@@ -153,7 +163,7 @@
       </section>
     </main>
     <div id="notice" class="notice" role="status" aria-live="polite"></div>
-    <input id="svg-file-input" type="file" accept=".svg,image/svg+xml" hidden>
+    <input id="svg-file-input" type="file" accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp" hidden>
     <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar atalhos">×</button></form>
       <h2 id="shortcuts-title">Atalhos de teclado</h2>

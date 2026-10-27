@@ -7,6 +7,7 @@ Este guia descreve os limites atuais da interface e como acrescentar ferramentas
 - `src/app.js`: composição dos módulos, estado de documento e ligação dos controles.
 - `src/ui/toolbar.js`: catálogo de ferramentas, atalhos visuais e estado ativo.
 - `src/ui/canvas-controller.js`: seleção, conversão de coordenadas SVG/mm e interações de ponteiro.
+- `src/ui/selection.js`: operações puras para substituir, alternar e combinar conjuntos selecionados.
 - `src/ui/layers-panel.js`: interface delegada de camadas e configurações de operação.
 - `src/ui/history.js`: snapshots imutáveis para desfazer/refazer.
 - `src/ui/shortcuts.js`: mapeamento global de atalhos; preserva a digitação em controles editáveis.
@@ -22,13 +23,15 @@ A barra de cabeçalho da tela de desenho é seguida por uma área de trabalho al
 
 ## Objetos e ações
 
-Tipos do modelo atual: `text`, `rect`, `ellipse`, `line` e `path`. Caminhos mantêm dados SVG editáveis e dimensões/posições em milímetros; a exportação geral os preserva, mas o adaptador GRBL ainda os recusa. Dimensões e coordenadas são milímetros; rotação e distorção são graus. `rotationDeg` gira em torno do centro geométrico (texto: ponto de ancoragem); `skewXDeg` e `skewYDeg` aplicam cisalhamento afim, limitados a menos de 80 graus. “Distorcer/Warp” neste estágio significa cisalhamento, não malha livre ou deformação por nós.
+Tipos do modelo atual: `text`, `rect`, `ellipse`, `line`, `path`, `image` e `svg-image`. Caminhos mantêm dados SVG editáveis; raster e SVG estático incorporados são objetos visuais posicionáveis e preservados no SVG exportado. O adaptador GRBL recusa ambos os tipos de imagem. Dimensões e coordenadas são milímetros; rotação e distorção são graus. `rotationDeg` gira em torno do centro geométrico (texto: ponto de ancoragem); `skewXDeg` e `skewYDeg` aplicam cisalhamento afim, limitados a menos de 80 graus. “Distorcer/Warp” neste estágio significa cisalhamento, não malha livre ou deformação por nós.
 
 ## Importação SVG
 
-O controle de importação usa o `svgson` local (MIT) para ler a estrutura e `svg-pathdata` (MIT) para normalizar caminhos; nenhum código é obtido da rede. O núcleo recebe a árvore já analisada e importa `svg`, grupos simples, `rect`, `circle`, `ellipse`, `line`, `path`, `polygon`, `polyline` e texto sem marcação aninhada. As dimensões físicas aceitam `mm`, `cm`, `in`, `px`, `pt` ou `pc`; geometrias seguem o `viewBox` e seu alinhamento `preserveAspectRatio`, e o tamanho final é convertido para mm.
+O controle oferece dois modos. **Preservar aparência completa** incorpora o SVG estático como um objeto, delegando filtros, gradientes, máscaras, padrões, CSS e demais recursos visuais ao renderizador SVG do navegador. **Converter para vetores editáveis** usa o subconjunto geométrico abaixo. O parser `svgson` e `svg-pathdata` são locais e MIT; nenhum código é obtido da rede. As dimensões físicas aceitam `mm`, `cm`, `in`, `px`, `pt` ou `pc`; a viewport original é convertida para mm.
 
-Scripts, referências externas, imagens, CSS (`style`), atributos de evento e transforms SVG de formas/grupos são recusados com erro explícito. Texto aceita transforms afins que resultem em escala uniforme, rotação e translação; escala não uniforme, reflexão e distorção de texto são recusadas, pois o modelo não as preserva fielmente. Formatação de apresentação simples pode ser descartada, pois cor/operação vêm da camada ativa. SVGs com elementos ou transformações ainda não suportados não são importados parcialmente. O limite do arquivo na interface é 10 MB; a árvore aceita até 20.000 elementos e 64 níveis. Os vetores importados são adicionados à camada ativa desbloqueada e continuam selecionáveis, movíveis, transformáveis e com `pathData` editável no inspetor. O caminho de importação não implica suporte do adaptador GRBL.
+O modo visual conserva recursos SVG estáticos ou animados mesmo que não sejam editáveis no modelo. Scripts e atributos de evento são removidos; referências externas, CSS `@import` e URLs CSS externas são recusados. Um `DOCTYPE svg` é removido sem buscar DTDs externos. Entidades textuais internas simples são expandidas com limites de tamanho e recursão; entidades externas/de parâmetro e defaults `ATTLIST` não são suportados. Referências XML predefinidas e numéricas são decodificadas. `foreignObject` é preservado após a mesma sanitização de scripts, eventos e referências remotas. O modo vetorial ignora `metadata`, `title` e `desc` (conteúdo não gráfico), aplica e compõe transforms `matrix`, `translate`, `scale`, `rotate`, `skewX` e `skewY` em grupos, formas, paths, texto e imagens compatíveis, e converte grupos, `rect`, `circle`, `ellipse`, `line`, `path`, `polygon`, `polyline`, texto plano e imagens raster incorporadas. Formas giradas/distorcidas viram paths editáveis; transforms de texto devem preservar escala uniforme; imagens aceitam transforms com eixos ortogonais e sem reflexão. A importação da interface atribui todos os objetos vetoriais à camada ativa; a API do núcleo ainda permite preservar camadas incorporadas quando desejado. Recursos que não podem ser representados pelo modelo são recusados em vez de importados parcialmente. O modo visual conserva a aparência do SVG como objeto único, sem criar camadas separadas; a importação vetorial pela API pode restaurar metadados de camadas quando `forceLayerId` não é informado. O limite de arquivo na interface é 10 MB; a árvore aceita até 20.000 elementos e 64 níveis. Imagens raster avulsas são incorporadas no documento, limitadas a 10 MB, dimensionadas inicialmente a 96 dpi e ajustadas dentro da área em milímetros; podem ser redimensionadas no inspetor. Objetos de imagem não são aceitos pelo adaptador GRBL.
+
+Na ferramenta Selecionar (`V`), Shift+clique alterna objetos na seleção e arrastar no espaço vazio cria uma caixa de seleção. A ferramenta Seleção múltipla (`Q`) adiciona objetos por clique ou caixa. O conjunto selecionado pode ser movido, duplicado, removido e copiado/colado; `Ctrl+C` copia sem modificar o original e `Ctrl+V` cola com deslocamento de 5 mm na camada ativa, mesmo se os objetos copiados vierem de outra camada. Campos de texto mantêm os atalhos nativos do navegador. Uma operação em objetos de camadas bloqueadas é recusada; colar exige uma camada ativa desbloqueada. Rotação e distorção continuam disponíveis para um objeto por vez. Cada cartão de camada tem ação para duplicar a configuração da camada e todos os seus objetos na mesma posição; a cópia começa desbloqueada.
 
 A sidebar tem altura limitada à área visível no desktop e rolagem vertical própria; em telas estreitas a rolagem é limitada ao painel de ferramentas antes da área de desenho.
 
@@ -51,12 +54,15 @@ Atalhos:
 | Tecla | Ação |
 |---|---|
 | `V` | Selecionar |
+| `Q` | Seleção múltipla |
 | `M` | Mover |
 | `E` | Editar |
 | `R` | Rotacionar |
 | `W` | Distorcer |
-| `Delete` | Remover seleção |
-| `Ctrl+D` | Duplicar seleção |
+| `Ctrl+C` | Copiar seleção |
+| `Ctrl+V` | Colar na camada ativa |
+| `Delete` | Remover seleção (inclusive múltipla) |
+| `Ctrl+D` | Duplicar seleção (inclusive múltipla) |
 | `Ctrl+Z` / `Ctrl+Y` | Desfazer / refazer |
 | `Ctrl+Shift+Z` | Refazer |
 | `Ctrl+S` | Exportar SVG |

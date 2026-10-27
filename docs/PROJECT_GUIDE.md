@@ -15,7 +15,7 @@ Um editor vetorial simples e acolhedor para preparar trabalhos de gravação e c
 
 ## Rascunho funcional atual
 
-O protótipo em `index.html` permite definir a área em mm, alternar orientação, escolher o canto de origem, inverter X/Y, criar/editar texto e formas, importar SVG como objetos vetoriais editáveis, organizar objetos em camadas de gravação/corte/preenchimento e exportar SVG. A sidebar rola dentro da altura visível da tela. Ferramentas de seleção, mover, editar, rotacionar e distorcer compartilham o modelo e a conversão mm/SVG. A CLI cria SVG do mesmo documento JSON. O servidor local opcional abre portas seriais para controladores compatíveis com GRBL e envia apenas contornos retangulares sem transformação depois de confirmação explícita. O guia da [arquitetura da interface](./UI_ARCHITECTURE.md) documenta módulos, réguas, atalhos, importação segura e slots de extensão.
+O protótipo em `index.html` permite definir a área em mm, alternar orientação, escolher o canto de origem, inverter X/Y, criar/editar texto e formas, preservar a aparência de SVGs como objetos visuais ou converter geometria compatível em vetores editáveis, incorporar imagens PNG/JPEG/WebP, organizar objetos em camadas coloridas de gravação/corte/preenchimento e exportar SVG. A seleção aceita Shift+clique e caixa de seleção; mover, duplicar, copiar/colar e remover atuam sobre grupos selecionados. Objetos copiados podem ser colados na camada ativa; camadas podem ser duplicadas com sua configuração e objetos. A sidebar rola dentro da altura visível da tela. Ferramentas de seleção, mover, editar, rotacionar e distorcer compartilham o modelo e a conversão mm/SVG. A CLI cria SVG do mesmo documento JSON. O servidor local opcional abre portas seriais para controladores compatíveis com GRBL e envia apenas contornos retangulares sem transformação depois de confirmação explícita. O guia da [arquitetura da interface](./UI_ARCHITECTURE.md) documenta módulos, réguas, atalhos, importação segura e slots de extensão.
 
 ## Estrutura planejada
 
@@ -29,7 +29,7 @@ O protótipo em `index.html` permite definir a área em mm, alternar orientaçã
 ## Etapas sugeridas
 
 1. **Rascunho:** editor SVG básico, valores métricos, edição de texto, coordenadas manuais, exportação e testes.
-2. **Documentos:** seleção/manipulação vetorial, desfazer/refazer, salvamento de projeto e importação controlada.
+2. **Documentos:** desfazer/refazer, salvamento de projeto, seleção/manipulação avançada e importação controlada.
 3. **Máquinas:** o primeiro adaptador GRBL comunica pela biblioteca MIT `serialport`; adicionar outros protocolos apenas com testes em equipamento. Operação exige confirmação e valores de avanço/potência informados para a máquina pelo usuário.
 4. **Extensões:** API de plugins versionada, manifesto, permissões, licenciamento e compatibilidade.
 5. **Robustez:** testes em diferentes tamanhos de tela, acessibilidade, arquivos grandes e matrizes de equipamentos suportadas.
