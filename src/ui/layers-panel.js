@@ -5,9 +5,9 @@ const OPERATIONS = [
 ];
 
 export class LayersPanel {
-  constructor(root, { onSelect, onAdd, onUpdate, onDelete }) {
+  constructor(root, { onSelect, onAdd, onUpdate, onDelete, onDuplicate }) {
     this.root = root;
-    this.callbacks = { onSelect, onAdd, onUpdate, onDelete };
+    this.callbacks = { onSelect, onAdd, onUpdate, onDelete, onDuplicate };
     root.addEventListener("click", (event) => this.handleClick(event));
     root.addEventListener("change", (event) => this.handleChange(event));
   }
@@ -47,13 +47,21 @@ export class LayersPanel {
       remove.title = "Remover camada e mover seus objetos para outra camada";
       remove.setAttribute("aria-label", remove.title);
       remove.disabled = layers.length <= 1;
-      header.append(select, remove);
+      const duplicate = document.createElement("button");
+      duplicate.className = "layer-duplicate";
+      duplicate.type = "button";
+      duplicate.dataset.layerDuplicate = "";
+      duplicate.textContent = "⧉";
+      duplicate.title = "Duplicar camada e seus objetos";
+      duplicate.setAttribute("aria-label", duplicate.title);
+      header.append(select, duplicate, remove);
 
       const settings = document.createElement("div");
       settings.className = "layer-settings";
       settings.append(
         this.createField("Tipo de operação", this.createSelect("operation", layer.operation, OPERATIONS)),
         this.createField("Nome", this.createInput("name", layer.name, "text")),
+        this.createField("Cor de visualização", this.createInput("color", layer.color, "color")),
         this.createField("Avanço (mm/min)", this.createInput("feedMmPerMinute", layer.feedMmPerMinute, "number", { min: "0.1", step: "10" })),
         this.createField("Potência (%)", this.createInput("powerPercent", layer.powerPercent, "number", { min: "0.1", max: "100", step: "1" })),
         this.createField("Passes", this.createInput("passes", layer.passes, "number", { min: "1", max: "100", step: "1" }))
@@ -131,6 +139,8 @@ export class LayersPanel {
     if (!item) return;
     if (event.target.closest("[data-layer-delete]")) {
       this.callbacks.onDelete(item.dataset.layerId);
+    } else if (event.target.closest("[data-layer-duplicate]")) {
+      this.callbacks.onDuplicate(item.dataset.layerId);
     } else if (event.target.closest("[data-layer-select]")) {
       this.callbacks.onSelect(item.dataset.layerId);
     }

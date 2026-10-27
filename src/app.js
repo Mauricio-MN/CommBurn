@@ -5,7 +5,8 @@ import { installShortcuts, SHORTCUTS } from "./ui/shortcuts.js";
 import { connectToolbar } from "./ui/toolbar.js";
 import { installTooltips } from "./ui/tooltips.js";
 import { LayersPanel } from "./ui/layers-panel.js";
-import { importSvgTree, validateSvgSource } from "./core/svg-import.js";
+import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "./core/svg-import.js";
+import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 
 const byId = (id) => document.getElementById(id);
 const widthInput = byId("width");
@@ -33,8 +34,11 @@ const safetyCheckbox = byId("safety-confirmed");
 
 let currentDocument = createDocument({ widthMm: 180, heightMm: 120 });
 let selectedId = null;
+let selectedIds = [];
 let activeLayerId = currentDocument.layers[0].id;
 let nextId = 1;
+let copiedElements = [];
+let pasteSequence = 0;
 let activeTool = "select";
 let noticeTimer;
 let machineConnected = false;
@@ -90,10 +94,25 @@ function resizeBoard(widthMm = currentDocument.widthMm, heightMm = currentDocume
 
 function syncInspector() {
   const inspector = byId("object-inspector");
+  const selectedElements = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
+  selectedIds = selectedElements.map((element) => element.id);
+  selectedId = selectedIds.at(-1) ?? null;
   const selected = currentDocument.elements.find((element) => element.id === selectedId);
-  inspector.hidden = !selected;
+  const isMultiple = selectedElements.length > 1;
+  inspector.hidden = selectedElements.length === 0;
+  byId("single-selection-fields").hidden = isMultiple;
+  byId("multi-selection-message").hidden = !isMultiple;
   renderLayers();
   if (!selected) return;
+  if (isMultiple) {
+    byId("inspector-kind").textContent = `${selectedElements.length} objetos selecionados`;
+    const hasLockedLayer = selectedElements.some((element) =>
+      currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked
+    );
+    removeButton.disabled = hasLockedLayer;
+    byId("duplicate-selection").disabled = hasLockedLayer;
+    return;
+  }
 
   byId("inspector-kind").textContent = `${selected.type} · ${selected.id}`;
   const isText = selected.type === "text";
@@ -118,6 +137,7 @@ function syncInspector() {
   byId("object-layer").replaceChildren(...currentDocument.layers.map((layer) => new Option(layer.name, layer.id)));
   byId("object-layer").value = selected.layerId;
   removeButton.disabled = layerLocked;
+  byId("duplicate-selection").disabled = layerLocked;
 }
 
 function renderLayers() {
@@ -126,11 +146,31 @@ function renderLayers() {
 }
 
 function selectObject(id) {
+  selectedIds = id ? [id] : [];
   selectedId = id;
   const selected = currentDocument.elements.find((element) => element.id === id);
   if (selected) activeLayerId = selected.layerId;
   syncInspector();
   renderPreview();
+}
+
+function changeSelection(ids) {
+  selectedIds = [...new Set(ids)].filter((id) => currentDocument.elements.some((element) => element.id === id));
+  selectedId = selectedIds.at(-1) ?? null;
+  if (selectedIds.length === 1) {
+    const selected = currentDocument.elements.find((element) => element.id === selectedId);
+    if (selected) activeLayerId = selected.layerId;
+  }
+  syncInspector();
+  renderPreview();
+}
+
+function selectObjectWithOptions(id, options = {}) {
+  changeSelection(selectOne(selectedIds, id, options));
+}
+
+function selectObjects(ids, options = {}) {
+  changeSelection(mergeSelection(selectedIds, ids, options));
 }
 
 function updateSelected(patch, saveHistory = true, refreshInspector = true) {
@@ -142,6 +182,28 @@ function updateSelected(patch, saveHistory = true, refreshInspector = true) {
     );
     currentDocument = createDocument({ ...currentDocument, elements });
     if (refreshInspector) syncInspector();
+    renderPreview();
+    if (saveHistory) commitHistory();
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function updateMany(updates, saveHistory = true) {
+  const patches = new Map(updates.map(({ id, patch }) => [id, patch]));
+  try {
+    for (const id of patches.keys()) {
+      const element = currentDocument.elements.find((candidate) => candidate.id === id);
+      if (!element) throw new RangeError(`Objeto selecionado não encontrado: ${id}`);
+      if (currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked) {
+        throw new Error("Desbloqueie todas as camadas selecionadas antes de transformar os objetos.");
+      }
+    }
+    const elements = currentDocument.elements.map((element) =>
+      patches.has(element.id) ? { ...element, ...patches.get(element.id) } : element
+    );
+    currentDocument = createDocument({ ...readDocument(), elements });
+    if (selectedIds.length === 1) syncInspector();
     renderPreview();
     if (saveHistory) commitHistory();
   } catch (error) {
@@ -233,19 +295,28 @@ function renderPreview() {
 
     const svgDocument = new DOMParser().parseFromString(renderSvg(currentDocument), "image/svg+xml");
     if (svgDocument.querySelector("parsererror")) throw new Error("Não foi possível desenhar este documento.");
+    const selection = new Set(selectedIds);
     const nodes = Array.from(svgDocument.querySelectorAll("[id]"), (node) => {
       const imported = document.importNode(node, true);
       imported.dataset.id = imported.getAttribute("id");
       imported.dataset.layerId = node.closest("[data-layer-id]")?.getAttribute("data-layer-id") ?? "";
       const layer = currentDocument.layers.find((candidate) => candidate.id === imported.dataset.layerId);
       if (layer?.locked) imported.dataset.locked = "true";
-      if (imported.dataset.id === selectedId) imported.classList.add("selected");
+      if (selection.has(imported.dataset.id)) imported.classList.add("selected");
       return imported;
     });
     objects.replaceChildren(...nodes);
-    selectionStatus.textContent = selectedId ? `Selecionado: ${selectedId}` : "Nenhum objeto selecionado";
-    const selected = currentDocument.elements.find((element) => element.id === selectedId);
-    removeButton.disabled = !selected || currentDocument.layers.find((layer) => layer.id === selected.layerId)?.locked;
+    selectionStatus.textContent = selectedIds.length === 0
+      ? "Nenhum objeto selecionado"
+      : selectedIds.length === 1
+        ? `Selecionado: ${selectedId}`
+        : `${selectedIds.length} objetos selecionados`;
+    const selected = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
+    const hasLockedLayer = selected.some((element) =>
+      currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked
+    );
+    removeButton.disabled = selected.length === 0 || hasLockedLayer;
+    byId("duplicate-selection").disabled = selected.length === 0 || hasLockedLayer;
     renderLayers();
   } catch (error) {
     showNotice(error.message);
@@ -270,6 +341,7 @@ function addText() {
     layerId: activeLayerId
   };
   currentDocument = createDocument({ ...baseDocument, elements: [...baseDocument.elements, element] });
+  selectedIds = [element.id];
   selectedId = element.id;
   syncInspector();
   renderPreview();
@@ -297,6 +369,7 @@ function addShape() {
     throw new RangeError("A linha precisa ter comprimento maior que zero.");
   }
   currentDocument = createDocument({ ...baseDocument, elements: [...baseDocument.elements, element] });
+  selectedIds = [element.id];
   selectedId = element.id;
   syncInspector();
   renderPreview();
@@ -320,27 +393,130 @@ async function importSvgFile(file) {
   if (file.size > 10 * 1024 * 1024) throw new RangeError("O SVG deve ter no máximo 10 MB.");
   const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
   if (!layer || layer.locked) throw new Error("Selecione uma camada desbloqueada para importar objetos.");
-  if (!globalThis.svgson?.parseSync) throw new Error("O parser SVG local não foi carregado.");
+  if (!globalThis.svgson?.parseSync || !globalThis.svgson?.stringify) throw new Error("O parser SVG local não foi carregado.");
 
   const source = await file.text();
-  validateSvgSource(source);
-  const tree = globalThis.svgson.parseSync(source);
-  const imported = importSvgTree(tree, { layerId: activeLayerId, idPrefix: `svg-${nextId}` });
+  const sanitizedSource = validateSvgSource(source);
+  const tree = globalThis.svgson.parseSync(sanitizedSource);
+  if (byId("svg-import-mode").value === "visual") {
+    const viewport = getSvgViewport(tree);
+    const sanitized = sanitizeSvgForVisual(tree, globalThis.svgson);
+    const svgDataUri = encodeSvgDataUri(sanitized.source);
+    const fit = Math.min(1, currentDocument.widthMm / viewport.widthMm, currentDocument.heightMm / viewport.heightMm);
+    const element = {
+      id: `svg-image-${nextId++}`,
+      type: "svg-image",
+      xMm: 0,
+      yMm: 0,
+      widthMm: viewport.widthMm * fit,
+      heightMm: viewport.heightMm * fit,
+      svgDataUri,
+      layerId: activeLayerId
+    };
+    currentDocument = createDocument({ ...readDocument(), elements: [...currentDocument.elements, element] });
+    selectedIds = [element.id];
+    selectedId = element.id;
+    syncInspector();
+    renderPreview();
+    commitHistory();
+    showNotice(sanitized.removedActiveContent
+      ? "SVG visual incorporado. Scripts e eventos foram removidos; conteúdo externo não é carregado."
+      : "SVG importado como objeto visual incorporado, sem execução de scripts nem conteúdo remoto.");
+    return;
+  }
+
+  const imported = importSvgTree(tree, {
+    layerId: activeLayerId,
+    forceLayerId: activeLayerId,
+    idPrefix: `svg-${nextId}`
+  });
   const elements = [...currentDocument.elements, ...imported.elements];
   currentDocument = createDocument({
     ...currentDocument,
     widthMm: Math.max(currentDocument.widthMm, imported.widthMm),
     heightMm: Math.max(currentDocument.heightMm, imported.heightMm),
+    layers: [...currentDocument.layers, ...imported.layers.filter((candidate) => candidate.id !== activeLayerId)],
     elements
   });
   widthInput.value = currentDocument.widthMm;
   heightInput.value = currentDocument.heightMm;
   nextId += imported.elements.length;
-  selectedId = imported.elements.at(-1).id;
+  selectedIds = [imported.elements.at(-1).id];
+  selectedId = selectedIds[0];
   syncInspector();
   renderPreview();
   commitHistory();
   showNotice(`SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`);
+}
+
+function encodeSvgDataUri(source) {
+  const bytes = new TextEncoder().encode(source);
+  if (bytes.length > 10 * 1024 * 1024) throw new RangeError("O SVG sanitizado deve ter no máximo 10 MB.");
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return `data:image/svg+xml;base64,${btoa(binary)}`;
+}
+
+async function importImageFile(file) {
+  if (!file) return;
+  const mimeByExtension = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
+  const extension = file.name.toLowerCase().split(".").at(-1);
+  const mimeType = ["image/png", "image/jpeg", "image/webp"].includes(file.type)
+    ? file.type
+    : mimeByExtension[extension];
+  if (!mimeType) {
+    throw new Error("Escolha uma imagem PNG, JPEG ou WebP.");
+  }
+  if (file.size === 0 || file.size > 10 * 1024 * 1024) {
+    throw new RangeError("A imagem deve ter entre 1 byte e 10 MB.");
+  }
+  const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
+  if (!layer || layer.locked) throw new Error("Selecione uma camada desbloqueada para importar objetos.");
+
+  const bitmap = await createImageBitmap(file);
+  let imageDataUri;
+  const pixelWidth = bitmap.width;
+  const pixelHeight = bitmap.height;
+  try {
+    imageDataUri = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => {
+        if (typeof reader.result !== "string") reject(new Error("Não foi possível ler a imagem."));
+        else resolve(reader.result.replace(/^data:[^;]+;/, `data:${mimeType};`));
+      }, { once: true });
+      reader.addEventListener("error", () => reject(reader.error ?? new Error("Não foi possível ler a imagem.")), { once: true });
+      reader.readAsDataURL(new Blob([file], { type: mimeType }));
+    });
+  } finally {
+    bitmap.close();
+  }
+  if (!pixelWidth || !pixelHeight) throw new RangeError("A imagem precisa ter dimensões válidas.");
+
+  const mmPerPixel = 25.4 / 96;
+  const fit = Math.min(1, currentDocument.widthMm / (pixelWidth * mmPerPixel), currentDocument.heightMm / (pixelHeight * mmPerPixel));
+  const element = {
+    id: `image-${nextId++}`,
+    type: "image",
+    xMm: 0,
+    yMm: 0,
+    widthMm: pixelWidth * mmPerPixel * fit,
+    heightMm: pixelHeight * mmPerPixel * fit,
+    imageDataUri,
+    preserveAspectRatio: "xMidYMid meet",
+    rotationDeg: 0,
+    skewXDeg: 0,
+    skewYDeg: 0,
+    layerId: activeLayerId
+  };
+  currentDocument = createDocument({ ...readDocument(), elements: [...currentDocument.elements, element] });
+  selectedIds = [element.id];
+  selectedId = element.id;
+  syncInspector();
+  renderPreview();
+  commitHistory();
+  showNotice("Imagem incorporada ao documento e dimensionada em milímetros (96 dpi).");
 }
 
 function newDocument() {
@@ -352,6 +528,7 @@ function newDocument() {
   flipXInput.checked = false;
   flipYInput.checked = false;
   selectedId = null;
+  selectedIds = [];
   textInput.value = "";
   currentDocument = readDocument();
   syncInspector();
@@ -424,33 +601,130 @@ removeButton.addEventListener("click", removeSelectedObject);
 byId("duplicate-selection").addEventListener("click", duplicateSelectedObject);
 
 function removeSelectedObject() {
-  if (!selectedId) return;
-  const selected = currentDocument.elements.find((element) => element.id === selectedId);
-  if (currentDocument.layers.find((layer) => layer.id === selected?.layerId)?.locked) {
-    showNotice("Desbloqueie a camada antes de remover objetos.");
+  if (selectedIds.length === 0) return;
+  const selected = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
+  if (selected.some((element) => currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked)) {
+    showNotice("Desbloqueie todas as camadas selecionadas antes de remover objetos.");
     return;
   }
-  currentDocument.elements = currentDocument.elements.filter((element) => element.id !== selectedId);
+  currentDocument = createDocument({
+    ...currentDocument,
+    elements: currentDocument.elements.filter((element) => !selectedIds.includes(element.id))
+  });
+  selectedIds = [];
   selectedId = null;
   syncInspector();
   renderPreview();
   commitHistory();
 }
 
-function duplicateSelectedObject() {
+function copySelectedObjects() {
+  const selected = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
+  if (selected.length === 0) {
+    showNotice("Selecione ao menos um objeto para copiar.");
+    return;
+  }
+  copiedElements = selected.map((element) => ({ ...element }));
+  pasteSequence = 0;
+  showNotice(`${copiedElements.length} objeto(s) copiado(s). Selecione a camada de destino e use Ctrl+V.`);
+}
+
+function pasteCopiedObjects() {
   try {
-    const baseDocument = readDocument();
-    const selected = baseDocument.elements.find((element) => element.id === selectedId);
-    if (!selected) return;
-    if (baseDocument.layers.find((layer) => layer.id === selected.layerId)?.locked) {
-      throw new Error("Desbloqueie a camada antes de duplicar objetos.");
+    if (copiedElements.length === 0) {
+      showNotice("Nenhum objeto copiado. Selecione objetos e use Ctrl+C primeiro.");
+      return;
     }
-    const duplicate = { ...selected, id: `${selected.type}-${nextId++}`, xMm: selected.xMm + 5, yMm: selected.yMm + 5 };
-    currentDocument = createDocument({ ...baseDocument, elements: [...baseDocument.elements, duplicate] });
-    selectedId = duplicate.id;
+    const targetLayer = currentDocument.layers.find((layer) => layer.id === activeLayerId);
+    if (!targetLayer || targetLayer.locked) {
+      throw new Error("Selecione uma camada de destino desbloqueada antes de colar.");
+    }
+    pasteSequence += 1;
+    const offsetMm = pasteSequence * 5;
+    const pasted = copiedElements.map((element) => ({
+      ...element,
+      id: `${element.type}-${crypto.randomUUID()}`,
+      xMm: element.xMm + offsetMm,
+      yMm: element.yMm + offsetMm,
+      layerId: targetLayer.id
+    }));
+    currentDocument = createDocument({
+      ...readDocument(),
+      elements: [...currentDocument.elements, ...pasted]
+    });
+    selectedIds = pasted.map((element) => element.id);
+    selectedId = selectedIds.at(-1);
     syncInspector();
     renderPreview();
     commitHistory();
+    showNotice(`${pasted.length} objeto(s) colado(s) na camada "${targetLayer.name}".`);
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function duplicateSelectedObject() {
+  try {
+    const baseDocument = readDocument();
+    const selected = baseDocument.elements.filter((element) => selectedIds.includes(element.id));
+    if (selected.length === 0) return;
+    if (selected.some((element) => baseDocument.layers.find((layer) => layer.id === element.layerId)?.locked)) {
+      throw new Error("Desbloqueie todas as camadas selecionadas antes de duplicar objetos.");
+    }
+    const duplicates = selected.map((element) => ({
+      ...element,
+      id: `${element.type}-${nextId++}`,
+      xMm: element.xMm + 5,
+      yMm: element.yMm + 5
+    }));
+    currentDocument = createDocument({ ...baseDocument, elements: [...baseDocument.elements, ...duplicates] });
+    selectedIds = duplicates.map((element) => element.id);
+    selectedId = selectedIds.at(-1);
+    syncInspector();
+    renderPreview();
+    commitHistory();
+  } catch (error) {
+    showNotice(error.message);
+  }
+}
+
+function duplicateLayer(layerId) {
+  try {
+    const source = currentDocument.layers.find((layer) => layer.id === layerId);
+    if (!source) throw new RangeError("A camada a duplicar não foi encontrada.");
+    const baseName = `${source.name} (cópia)`;
+    let name = baseName;
+    let suffix = 2;
+    while (currentDocument.layers.some((layer) => layer.name === name)) {
+      name = `${baseName} ${suffix++}`;
+    }
+    const duplicate = {
+      ...source,
+      id: `layer-${crypto.randomUUID()}`,
+      name,
+      locked: false
+    };
+    const sourceElements = currentDocument.elements.filter((element) => element.layerId === source.id);
+    const duplicatedElements = sourceElements.map((element) => ({
+      ...element,
+      id: `${element.type}-${crypto.randomUUID()}`,
+      layerId: duplicate.id
+    }));
+    const layerIndex = currentDocument.layers.findIndex((layer) => layer.id === source.id);
+    const layers = [...currentDocument.layers];
+    layers.splice(layerIndex + 1, 0, duplicate);
+    currentDocument = createDocument({
+      ...readDocument(),
+      layers,
+      elements: [...currentDocument.elements, ...duplicatedElements]
+    });
+    activeLayerId = duplicate.id;
+    selectedIds = duplicatedElements.map((element) => element.id);
+    selectedId = selectedIds.at(-1) ?? null;
+    syncInspector();
+    renderPreview();
+    commitHistory();
+    showNotice(`Camada "${source.name}" duplicada com ${duplicatedElements.length} objeto(s).`);
   } catch (error) {
     showNotice(error.message);
   }
@@ -464,7 +738,8 @@ function restoreDocument(snapshot) {
   flipXInput.checked = currentDocument.origin.flipX;
   flipYInput.checked = currentDocument.origin.flipY;
   if (!currentDocument.layers.some((layer) => layer.id === activeLayerId)) activeLayerId = currentDocument.layers[0].id;
-  if (!currentDocument.elements.some((element) => element.id === selectedId)) selectedId = null;
+  selectedIds = selectedIds.filter((id) => currentDocument.elements.some((element) => element.id === id));
+  selectedId = selectedIds.at(-1) ?? null;
   syncInspector();
   renderPreview();
 }
@@ -501,6 +776,7 @@ function addLayer() {
   currentDocument = createDocument({ ...currentDocument, layers: [...currentDocument.layers, layer] });
   activeLayerId = layer.id;
   selectedId = null;
+  selectedIds = [];
   syncInspector();
   renderPreview();
   commitHistory();
@@ -510,6 +786,7 @@ const layersPanel = new LayersPanel(byId("layers-list"), {
   onSelect: (layerId) => {
     activeLayerId = layerId;
     selectedId = null;
+    selectedIds = [];
     syncInspector();
     renderPreview();
   },
@@ -539,10 +816,14 @@ const layersPanel = new LayersPanel(byId("layers-list"), {
     syncInspector();
     renderPreview();
     commitHistory();
-  }
+  },
+  onDuplicate: duplicateLayer
 });
 
-byId("add-layer").addEventListener("click", addLayer);
+byId("add-layer").addEventListener("click", (event) => {
+  if (event.detail > 1) return;
+  addLayer();
+});
 byId("object-layer").addEventListener("change", (event) => {
   const layer = currentDocument.layers.find((candidate) => candidate.id === event.target.value);
   if (!layer || layer.locked) return;
@@ -564,8 +845,11 @@ const toolbar = connectToolbar(byId("action-toolbar"), (toolId) => {
 new CanvasController(artboard, {
   getDocument: () => currentDocument,
   getTool: () => activeTool,
-  select: selectObject,
+  getSelectedIds: () => [...selectedIds],
+  select: selectObjectWithOptions,
+  selectMany: selectObjects,
   deselect: () => selectObject(null),
+  notify: showNotice,
   update: (id, patch) => {
     selectedId = id;
     const element = currentDocument.elements.find((candidate) => candidate.id === id);
@@ -575,6 +859,7 @@ new CanvasController(artboard, {
     }
     updateSelected(patch, false);
   },
+  updateMany: (updates) => updateMany(updates, false),
   commit: commitHistory
 });
 
@@ -593,6 +878,8 @@ installShortcuts({
   },
   remove: removeSelectedObject,
   duplicate: duplicateSelectedObject,
+  copy: copySelectedObjects,
+  paste: pasteCopiedObjects,
   addText: () => {
     try { addText(); } catch (error) { showNotice(error.message); }
   },
@@ -610,7 +897,12 @@ for (const button of document.querySelectorAll('[data-action="import-svg"]')) {
 }
 byId("svg-file-input").addEventListener("change", async (event) => {
   try {
-    await importSvgFile(event.target.files[0]);
+    const file = event.target.files[0];
+    if (file?.type === "image/svg+xml" || file?.name.toLowerCase().endsWith(".svg")) {
+      await importSvgFile(file);
+    } else {
+      await importImageFile(file);
+    }
   } catch (error) {
     showNotice(error.message);
   } finally {

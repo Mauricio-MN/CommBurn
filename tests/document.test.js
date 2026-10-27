@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createDocument, renderGrblJob, renderSvg } from "../src/core/document.js";
 
+const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
+const embeddedSvg = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><circle cx="5" cy="5" r="4"/></svg>').toString("base64")}`;
+
 test("document dimensions, positions, and SVG output use millimetres", () => {
   const document = createDocument({
     widthMm: 180, heightMm: 120,
@@ -115,6 +118,53 @@ test("SVG paths remain editable, metric, and honor origin inversion", async () =
   assert.throws(() => createDocument({
     elements: [{ type: "path", xMm: 0, yMm: 0, pathData: "M nope" }]
   }), /path/i);
+});
+
+test("embedded raster images remain metric and are rejected by the GRBL adapter", () => {
+  const document = createDocument({
+    widthMm: 50,
+    heightMm: 40,
+    elements: [{
+      id: "photo", type: "image", xMm: 1.5, yMm: 2, widthMm: 20, heightMm: 10,
+      imageDataUri: onePixelPng, preserveAspectRatio: "xMidYMid meet"
+    }]
+  });
+
+  assert.match(renderSvg(document), /<image id="photo" x="1.5" y="2" width="20" height="10" href="data:image\/png;base64,/);
+  assert.throws(() => createDocument({
+    elements: [{ type: "image", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1, imageDataUri: "https://example.invalid/image.png" }]
+  }), /embedded PNG, JPEG, or WebP/);
+  assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /rectangles only/);
+});
+
+test("embedded SVG visual objects are preserved by SVG export and rejected by GRBL", () => {
+  const document = createDocument({
+    widthMm: 50,
+    heightMm: 40,
+    elements: [{
+      id: "complex-art", type: "svg-image", xMm: 2, yMm: 3,
+      widthMm: 10, heightMm: 10, svgDataUri: embeddedSvg
+    }]
+  });
+
+  assert.match(renderSvg(document), /<image id="complex-art" x="2" y="3" width="10" height="10" href="data:image\/svg\+xml;base64,/);
+  assert.throws(() => createDocument({
+    elements: [{
+      type: "svg-image", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1,
+      svgDataUri: `data:image/svg+xml;base64,${Buffer.from('<svg><script>alert(1)</script></svg>').toString("base64")}`
+    }]
+  }), /active or external content/);
+  const nested = Buffer.from('<svg width="2mm" height="2mm"><circle cx="1" cy="1" r="1"/></svg>').toString("base64");
+  const nestedSvg = `data:image/svg+xml;base64,${Buffer.from(`<svg width="10mm" height="10mm"><image href="data:image/svg+xml;base64,${nested}"/></svg>`).toString("base64")}`;
+  assert.doesNotThrow(() => createDocument({
+    elements: [{ type: "svg-image", xMm: 0, yMm: 0, widthMm: 10, heightMm: 10, svgDataUri: nestedSvg }]
+  }));
+  const unsafeNested = Buffer.from('<svg><script>alert(1)</script></svg>').toString("base64");
+  const unsafeOuter = `data:image/svg+xml;base64,${Buffer.from(`<svg><image href="data:image/svg+xml;base64,${unsafeNested}"/></svg>`).toString("base64")}`;
+  assert.throws(() => createDocument({
+    elements: [{ type: "svg-image", xMm: 0, yMm: 0, widthMm: 10, heightMm: 10, svgDataUri: unsafeOuter }]
+  }), /active or external content/);
+  assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /rectangles only/);
 });
 
 test("GRBL rejects rotated, warped, and non-rectangular objects", () => {
