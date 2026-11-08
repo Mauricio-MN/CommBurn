@@ -15,6 +15,7 @@ Rascunho de um editor vetorial simples para trabalhos a laser, com milímetros c
 
 - Execute `npm run desktop` para abrir o CommBurn em uma janela desktop durante o desenvolvimento.
 - O GitHub Actions executa testes e valida os pacotes Linux e Windows em pushes para `main` e pull requests direcionados a `main`.
+- O workflow **Build MSIX** gera um pacote Windows separado em pushes/pull requests para `main` ou sob demanda. O `.msix` fica disponível como artifact da execução e não é enviado para uma GitHub Release.
 - Para publicar uma versão, atualize `package.json` e `package-lock.json`, crie e envie a tag correspondente, por exemplo `v0.1.1`. O workflow recusa tags que não correspondam a `v<version>` e publica uma GitHub Release depois que os três builds concluírem.
 - A publicação inclui instalador `.msi` e executável portátil `.exe` para Windows, `.dmg` e `.zip` para macOS, e `.AppImage` e `.deb` para Linux. As builds macOS ainda não são assinadas nem notarizadas; isso requer certificados e credenciais Apple configurados como secrets do repositório.
 
