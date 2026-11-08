@@ -1,21 +1,74 @@
 {
   "name": "commburn",
   "version": "0.1.0",
+  "description": "Metric-first vector editor for laser jobs",
   "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "desktop": "electron .",
+    "dist": "electron-builder --publish never"
   },
   "dependencies": {
-    "imagetracerjs": "^1.2.6",
     "@jodit/image-editor": "^0.2.5",
+    "imagetracerjs": "^1.2.6",
     "serialport": "^13.0.0",
     "svg-pathdata": "^6.0.3",
     "svgson": "^5.3.1"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  },
+  "main": "electron-main.mjs",
+  "desktopName": "CommBurn",
+  "build": {
+    "appId": "org.commburn.editor",
+    "productName": "CommBurn",
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "files": [
+      "electron-main.mjs",
+      "server.mjs",
+      "index.html",
+      "src/**/*",
+      "!tests/**",
+      "!docs/**",
+      "!cli/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Graphics",
+      "maintainer": "Mauricio-MN <81537317+Mauricio-MN@users.noreply.github.com>",
+      "syncDesktopName": true
+    }
   }
 }

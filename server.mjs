@@ -223,7 +223,22 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(portNumber, host, () => console.log(`CommBurn running at http://${host}:${portNumber}`));
+export function startServer({ port = portNumber } = {}) {
+  return new Promise((resolveStart, rejectStart) => {
+    const onError = (error) => {
+      server.off("listening", onListening);
+      rejectStart(error);
+    };
+    const onListening = () => {
+      server.off("error", onError);
+      const address = server.address();
+      resolveStart({ url: `http://${host}:${address.port}`, close: shutdown });
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, host);
+  });
+}
 
 async function shutdown() {
   if (connection) {
@@ -237,8 +252,14 @@ async function shutdown() {
     }
     try { await connection.close(); } catch (error) { console.error(`Unable to close controller cleanly: ${error.message}`); }
   }
-  server.close();
+  await new Promise((resolveClose, rejectClose) => {
+    server.close((error) => error ? rejectClose(error) : resolveClose());
+  });
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  const { url } = await startServer();
+  console.log(`CommBurn running at ${url}`);
+}
