@@ -30,6 +30,7 @@
   "build": {
     "appId": "org.commburn.editor",
     "productName": "CommBurn",
+    "icon": "commburn-icon.png",
     "asarUnpack": [
       "**/*.node"
     ],
