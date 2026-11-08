@@ -18,7 +18,7 @@ Use this workflow when implementing or authoring a laser document.
 9. Keep object geometry and coordinate mapping in the shared core so browser, CLI, AI, and plugin workflows agree.
 10. Add focused tests for geometry, layer validation, coordinate mapping, transforms, and serialized output.
 11. When importing SVG, use `src/core/svg-import.js`; keep its explicit element/attribute allowlist, reject active or external content and unsupported transforms, allow only embedded raster images, and never silently discard geometry.
-12. Raster images are edited with the locally installed MIT `@jodit/image-editor`; never load editor code remotely. Use ImageTracerJS in a local worker for color contours and `src/core/image-vectorize.js` for tonal line/stipple engraving. Keep conversion geometry and metric limits in the shared core, validate path power, and show a preview before replacing the source image.
+12. Raster images are edited with the locally installed MIT `@jodit/image-editor`; never load editor code remotely. Use ImageTracerJS in a local worker to convert color regions into independent, filled vector paths with per-object colors; keep them on the current layer and let users select colors before applying. Keep conversion geometry and metric limits in the shared core, and show the actual vector result before replacing the source image.
 13. Edit SVG path anchors and controls through the dedicated path editor; keep `pathData` valid and preserve its metric bounds when saving.
 
 ## References

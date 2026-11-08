@@ -101,6 +101,69 @@ test("GRBL filled layers reject unsafe scan-line counts", () => {
   }, machineSettings), /too many scan lines/);
 });
 
+test("GRBL fills closed vector paths and leaves holes unfilled", () => {
+  const triangle = planGrblJob({
+    widthMm: 20,
+    heightMm: 20,
+    layers: [{ id: "fill", operation: "fill", fillSpacingMm: 2 }],
+    elements: [{
+      id: "triangle",
+      type: "path",
+      xMm: 4,
+      yMm: 5,
+      widthMm: 10,
+      heightMm: 10,
+      pathData: "M 0 0 L 10 0 L 5 10 Z",
+      layerId: "fill"
+    }]
+  }, machineSettings);
+  const trianglePaths = triangle.paths.filter((path) => path.kind === "work");
+  assert.equal(trianglePaths.length, 5);
+  assert.deepEqual(trianglePaths.slice(0, 2).map((path) => path.points.map(({ xMm, yMm }) => [xMm, yMm])), [
+    [[4, 5], [14, 5]],
+    [[13, 7], [5, 7]]
+  ]);
+
+  const ring = planGrblJob({
+    widthMm: 20,
+    heightMm: 20,
+    layers: [{ id: "fill", operation: "fill", fillSpacingMm: 4 }],
+    elements: [{
+      id: "ring",
+      type: "path",
+      xMm: 2,
+      yMm: 2,
+      widthMm: 10,
+      heightMm: 10,
+      pathData: "M 0 0 L 10 0 L 10 10 L 0 10 Z M 3 3 L 7 3 L 7 7 L 3 7 Z",
+      layerId: "fill"
+    }]
+  }, machineSettings);
+  const y6Segments = ring.paths.filter((path) => path.kind === "work" && path.points[0].yMm === 6);
+  assert.deepEqual(y6Segments.map((path) => path.points.map(({ xMm, yMm }) => [xMm, yMm])), [
+    [[12, 6], [9, 6]],
+    [[5, 6], [2, 6]]
+  ]);
+});
+
+test("GRBL filled vector paths must be closed", () => {
+  assert.throws(() => renderGrblJob({
+    widthMm: 20,
+    heightMm: 20,
+    layers: [{ id: "fill", operation: "fill" }],
+    elements: [{
+      id: "open-path",
+      type: "path",
+      xMm: 1,
+      yMm: 1,
+      widthMm: 10,
+      heightMm: 10,
+      pathData: "M 0 0 L 10 0 L 10 10 L 0 10",
+      layerId: "fill"
+    }]
+  }, machineSettings), /requires closed vector paths/);
+});
+
 test("GRBL fill algorithms create horizontal, vertical, crosshatch, and unidirectional paths", () => {
   const document = {
     widthMm: 40,

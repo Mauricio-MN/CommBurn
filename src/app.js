@@ -1,5 +1,4 @@
 import { createDocument, planGrblJob, renderSvg } from "./core/document.js";
-import { vectorizePixels } from "./core/image-vectorize.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { parseProject, serializeProject } from "./core/project.js";
 import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
@@ -14,6 +13,7 @@ import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource 
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 
 const byId = (id) => document.getElementById(id);
+const SIMULATOR_MAX_SPINDLE_SPEED = 1000;
 const IMAGE_EDITOR_PT_BR = {
   id: "pt-BR",
   name: "Português (Brasil)",
@@ -89,6 +89,7 @@ const notice = byId("notice");
 const serialPathInput = byId("serial-path");
 const connectButton = byId("connect-machine");
 const disconnectButton = byId("disconnect-machine");
+const simulateMachineButton = byId("simulate-machine");
 const startMachineButton = byId("start-machine-job");
 const holdMachineButton = byId("hold-machine-job");
 const machineState = byId("machine-state");
@@ -104,12 +105,14 @@ let pasteSequence = 0;
 let activeTool = "select";
 let imageVectorSourceId = null;
 let imageVectorResult = null;
+let imageVectorColors = new Set();
 let imageVectorPreviewSequence = 0;
 let imageTraceCancellation = null;
 let rasterImageEditor = null;
 let pendingImageEdit = null;
 let noticeTimer;
 let machineConnected = false;
+let machineSimulation = false;
 let machineBusy = false;
 let statusPollTimer;
 const history = new DocumentHistory(currentDocument);
@@ -307,13 +310,40 @@ async function machineApi(path, method = "GET", body) {
 function updateMachineControls() {
   const maxSpindleSpeed = Number(byId("machine-smax").value);
   const enabledLayers = currentDocument.layers.filter((layer) => layer.enabled);
-  const settingsAreValid = Number.isFinite(maxSpindleSpeed) && maxSpindleSpeed > 0 && enabledLayers.length > 0;
+  const settingsAreValid = (machineSimulation || (Number.isFinite(maxSpindleSpeed) && maxSpindleSpeed > 0))
+    && enabledLayers.length > 0;
   connectButton.disabled = machineConnected;
+  simulateMachineButton.disabled = machineConnected;
   disconnectButton.disabled = !machineConnected || machineBusy;
   serialPathInput.disabled = machineConnected;
   byId("baud-rate").disabled = machineConnected;
-  startMachineButton.disabled = !machineConnected || !safetyCheckbox.checked || !settingsAreValid || machineBusy;
+  byId("machine-safety-check").hidden = machineSimulation;
+  startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy;
+  startMachineButton.textContent = machineSimulation ? "Simular envio de contornos" : "Enviar contornos à máquina";
   holdMachineButton.disabled = !machineConnected || !machineBusy;
+}
+
+async function restoreMachineConnection() {
+  try {
+    const state = await machineApi("/api/connection-status");
+    machineConnected = state.connected;
+    machineSimulation = state.simulated;
+    machineBusy = state.busy;
+    if (machineBusy) {
+      machineState.textContent = machineSimulation
+        ? `Simulação em andamento: ${state.jobStatus.completed}/${state.jobStatus.total}`
+        : `Envio em andamento: ${state.jobStatus.completed}/${state.jobStatus.total}`;
+      statusPollTimer = setInterval(pollMachineJob, 500);
+      void pollMachineJob();
+    } else if (machineConnected) {
+      machineState.textContent = machineSimulation
+        ? "Simulador GRBL conectado. Nenhum hardware ou laser será acionado."
+        : "Controlador GRBL conectado. Confirme a máquina antes de enviar.";
+    }
+    updateMachineControls();
+  } catch {
+    machineState.textContent = "Estado da conexão indisponível neste modo de execução.";
+  }
 }
 
 async function refreshPorts() {
@@ -332,15 +362,21 @@ async function pollMachineJob() {
   try {
     const result = await machineApi("/api/job-status");
     if (result.state === "running") {
-      machineState.textContent = `Enviando comandos: ${result.completed}/${result.total}`;
+      machineState.textContent = machineSimulation
+        ? `Simulando comandos: ${result.completed}/${result.total}`
+        : `Enviando comandos: ${result.completed}/${result.total}`;
       return;
     }
     clearInterval(statusPollTimer);
     statusPollTimer = undefined;
     machineBusy = false;
     if (result.state === "complete") {
-      machineState.textContent = "Trabalho enviado e confirmado pelo controlador.";
-      showNotice("Envio finalizado. Confirme a máquina antes de iniciar outro trabalho.");
+      machineState.textContent = machineSimulation
+        ? "Simulação concluída; nenhum comando foi enviado a uma máquina."
+        : "Trabalho enviado e confirmado pelo controlador.";
+      showNotice(machineSimulation
+        ? "Simulação concluída sem conexão com hardware."
+        : "Envio finalizado. Confirme a máquina antes de iniciar outro trabalho.");
     } else if (result.state === "stopped") {
       machineState.textContent = `Envio interrompido: ${result.error}`;
       showNotice(`Envio interrompido: ${result.error}`);
@@ -472,9 +508,16 @@ function exportProject() {
   showNotice("Projeto editável salvo com camadas e objetos.");
 }
 
-function createMachinePlan() {
+function machineMaxSpindleSpeed(allowDefaultSmax = false) {
+  const inputValue = Number(byId("machine-smax").value);
+  if (Number.isFinite(inputValue) && inputValue > 0) return inputValue;
+  if (allowDefaultSmax) return SIMULATOR_MAX_SPINDLE_SPEED;
+  return numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE);
+}
+
+function createMachinePlan({ allowDefaultSmax = false } = {}) {
   return planGrblJob(readDocument(), {
-    maxSpindleSpeed: numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE)
+    maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax)
   });
 }
 
@@ -510,7 +553,7 @@ function drawMachinePreview(plan) {
 
 function showMachinePreview() {
   try {
-    const plan = createMachinePlan();
+    const plan = createMachinePlan({ allowDefaultSmax: true });
     drawMachinePreview(plan);
     byId("machine-preview-dialog").showModal();
   } catch (error) {
@@ -788,25 +831,13 @@ function imageConversionOptions(element) {
     }
     return value;
   };
-  const pitchMm = readNumber("image-vector-pitch", "Espaçamento");
-  const minimumPowerPercent = readNumber("image-vector-min-power", "Potência mínima");
-  const maximumPowerPercent = readNumber("image-vector-max-power", "Potência máxima");
-  const colorTolerance = readNumber("image-vector-tolerance", "Tolerância de cor");
-  const mode = byId("image-vector-mode").value;
   return {
     xMm: element.xMm,
     yMm: element.yMm,
     widthMm: element.widthMm,
     heightMm: element.heightMm,
-    pitchMm,
-    mode,
-    layerId: element.layerId,
     idPrefix: `vector-${crypto.randomUUID()}`,
-    targetColor: byId("image-vector-color").value,
-    colorTolerance,
-    minimumPowerPercent,
-    maximumPowerPercent,
-    traceOptions: mode === "trace" ? {
+    traceOptions: {
       numberofcolors: readNumber("image-vector-colors", "Quantidade de cores"),
       pathomit: readNumber("image-vector-pathomit", "Remoção de detalhes"),
       ltres: readNumber("image-vector-line-tolerance", "Suavização de linhas"),
@@ -818,8 +849,23 @@ function imageConversionOptions(element) {
       scale: 1,
       roundcoords: 1,
       viewbox: true
-    } : null
+    }
   };
+}
+
+function imageVectorStyleOptions() {
+  const strokeColorMode = byId("image-vector-border-mode").value;
+  const strokeInput = byId("image-vector-border-width");
+  const strokeWidthMm = strokeColorMode === "none" ? 0 : Number(strokeInput.value);
+  if (strokeColorMode !== "none"
+    && (!strokeInput.value.trim() || !Number.isFinite(strokeWidthMm) || !strokeInput.checkValidity())) {
+    throw new RangeError("A espessura da borda deve estar dentro do intervalo indicado.");
+  }
+  return { fillColorMode: "layer", strokeColorMode, strokeWidthMm };
+}
+
+function syncImageVectorStyleControls() {
+  byId("image-vector-border-width").disabled = byId("image-vector-border-mode").value === "none";
 }
 
 function cancelImageTracePreview() {
@@ -872,12 +918,14 @@ async function vectorizeImageElement(element) {
     throw new RangeError("A imagem excede o limite de 20 milhões de pixels para conversão.");
   }
   const options = imageConversionOptions(element);
-  const pixelWidth = Math.max(1, Math.ceil(element.widthMm / options.pitchMm));
-  const pixelHeight = Math.max(1, Math.ceil(element.heightMm / options.pitchMm));
-  if (pixelWidth * pixelHeight > 2_000_000) {
-    bitmap.close();
-    throw new RangeError("A prévia ultrapassaria 2 milhões de amostras; aumente o espaçamento.");
-  }
+  const maximumSamples = 2_000_000;
+  const sampleScale = Math.min(1, Math.sqrt(maximumSamples / (bitmap.width * bitmap.height)));
+  const pixelWidth = Math.max(1, Math.min(bitmap.width, maximumSamples, Math.floor(bitmap.width * sampleScale)));
+  const pixelHeight = Math.max(1, Math.min(
+    bitmap.height,
+    Math.floor(bitmap.height * sampleScale),
+    Math.floor(maximumSamples / pixelWidth)
+  ));
   const canvas = document.createElement("canvas");
   canvas.width = pixelWidth;
   canvas.height = pixelHeight;
@@ -895,48 +943,23 @@ async function vectorizeImageElement(element) {
     bitmap.close();
   }
   const pixels = context.getImageData(0, 0, pixelWidth, pixelHeight);
-  if (options.mode === "trace") {
-    const traceSvg = await traceImageData(pixels, pixelWidth, pixelHeight, options.traceOptions);
-    if (!globalThis.svgson?.parseSync || !globalThis.svgson?.stringify) {
-      throw new Error("O parser SVG local não foi carregado para converter os contornos.");
-    }
-    const tree = globalThis.svgson.parseSync(validateSvgSource(traceSvg));
-    const sourceLayer = currentDocument.layers.find((layer) => layer.id === element.layerId);
-    const imported = importTracedImageSvg(tree, {
-      widthMm: element.widthMm,
-      heightMm: element.heightMm,
-      minimumPowerPercent: options.minimumPowerPercent,
-      maximumPowerPercent: options.maximumPowerPercent,
-      sourceLayer,
-      idPrefix: `trace-${crypto.randomUUID()}`
-    });
-    const previewTree = {
-      ...tree,
-      attributes: { ...tree.attributes, width: `${pixelWidth}px`, height: `${pixelHeight}px` },
-      children: tree.children.map((node) => node.type === "element" && node.name === "path"
-        ? {
-          ...node,
-          attributes: {
-            ...node.attributes,
-            fill: "none",
-            stroke: node.attributes.fill ?? node.attributes.stroke
-          }
-        }
-        : node)
-    };
-    return {
-      mode: "trace",
-      elements: imported.elements,
-      layers: imported.layers,
-      preview: {
-        svg: globalThis.svgson.stringify(previewTree),
-        width: pixelWidth,
-        height: pixelHeight
-      },
-      stats: { ...imported.stats, pixelWidth, pixelHeight }
-    };
+  const traceSvg = await traceImageData(pixels, pixelWidth, pixelHeight, options.traceOptions);
+  if (!globalThis.svgson?.parseSync) {
+    throw new Error("O parser SVG local não foi carregado para converter as regiões.");
   }
-  return vectorizePixels(pixels.data, pixelWidth, pixelHeight, options);
+  const tree = globalThis.svgson.parseSync(validateSvgSource(traceSvg));
+  const sourceLayer = currentDocument.layers.find((layer) => layer.id === element.layerId);
+  const imported = importTracedImageSvg(tree, {
+    widthMm: element.widthMm,
+    heightMm: element.heightMm,
+    sourceLayer,
+    idPrefix: `vector-${crypto.randomUUID()}`
+  });
+  return {
+    elements: imported.elements,
+    preview: { width: pixelWidth, height: pixelHeight },
+    stats: { ...imported.stats, pixelWidth, pixelHeight }
+  };
 }
 
 async function drawTracePreview(preview) {
@@ -958,42 +981,107 @@ async function drawTracePreview(preview) {
   }
 }
 
+async function drawVectorPreview(
+  result,
+  source,
+  selectedColors = new Set(result.elements.map((element) => element.color)),
+  styles = { fillColorMode: "image", strokeColorMode: "none", strokeWidthMm: 0 }
+) {
+  const sourceLayer = currentDocument.layers.find((layer) => layer.id === source.layerId);
+  const previewDocument = createDocument({
+    widthMm: source.widthMm,
+    heightMm: source.heightMm,
+    layers: [sourceLayer],
+    elements: result.elements.filter((element) => selectedColors.has(element.color)).map((element) => ({
+      ...element,
+      ...styles,
+      xMm: element.xMm - source.xMm,
+      yMm: element.yMm - source.yMm
+    }))
+  });
+  const parsedSvg = new DOMParser().parseFromString(renderSvg(previewDocument), "image/svg+xml");
+  if (parsedSvg.querySelector("parsererror")) throw new Error("Não foi possível renderizar os vetores da prévia.");
+  const svg = parsedSvg.documentElement;
+  svg.setAttribute("width", `${result.preview.width}px`);
+  svg.setAttribute("height", `${result.preview.height}px`);
+  svg.setAttribute("viewBox", `0 0 ${source.widthMm} ${source.heightMm}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  await drawTracePreview({
+    svg: new XMLSerializer().serializeToString(svg),
+    width: result.preview.width,
+    height: result.preview.height
+  });
+}
+
+function updateImageVectorStyleControls() {
+  try {
+    syncImageVectorStyleControls();
+    if (imageVectorResult) updateImageVectorStats(imageVectorResult);
+    imageVectorStyleOptions();
+  } catch (error) {
+    byId("image-vector-stats").textContent = `Configuração inválida: ${error.message}`;
+    byId("apply-image-vector").disabled = true;
+  }
+}
+
+function updateImageVectorStats(result) {
+  const selectedElements = result.elements.filter((element) => imageVectorColors.has(element.color));
+  const selectedColors = new Set(selectedElements.map((element) => element.color));
+  byId("image-vector-stats").textContent = `${selectedElements.length} regiões vetoriais · ${selectedColors.size} cores selecionadas · ${result.stats.pixelWidth} × ${result.stats.pixelHeight} amostras.`;
+  byId("apply-image-vector").disabled = selectedElements.length === 0;
+}
+
+function showImageVectorColors(result, source) {
+  const colorCounts = new Map();
+  for (const element of result.elements) colorCounts.set(element.color, (colorCounts.get(element.color) ?? 0) + 1);
+  imageVectorColors = new Set(colorCounts.keys());
+  const options = byId("image-vector-color-options");
+  options.replaceChildren(...Array.from(colorCounts, ([color, count]) => {
+    const label = document.createElement("label");
+    label.className = "image-vector-color-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.setAttribute("aria-label", `${color}, ${count} vetores`);
+    const swatch = document.createElement("span");
+    swatch.className = "image-vector-color-swatch";
+    swatch.style.setProperty("--swatch-color", color);
+    const caption = document.createElement("span");
+    caption.textContent = `${color} · ${count}`;
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) imageVectorColors.add(color);
+      else imageVectorColors.delete(color);
+      updateImageVectorStats(result);
+      void drawVectorPreview(result, source, imageVectorColors).catch((error) => {
+        byId("image-vector-stats").textContent = `Prévia indisponível: ${error.message}`;
+        byId("apply-image-vector").disabled = true;
+      });
+    });
+    label.append(checkbox, swatch, caption);
+    return label;
+  }));
+  updateImageVectorStats(result);
+}
+
 async function updateImageVectorPreview() {
   const sequence = ++imageVectorPreviewSequence;
   cancelImageTracePreview();
   imageVectorResult = null;
   byId("apply-image-vector").disabled = true;
+  byId("image-vector-color-options").replaceChildren();
+  byId("image-vector-stats").textContent = "Preparando regiões vetoriais…";
   const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
   if (!source || source.type !== "image") return;
   try {
     const result = await vectorizeImageElement(source);
     if (sequence !== imageVectorPreviewSequence) return;
-    if (result.preview.svg) {
-      await drawTracePreview(result.preview);
-    } else {
-      const canvas = byId("image-vector-preview");
-      canvas.width = result.preview.width;
-      canvas.height = result.preview.height;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("O navegador não disponibilizou o canvas de prévia.");
-      context.putImageData(new ImageData(result.preview.data, result.preview.width, result.preview.height), 0, 0);
-    }
-    if (sequence !== imageVectorPreviewSequence) return;
     imageVectorResult = result;
-    byId("image-vector-stats").textContent = result.mode === "trace"
-      ? `${result.stats.pathCount} contornos em ${result.stats.colorCount} cores · ${result.stats.pixelWidth} × ${result.stats.pixelHeight} amostras.`
-      : `${result.stats.pathCount} trajetórias · ${result.stats.pixelWidth} × ${result.stats.pixelHeight} amostras · potência variável por tom.`;
-    byId("apply-image-vector").disabled = false;
+    showImageVectorColors(result, source);
+    await drawVectorPreview(result, source, imageVectorColors);
+    if (sequence !== imageVectorPreviewSequence) return;
   } catch (error) {
     if (sequence !== imageVectorPreviewSequence) return;
     byId("image-vector-stats").textContent = `Conversão indisponível: ${error.message}`;
-  }
-}
-
-function syncImageVectorSettings() {
-  const traceMode = byId("image-vector-mode").value === "trace";
-  for (const setting of document.querySelectorAll("[data-image-setting]")) {
-    setting.hidden = setting.dataset.imageSetting === "trace" ? !traceMode : traceMode;
   }
 }
 
@@ -1003,10 +1091,9 @@ function openImageVectorizer() {
     if (!source || source.type !== "image") throw new Error("Selecione uma imagem raster incorporada.");
     const layer = currentDocument.layers.find((candidate) => candidate.id === source.layerId);
     if (!layer || layer.locked) throw new Error("Desbloqueie a camada da imagem antes de convertê-la.");
-    if (layer.operation !== "engrave") throw new Error("A conversão tonal exige uma camada configurada como Gravação.");
     imageVectorSourceId = source.id;
+    syncImageVectorStyleControls();
     byId("image-vector-dialog").showModal();
-    syncImageVectorSettings();
     void updateImageVectorPreview();
   } catch (error) {
     showNotice(error.message);
@@ -1018,15 +1105,18 @@ function applyImageVectorization() {
     const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
     const layer = currentDocument.layers.find((candidate) => candidate.id === source?.layerId);
     if (!source || source.type !== "image" || !imageVectorResult) throw new Error("Gere uma prévia válida antes de aplicar.");
-    if (!layer || layer.locked || layer.operation !== "engrave") throw new Error("A camada de gravação não está disponível.");
-    const resultMode = imageVectorResult.mode;
-    const convertedIds = imageVectorResult.elements.map((element) => element.id);
+    if (!layer || layer.locked) throw new Error("A camada da imagem não está disponível.");
+    const styles = imageVectorStyleOptions();
+    const convertedElements = imageVectorResult.elements
+      .filter((element) => imageVectorColors.has(element.color))
+      .map((element) => ({ ...element, ...styles }));
+    if (!convertedElements.length) throw new Error("Selecione ao menos uma cor para converter.");
+    const convertedIds = convertedElements.map((element) => element.id);
     currentDocument = createDocument({
       ...readDocument(),
-      layers: [...currentDocument.layers, ...(imageVectorResult.layers ?? [])],
       elements: [
         ...currentDocument.elements.filter((element) => element.id !== source.id),
-        ...imageVectorResult.elements
+        ...convertedElements
       ]
     });
     selectedIds = convertedIds.length ? [convertedIds.at(-1)] : [];
@@ -1036,9 +1126,7 @@ function applyImageVectorization() {
     renderPreview();
     commitHistory();
     byId("image-vector-dialog").close();
-    showNotice(resultMode === "trace"
-      ? `${convertedIds.length} contorno(s) vetorial(is) criado(s) em camadas por cor.`
-      : `${convertedIds.length} trajetória(s) vetorial(is) criada(s) com potência variável.`);
+    showNotice(`${convertedIds.length} região(ões) vetorial(is) sólida(s) criada(s) em ${new Set(convertedElements.map((element) => element.color)).size} cor(es).`);
   } catch (error) {
     showNotice(error.message);
   }
@@ -1460,18 +1548,20 @@ byId("image-vector-dialog").addEventListener("close", () => {
   imageVectorPreviewSequence += 1;
   cancelImageTracePreview();
   imageVectorResult = null;
+  imageVectorColors = new Set();
   imageVectorSourceId = null;
+  byId("image-vector-color-options").replaceChildren();
 });
 for (const id of [
-  "image-vector-mode", "image-vector-pitch", "image-vector-color", "image-vector-tolerance",
-  "image-vector-min-power", "image-vector-max-power", "image-vector-colors", "image-vector-pathomit",
+  "image-vector-colors", "image-vector-pathomit",
   "image-vector-line-tolerance", "image-vector-curve-tolerance"
 ]) {
   byId(id).addEventListener("input", () => {
-    if (id === "image-vector-mode") syncImageVectorSettings();
     void updateImageVectorPreview();
   });
 }
+byId("image-vector-border-mode").addEventListener("change", updateImageVectorStyleControls);
+byId("image-vector-border-width").addEventListener("input", updateImageVectorStyleControls);
 installTooltips();
 new ResizeObserver(() => resizeBoard()).observe(stage);
 
@@ -1505,6 +1595,7 @@ for (const button of document.querySelectorAll('[data-action="export-project"]')
 for (const button of document.querySelectorAll('[data-action="preview-machine"]')) {
   button.addEventListener("click", showMachinePreview);
 }
+byId("preview-machine-job").addEventListener("click", showMachinePreview);
 for (const button of document.querySelectorAll('[data-action="export-gcode"]')) {
   button.addEventListener("click", () => {
     try { exportGcode(); } catch (error) { showNotice(`Não foi possível exportar G-code: ${error.message}`); }
@@ -1530,6 +1621,7 @@ connectButton.addEventListener("click", async () => {
       baudRate: Number(byId("baud-rate").value)
     });
     machineConnected = result.connected;
+    machineSimulation = false;
     machineState.textContent = `Conectado em ${result.path} a ${result.baudRate} baud. Verifique o firmware e a máquina antes de enviar.`;
     updateMachineControls();
   } catch (error) {
@@ -1537,10 +1629,23 @@ connectButton.addEventListener("click", async () => {
     showNotice(error.message);
   }
 });
+simulateMachineButton.addEventListener("click", async () => {
+  try {
+    const result = await machineApi("/api/simulate-connect", "POST", {});
+    machineConnected = result.connected;
+    machineSimulation = result.simulated;
+    machineState.textContent = "Simulador GRBL conectado. Nenhum hardware ou laser será acionado.";
+    updateMachineControls();
+  } catch (error) {
+    machineState.textContent = `Falha ao iniciar simulador: ${error.message}`;
+    showNotice(error.message);
+  }
+});
 disconnectButton.addEventListener("click", async () => {
   try {
     await machineApi("/api/disconnect", "POST", {});
     machineConnected = false;
+    machineSimulation = false;
     machineState.textContent = "Desconectado.";
     updateMachineControls();
   } catch (error) {
@@ -1551,16 +1656,18 @@ safetyCheckbox.addEventListener("change", updateMachineControls);
 byId("machine-smax").addEventListener("input", updateMachineControls);
 startMachineButton.addEventListener("click", async () => {
   try {
-    if (!safetyCheckbox.checked) throw new Error("Confirme a lista de segurança antes de enviar.");
+    if (!machineSimulation && !safetyCheckbox.checked) throw new Error("Confirme a lista de segurança antes de enviar.");
     const result = await machineApi("/api/job", "POST", {
       safetyConfirmed: safetyCheckbox.checked,
       document: readDocument(),
       settings: {
-        maxSpindleSpeed: numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE)
+        maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation)
       }
     });
     machineBusy = true;
-    machineState.textContent = `Trabalho aceito: ${result.lines} comandos.`;
+    machineState.textContent = machineSimulation
+      ? `Simulação aceita: ${result.lines} comandos. Nenhum hardware será acionado.`
+      : `Trabalho aceito: ${result.lines} comandos.`;
     updateMachineControls();
     statusPollTimer = setInterval(pollMachineJob, 500);
     await pollMachineJob();
@@ -1581,3 +1688,4 @@ holdMachineButton.addEventListener("click", async () => {
 
 renderPreview();
 updateMachineControls();
+void restoreMachineConnection();

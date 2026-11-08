@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,33 @@ let connection = null;
 let activeJob = false;
 let jobTask = null;
 let jobStatus = { state: "idle", completed: 0, total: 0, error: null };
+
+class SimulatedSerialPort extends EventEmitter {
+  isOpen = true;
+  status = "Idle";
+
+  write(data) {
+    setTimeout(() => {
+      if (data === "?") {
+        this.emit("data", Buffer.from(`<${this.status}|MPos:0,0,0>\r\n`));
+      } else if (data === "!") {
+        this.status = "Hold:0";
+        this.emit("data", Buffer.from(`<${this.status}|MPos:0,0,0>\r\n`));
+      } else if (data.endsWith("\n")) {
+        this.emit("data", Buffer.from("ok\r\n"));
+      }
+    }, 2);
+  }
+
+  drain(callback) {
+    callback(null);
+  }
+
+  close(callback) {
+    this.isOpen = false;
+    callback(null);
+  }
+}
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -31,6 +59,16 @@ const securityHeaders = {
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, { ...securityHeaders, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   response.end(JSON.stringify(body));
+}
+
+function attachConnection(serialPort, simulated = false) {
+  connection = new GrblConnection(serialPort, {
+    onProgress: ({ completed, total }) => {
+      jobStatus = { ...jobStatus, completed, total };
+    }
+  });
+  connection.isSimulation = simulated;
+  return connection;
 }
 
 function verifyLocalRequest(request, response) {
@@ -68,6 +106,15 @@ async function readJson(request) {
 async function handleApi(request, response, url) {
   if (!verifyLocalRequest(request, response)) return;
   try {
+    if (request.method === "GET" && url.pathname === "/api/connection-status") {
+      sendJson(response, 200, {
+        connected: Boolean(connection),
+        simulated: Boolean(connection?.isSimulation),
+        busy: activeJob,
+        jobStatus
+      });
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/api/ports") {
       sendJson(response, 200, { ports: await SerialPort.list() });
       return;
@@ -82,12 +129,14 @@ async function handleApi(request, response, url) {
       }
       const serialPort = new SerialPort({ path: input.path, baudRate, autoOpen: false });
       await new Promise((resolveOpen, rejectOpen) => serialPort.open((error) => error ? rejectOpen(error) : resolveOpen()));
-      connection = new GrblConnection(serialPort, {
-        onProgress: ({ completed, total }) => {
-          jobStatus = { ...jobStatus, completed, total };
-        }
-      });
+      attachConnection(serialPort);
       sendJson(response, 200, { connected: true, path: input.path, baudRate });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/simulate-connect") {
+      if (connection) throw new Error("Desconecte o controlador atual antes de conectar o simulador");
+      attachConnection(new SimulatedSerialPort(), true);
+      sendJson(response, 200, { connected: true, simulated: true });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/disconnect") {
@@ -113,7 +162,9 @@ async function handleApi(request, response, url) {
       if (!connection) throw new Error("Connect to a GRBL-compatible controller first");
       if (activeJob) throw new Error("A machine job is already running");
       const input = await readJson(request);
-      if (input.safetyConfirmed !== true) throw new Error("Confirm the laser safety checklist before sending a job");
+      if (!connection.isSimulation && input.safetyConfirmed !== true) {
+        throw new Error("Confirm the laser safety checklist before sending a job");
+      }
       const gcode = renderGrblJob(input.document, input.settings);
       activeJob = true;
       const jobConnection = connection;

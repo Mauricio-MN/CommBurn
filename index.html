@@ -141,19 +141,22 @@
         </section>
 
         <section class="panel machine-panel">
-          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌁</span><div><h2>Máquina · GRBL</h2><p>Conexão serial local e opcional</p></div></div>
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌁</span><div><h2>Máquina · GRBL</h2><p>Conexão serial local ou simulador offline</p></div></div>
           <p class="machine-warning">Controle limitado a controladores compatíveis com GRBL. Confirme firmware, limites, foco, exaustão e proteção ocular para sua máquina antes de conectar.</p>
           <label class="field">Porta / caminho serial
             <span class="port-row"><input id="serial-path" list="serial-port-options" placeholder="/dev/ttyACM0 ou COM3"><datalist id="serial-port-options"></datalist><button class="button button-secondary" id="refresh-ports" type="button" aria-label="Atualizar portas">↻</button></span>
           </label>
           <label class="field">Baud rate<select id="baud-rate"><option>115200</option><option>230400</option><option>57600</option><option>250000</option></select></label>
           <label class="field">Velocidade máxima S configurada na máquina<input id="machine-smax" type="number" min="1" step="1" placeholder="Confira $30 no controlador"></label>
+          <p class="help-text">Prévia e simulador usam S máximo 1000 quando o campo acima está vazio. Para conectar hardware ou exportar G-code, informe o valor real de $30.</p>
           <div class="machine-actions">
             <button class="button button-secondary" id="connect-machine" type="button">Conectar</button>
             <button class="button button-danger" id="disconnect-machine" type="button" disabled>Desconectar</button>
           </div>
+          <button class="button button-secondary full-width" id="simulate-machine" type="button">Conectar simulador GRBL (sem hardware)</button>
+          <button class="button button-secondary full-width" id="preview-machine-job" type="button">Pré-visualizar processo GRBL</button>
           <p class="machine-state" id="machine-state" role="status">Desconectado</p>
-          <label class="safety-check"><input id="safety-confirmed" type="checkbox"><span>Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
+          <label class="safety-check" id="machine-safety-check"><input id="safety-confirmed" type="checkbox"><span>Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
           <button class="button button-primary full-width" id="start-machine-job" type="button" disabled>Enviar contornos à máquina</button>
           <button class="button button-danger full-width" id="hold-machine-job" type="button" disabled>Parar envio e solicitar pausa</button>
           <p class="help-text">O adaptador aceita retângulos e traçados SVG editáveis sem transformação. Texto, imagem raster original, elipses, linhas e formas transformadas ainda não são aceitos; converta imagens para trajetórias antes da prévia. A pausa não substitui o botão de emergência.</p>
@@ -205,19 +208,16 @@
     <dialog id="image-vector-dialog" class="image-vector-dialog" aria-labelledby="image-vector-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar conversor de imagem">×</button></form>
       <h2 id="image-vector-title">Vetorizar imagem</h2>
-      <p>Escolha gravação tonal por riscos/pontos ou contornos vetoriais coloridos. O traçado por cores cria contornos editáveis; a imagem fonte será substituída ao aplicar e pode ser recuperada com Desfazer.</p>
+      <p>A prévia preserva as cores da imagem para selecionar regiões. No editor, os vetores aplicados usam a cor da camada atual. A imagem fonte pode ser recuperada com Desfazer.</p>
       <div class="image-vector-settings">
-        <label class="field">Método<select id="image-vector-mode"><option value="lines">Gravação tonal · riscos</option><option value="dots">Gravação tonal · pontos</option><option value="trace">Contornos coloridos · ImageTracer</option></select></label>
-        <label class="field" data-image-setting="laser">Espaçamento de gravação<span class="input-with-unit"><input id="image-vector-pitch" type="number" min="0.1" step="0.1" value="1"><span>mm</span></span></label>
-        <label class="field" data-image-setting="laser">Cor de referência<input id="image-vector-color" type="color" value="#000000"></label>
-        <label class="field" data-image-setting="laser">Tolerância de cor<input id="image-vector-tolerance" type="number" min="0" max="441.7" step="any" value="0"><span class="unit-note">0 desativa o filtro; distância RGB máxima 441,7</span></label>
-        <label class="field" data-image-setting="trace" hidden>Quantidade de cores<input id="image-vector-colors" type="number" min="2" max="24" step="1" value="8"></label>
-        <label class="field" data-image-setting="trace" hidden>Remover detalhes menores<input id="image-vector-pathomit" type="number" min="0" max="1000" step="1" value="8"><span class="unit-note">pixels</span></label>
-        <label class="field" data-image-setting="trace" hidden>Suavização de linhas<input id="image-vector-line-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
-        <label class="field" data-image-setting="trace" hidden>Ajuste de curvas<input id="image-vector-curve-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
-        <label class="field">Potência mínima<input id="image-vector-min-power" type="number" min="0" max="100" step="1" value="8"><span class="unit-note">%; tons mais claros são omitidos</span></label>
-        <label class="field">Potência máxima<input id="image-vector-max-power" type="number" min="1" max="100" step="1" value="35"><span class="unit-note">%</span></label>
+        <label class="field">Cores<input id="image-vector-colors" type="number" min="2" max="24" step="1" value="8"></label>
+        <label class="field">Remover detalhes menores<input id="image-vector-pathomit" type="number" min="0" max="1000" step="1" value="8"><span class="unit-note">pixels</span></label>
+        <label class="field">Suavização de regiões<input id="image-vector-line-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+        <label class="field">Ajuste de curvas<input id="image-vector-curve-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+        <label class="field">Borda<select id="image-vector-border-mode"><option value="layer">Cor da camada atual</option><option value="none">Sem borda</option></select></label>
+        <label class="field">Espessura da borda<span class="input-with-unit"><input id="image-vector-border-width" type="number" min="0.01" max="10" step="0.01" value="0.15"><span>mm</span></span></label>
       </div>
+      <div id="image-vector-color-options" class="image-vector-color-options" role="group" aria-label="Cores incluídas na conversão"></div>
       <canvas id="image-vector-preview" class="image-vector-preview" aria-label="Prévia da vetorização"></canvas>
       <p id="image-vector-stats" class="machine-preview-stats" role="status">Ajuste os parâmetros para gerar a prévia.</p>
       <div class="preview-actions">

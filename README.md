@@ -1,5 +1,7 @@
 # CommBurn
 
+![CommBurn — editor vetorial para trabalhos a laser](commburn.png)
+
 Rascunho de um editor vetorial simples para trabalhos a laser, com milímetros como unidade canônica e origem/eixos controlados explicitamente pelo usuário.
 
 ## Experimentar

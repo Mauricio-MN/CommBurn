@@ -170,9 +170,29 @@ function normalizeElement(element, index, defaultLayerId) {
       && (typeof powerPercent !== "number" || !Number.isFinite(powerPercent) || powerPercent <= 0 || powerPercent > 100)) {
       throw new RangeError(`Element ${id} powerPercent must be greater than zero and at most 100`);
     }
+    const color = element.color;
+    if (color !== undefined && (typeof color !== "string" || !/^#[0-9a-f]{6}$/i.test(color))) {
+      throw new RangeError(`Element ${id} color must be a six-digit hexadecimal color`);
+    }
+    const fillColorMode = element.fillColorMode;
+    if (fillColorMode !== undefined && !["image", "layer", "none"].includes(fillColorMode)) {
+      throw new RangeError(`Element ${id} has an unsupported fillColorMode`);
+    }
+    const strokeColorMode = element.strokeColorMode;
+    if (strokeColorMode !== undefined && !["image", "layer", "none"].includes(strokeColorMode)) {
+      throw new RangeError(`Element ${id} has an unsupported strokeColorMode`);
+    }
+    const strokeWidthMm = element.strokeWidthMm;
+    if (strokeWidthMm !== undefined && (typeof strokeWidthMm !== "number" || !Number.isFinite(strokeWidthMm) || strokeWidthMm < 0)) {
+      throw new RangeError(`Element ${id} strokeWidthMm must be a finite non-negative millimetre value`);
+    }
     return {
       id, type: "path", xMm, yMm, widthMm, heightMm, pathData: element.pathData, layerId,
       ...(powerPercent === undefined ? {} : { powerPercent }),
+      ...(color === undefined ? {} : { color: color.toLowerCase() }),
+      ...(fillColorMode === undefined ? {} : { fillColorMode }),
+      ...(strokeColorMode === undefined ? {} : { strokeColorMode }),
+      ...(strokeWidthMm === undefined ? {} : { strokeWidthMm }),
       ...transforms
     };
   }
@@ -287,7 +307,20 @@ export function renderSvg(input) {
       const pathTransform = transformAttribute(element, point.xMm - (point.flipX ? element.widthMm / 2 : -element.widthMm / 2),
         point.yMm - (point.flipY ? element.heightMm / 2 : -element.heightMm / 2));
       const power = element.powerPercent === undefined ? "" : ` data-power-percent="${element.powerPercent}"`;
-      nodesByLayer.get(layer.id).push(`<path id="${escapeXml(element.id)}" d="${escapeXml(path.encode())}" fill="${fill}" stroke="${layer.color}"${power}${pathTransform}/>`);
+      const pathFill = element.fillColorMode === "none"
+        ? "none"
+        : element.fillColorMode === "layer"
+          ? layer.color
+          : element.color ?? fill;
+      const pathStroke = element.strokeColorMode === "none"
+        ? "none"
+        : element.strokeColorMode === "image"
+          ? element.color ?? layer.color
+          : element.strokeColorMode === "layer"
+            ? layer.color
+            : element.color ? "none" : layer.color;
+      const strokeWidth = element.strokeWidthMm === undefined ? "" : ` stroke-width="${element.strokeWidthMm}"`;
+      nodesByLayer.get(layer.id).push(`<path id="${escapeXml(element.id)}" d="${escapeXml(path.encode())}" fill="${pathFill}" stroke="${pathStroke}"${strokeWidth}${power}${pathTransform}/>`);
       continue;
     }
     if (element.type === "image") {
@@ -424,6 +457,78 @@ function fillPaths(element, algorithm, spacingMm) {
   return [...horizontal, ...vertical];
 }
 
+function fillVectorPaths(element, algorithm, spacingMm) {
+  const polygons = flattenVectorPath(element);
+  if (!polygons.length || polygons.some((points) => points.length < 4
+    || points[0][0] !== points.at(-1)[0] || points[0][1] !== points.at(-1)[1])) {
+    throw new RangeError(`GRBL fill requires closed vector paths; path ${element.id} is open or degenerate`);
+  }
+  const segmentCount = polygons.reduce((count, points) => count + points.length - 1, 0);
+  const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
+  const columnCount = Math.floor(element.widthMm / spacingMm) + 1;
+  const usesHorizontal = ["horizontal-serpentine", "horizontal-unidirectional", "crosshatch"].includes(algorithm);
+  const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
+  const scanlineCount = (usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0);
+  if (scanlineCount > 50000) throw new RangeError(`Fill spacing creates too many scan lines for element ${element.id}`);
+  if (segmentCount * scanlineCount > 2_000_000) {
+    throw new RangeError(`Path ${element.id} creates too many fill intersections; increase fill spacing or simplify the path`);
+  }
+
+  const spansAt = (fixedAxis, coordinate) => {
+    const varyingAxis = 1 - fixedAxis;
+    const intersections = [];
+    for (const polygon of polygons) {
+      for (let index = 1; index < polygon.length; index += 1) {
+        const start = polygon[index - 1];
+        const end = polygon[index];
+        const startFixed = start[fixedAxis];
+        const endFixed = end[fixedAxis];
+        if ((startFixed <= coordinate && endFixed > coordinate)
+          || (endFixed <= coordinate && startFixed > coordinate)) {
+          const ratio = (coordinate - startFixed) / (endFixed - startFixed);
+          intersections.push(start[varyingAxis] + ratio * (end[varyingAxis] - start[varyingAxis]));
+        }
+      }
+    }
+    intersections.sort((left, right) => left - right);
+    if (intersections.length % 2 !== 0) {
+      throw new RangeError(`Path ${element.id} has invalid fill geometry`);
+    }
+    const spans = [];
+    for (let index = 0; index < intersections.length; index += 2) {
+      if (intersections[index + 1] - intersections[index] > 1e-9) {
+        spans.push([intersections[index], intersections[index + 1]]);
+      }
+    }
+    return spans;
+  };
+
+  const paths = [];
+  if (usesHorizontal) {
+    for (let row = 0; row < rowCount; row += 1) {
+      const yMm = Math.min(element.yMm + row * spacingMm, element.yMm + element.heightMm);
+      const spans = spansAt(1, yMm);
+      const reverse = algorithm !== "horizontal-unidirectional" && row % 2 === 1;
+      if (reverse) spans.reverse();
+      for (const [left, right] of spans) {
+        paths.push(reverse ? [[right, yMm], [left, yMm]] : [[left, yMm], [right, yMm]]);
+      }
+    }
+  }
+  if (usesVertical) {
+    for (let column = 0; column < columnCount; column += 1) {
+      const xMm = Math.min(element.xMm + column * spacingMm, element.xMm + element.widthMm);
+      const spans = spansAt(0, xMm);
+      const reverse = column % 2 === 1;
+      if (reverse) spans.reverse();
+      for (const [top, bottom] of spans) {
+        paths.push(reverse ? [[xMm, bottom], [xMm, top]] : [[xMm, top], [xMm, bottom]]);
+      }
+    }
+  }
+  return paths;
+}
+
 function createElementWorkPaths(document, layer, element) {
   const outline = [
     [element.xMm, element.yMm],
@@ -432,11 +537,10 @@ function createElementWorkPaths(document, layer, element) {
     [element.xMm, element.yMm + element.heightMm],
     [element.xMm, element.yMm]
   ];
-  if (layer.operation === "fill" && element.type !== "rect") {
-    throw new RangeError(`GRBL fill currently supports rectangles only; path ${element.id} must use engrave or cut`);
-  }
   const sourcePaths = layer.operation === "fill"
-    ? fillPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
+    ? element.type === "rect"
+      ? fillPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
+      : fillVectorPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
     : element.type === "path"
       ? flattenVectorPath(element)
       : [outline];
@@ -545,6 +649,9 @@ export function planGrblJob(input, settings) {
       element.id,
       createElementWorkPaths(document, layer, element)
     ]));
+    if ([...workByElement.values()].every((workPaths) => workPaths.length === 0)) {
+      throw new RangeError(`Layer ${layer.name} has no fillable paths at the selected spacing`);
+    }
     const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint);
     for (const element of orderedElements) {
       for (const workPath of workByElement.get(element.id)) {

@@ -10,10 +10,11 @@
   --shadow: 0 8px 24px rgb(34 51 84 / 6%);
 }
 * { box-sizing: border-box; }
-body { min-width: 340px; min-height: 100vh; margin: 0; }
+html { width: 100%; min-width: 340px; min-height: 100%; }
+body { display: flex; width: 100%; min-width: 340px; min-height: 100vh; min-height: 100dvh; flex-direction: column; margin: 0; }
 button, input, textarea, select { font: inherit; }
 button, summary, select { cursor: pointer; }
-.topbar { height: 68px; display: flex; align-items: center; gap: 36px; padding: 0 25px; background: #fff; border-bottom: 1px solid var(--line); }
+.topbar { height: 68px; display: flex; flex: 0 0 auto; align-items: center; gap: 36px; padding: 0 25px; background: #fff; border-bottom: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 10px; color: #202a3a; font-size: 17px; font-weight: 750; text-decoration: none; letter-spacing: -.4px; }
 .brand-mark { display: grid; width: 31px; height: 31px; place-items: center; color: white; border-radius: 10px; background: linear-gradient(145deg, #547ff4, #7858e9); box-shadow: 0 3px 8px #625be54d; }
 .menu-bar, .topbar-end, .canvas-actions { display: flex; align-items: center; gap: 10px; }
@@ -38,7 +39,7 @@ button, summary, select { cursor: pointer; }
 .button:disabled { opacity: .45; cursor: not-allowed; }
 .button-icon { font-size: 17px; line-height: 1; }
 .full-width { width: 100%; }
-.workspace { display: grid; grid-template-columns: 308px minmax(0, 1fr); height: calc(100vh - 68px); height: calc(100dvh - 68px); min-height: 0; }
+.workspace { display: grid; flex: 1 1 auto; grid-template-columns: 308px minmax(0, 1fr); height: calc(100vh - 68px); height: calc(100dvh - 68px); min-height: 0; }
 .sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 13px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 17px 15px; background: #f9fafe; border-right: 1px solid var(--line); }
 .panel { min-width: 0; padding: 15px; background: #fff; border: 1px solid #edf0f5; border-radius: 12px; box-shadow: 0 2px 6px rgb(35 51 82 / 2%); }
 .field[hidden] { display: none; }
@@ -94,6 +95,7 @@ button, summary, select { cursor: pointer; }
 .machine-actions .button { flex: 1; }
 .machine-state { margin: 0 0 10px; color: #6e7b8e; font-size: 11px; }
 .safety-check { display: flex; gap: 8px; margin: 12px 0; color: #536176; font-size: 10px; line-height: 1.5; cursor: pointer; }
+.safety-check[hidden] { display: none; }
 .safety-check input { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; accent-color: #3978eb; }
 .machine-panel > .button + .button { margin-top: 7px; }
 .canvas-area { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: #f4f6fa; }
@@ -173,6 +175,10 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
 .image-import-dimensions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 420px; }
 .image-vector-dialog, .path-editor-dialog { width: min(980px, calc(100vw - 32px)); max-height: min(92dvh, 900px); overflow: auto; }
 .image-vector-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.image-vector-color-options { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0; }
+.image-vector-color-option { display: inline-flex; min-height: 34px; align-items: center; gap: 7px; padding: 5px 8px; color: #536176; background: #fff; border: 1px solid var(--line); border-radius: 6px; font-size: 11px; cursor: pointer; }
+.image-vector-color-option input { margin: 0; accent-color: #3978eb; }
+.image-vector-color-swatch { width: 15px; height: 15px; flex: 0 0 auto; background: var(--swatch-color); border: 1px solid #aeb8c7; border-radius: 3px; }
 .image-vector-preview { display: block; width: 100%; max-height: 42dvh; object-fit: contain; background: #eef1f5; border: 1px solid var(--line); }
 .path-editor-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(240px, 1fr); gap: 12px; min-height: 320px; }
 .path-editor-canvas { width: 100%; height: 55dvh; min-height: 320px; background: #fff; border: 1px solid var(--line); touch-action: none; }
@@ -206,7 +212,7 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
   .topbar-end { gap: 6px; }
   .unit-pill { display: none; }
   .button-primary { min-height: 33px; padding: 6px 8px; font-size: 10px; }
-  .workspace { display: flex; height: auto; min-height: calc(100dvh - 60px); flex-direction: column; }
+  .workspace { display: flex; height: auto; min-height: 0; flex: 1 0 auto; flex-direction: column; }
   .sidebar { display: grid; max-height: min(65dvh, 520px); flex: 0 0 auto; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); border-right: 0; border-bottom: 1px solid var(--line); }
   .canvas-area { min-height: 440px; }
   .canvas-toolbar { padding: 0 12px; }
