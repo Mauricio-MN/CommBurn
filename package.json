@@ -53,13 +53,15 @@
     },
     "win": {
       "target": [
-        "nsis",
+        "msi",
         "portable"
       ]
     },
-    "nsis": {
+    "msi": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "linux": {
       "target": [
