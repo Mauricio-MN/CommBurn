@@ -1,0 +1,40 @@
+name: Build MSIX
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:msix
+      - name: Rename AppX package to MSIX
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem -Path dist -Filter '*.appx' -File)
+          if ($packages.Count -ne 1) {
+            throw "Expected one AppX package in dist, found $($packages.Count)."
+          }
+          $destination = Join-Path $packages[0].DirectoryName "$($packages[0].BaseName).msix"
+          Move-Item -LiteralPath $packages[0].FullName -Destination $destination
+      - uses: actions/upload-artifact@v4
+        with:
+          name: commburn-msix
+          path: dist/*.msix
+          if-no-files-found: error
