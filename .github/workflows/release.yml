@@ -1,9 +1,12 @@
 name: Desktop release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão em package.json, sem o prefixo v (por exemplo, 0.1.1)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,11 +21,23 @@ jobs:
           node-version: 22
       - name: Require tag to match package version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::Run this workflow from the main branch"
+            exit 1
+          fi
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          if [ "$RELEASE_TAG" != "v$PACKAGE_VERSION" ]; then
-            echo "::error::Tag $RELEASE_TAG must match package version v$PACKAGE_VERSION"
+          if [ "$RELEASE_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "::error::Input version $RELEASE_VERSION must match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+          if ! printf '%s' "$RELEASE_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Version must use semantic version format, for example 0.1.1"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "::error::Release tag v$RELEASE_VERSION already exists"
             exit 1
           fi
 
@@ -51,7 +66,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.artifact == 'linux'
         with:
-          name: commburn-linux
+          name: commburn-linux-v${{ inputs.version }}
           path: |
             dist/*.AppImage
             dist/*.deb
@@ -59,7 +74,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.artifact == 'windows'
         with:
-          name: commburn-windows
+          name: commburn-windows-v${{ inputs.version }}
           path: |
             dist/*.msi
             dist/*.exe
@@ -67,7 +82,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: matrix.artifact == 'macos'
         with:
-          name: commburn-macos
+          name: commburn-macos-v${{ inputs.version }}
           path: |
             dist/*.dmg
             dist/*.zip
@@ -87,5 +102,6 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" release/* --title "CommBurn $GITHUB_REF_NAME" --generate-notes
+          gh release create "v$RELEASE_VERSION" release/* --target "$GITHUB_SHA" --title "CommBurn v$RELEASE_VERSION" --generate-notes

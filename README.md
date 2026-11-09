@@ -16,10 +16,14 @@ Rascunho de um editor vetorial simples para trabalhos a laser, com milímetros c
 ## Aplicativo desktop
 
 - Execute `npm run desktop` para abrir o CommBurn em uma janela desktop durante o desenvolvimento.
-- O GitHub Actions executa testes e valida os pacotes Linux e Windows em pushes para `main` e pull requests direcionados a `main`.
-- O workflow **Build MSIX** gera um pacote Windows separado em pushes/pull requests para `main` ou sob demanda. O `.msix` fica disponível como artifact da execução e não é enviado para uma GitHub Release.
-- Para publicar uma versão, atualize `package.json` e `package-lock.json`, crie e envie a tag correspondente, por exemplo `v0.1.1`. O workflow recusa tags que não correspondam a `v<version>` e publica uma GitHub Release depois que os três builds concluírem.
+- O GitHub Actions executa os testes automaticamente em pushes para `main` e pull requests direcionados a `main`. A criação de pacotes de lançamento é manual.
+- Para criar builds versionados:
+  1. Atualize a versão, por exemplo, com `npm version 0.1.1 --no-git-tag-version` (isso altera `package.json` e `package-lock.json`, sem criar uma tag).
+  2. Envie essa alteração para `main` com seu fluxo normal de commit e push.
+  3. No GitHub, abra **Actions → Desktop release → Run workflow**, selecione `main`, informe `0.1.1` (sem `v`) e inicie.
+  4. Quando a execução terminar com sucesso, a GitHub Release `v0.1.1` terá os instaladores de Linux, Windows e macOS.
 - A publicação inclui instalador `.msi` e executável portátil `.exe` para Windows, `.dmg` e `.zip` para macOS, e `.AppImage` e `.deb` para Linux. As builds macOS ainda não são assinadas nem notarizadas; isso requer certificados e credenciais Apple configurados como secrets do repositório.
+- Para gerar um `.msix` versionado, use a mesma versão já enviada para `main` e abra **Actions → Build MSIX → Run workflow**. Escolha `main`, informe a versão (por exemplo, `0.1.1`) e inicie. Ao terminar, baixe `commburn-msix-v0.1.1` na seção **Artifacts** da execução. O arquivo fica disponível por 90 dias e não é adicionado à GitHub Release. O pacote usa a identidade e o publisher reservados no Partner Center; assine-o conforme os requisitos da conta antes do envio. Também é possível executar `npm run dist:msix` localmente no Windows.
 
 O primeiro envio à máquina suporta somente contornos retangulares. Confira as limitações e precauções de hardware em [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md). O contrato de automação, plugins e GRBL está em [docs/PLUGIN_CLI_CONTRACT.md](docs/PLUGIN_CLI_CONTRACT.md).
 

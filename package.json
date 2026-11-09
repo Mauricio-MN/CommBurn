@@ -10,7 +10,7 @@
     "start": "node server.mjs",
     "desktop": "electron .",
     "dist": "electron-builder --publish never",
-    "dist:msix": "electron-builder --win appx --publish never"
+    "dist:msix": "electron-builder --win appx --publish never && node scripts/rename-msix.mjs"
   },
   "dependencies": {
     "@jodit/image-editor": "^0.2.5",
@@ -66,10 +66,11 @@
       "createStartMenuShortcut": true
     },
     "appx": {
-      "applicationId": "CommBurn",
       "identityName": "CMBRN-Software.CommBurn",
+      "applicationId": "CommBurn",
       "publisher": "CN=7388B7C3-5297-4CC5-82D1-023AC104A00B",
       "publisherDisplayName": "CMBRN - Software",
+      "displayName": "CommBurn",
       "minVersion": "10.0.19041.0"
     },
     "linux": {

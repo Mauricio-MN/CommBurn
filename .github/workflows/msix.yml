@@ -1,13 +1,12 @@
 name: Build MSIX
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão em package.json, sem o prefixo v (por exemplo, 0.1.1)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,20 +20,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Validate version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:GITHUB_REF_NAME -ne "main") {
+            Write-Error "Run this workflow from the main branch"
+            exit 1
+          }
+          $packageVersion = node -p "require('./package.json').version"
+          if ($env:RELEASE_VERSION -ne $packageVersion) {
+            Write-Error "Input version $env:RELEASE_VERSION must match package.json version $packageVersion"
+            exit 1
+          }
       - run: npm ci
       - run: npm test
       - run: npm run dist:msix
-      - name: Rename AppX package to MSIX
-        shell: pwsh
-        run: |
-          $packages = @(Get-ChildItem -Path dist -Filter '*.appx' -File)
-          if ($packages.Count -ne 1) {
-            throw "Expected one AppX package in dist, found $($packages.Count)."
-          }
-          $destination = Join-Path $packages[0].DirectoryName "$($packages[0].BaseName).msix"
-          Move-Item -LiteralPath $packages[0].FullName -Destination $destination
       - uses: actions/upload-artifact@v4
         with:
-          name: commburn-msix
+          name: commburn-msix-v${{ inputs.version }}
           path: dist/*.msix
           if-no-files-found: error
+          retention-days: 90
