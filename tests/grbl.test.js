@@ -6,6 +6,7 @@ import { GrblConnection } from "../src/machine/grbl.js";
 class MockSerialPort extends EventEmitter {
   writes = [];
   isOpen = true;
+  baudRate = 115200;
 
   write(data) {
     this.writes.push(data);
@@ -19,6 +20,11 @@ class MockSerialPort extends EventEmitter {
   }
 
   drain(callback) {
+    callback(null);
+  }
+
+  update({ baudRate }, callback) {
+    this.baudRate = baudRate;
     callback(null);
   }
 }
@@ -36,6 +42,68 @@ test("GRBL sender waits for each acknowledgement and idle status", async () => {
   assert.deepEqual(serialPort.writes.slice(0, 2), ["G21\n", "M5\n"]);
   assert.equal(serialPort.writes.filter((write) => write === "?").length, 2);
   assert.deepEqual(progress, [{ completed: 1, total: 2 }, { completed: 2, total: 2 }]);
+});
+
+test("GRBL settings query reads and returns the configured maximum spindle speed", async () => {
+  const serialPort = new MockSerialPort();
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+    if (data === "$$\n") {
+      setImmediate(() => this.emit("data", Buffer.from("$30=1000\r\n$31=0\r\n$32=1\r\nok\r\n")));
+    }
+  };
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 100 });
+
+  assert.deepEqual(await connection.querySettings(), { "$30": 1000, "$31": 0, "$32": 1 });
+  assert.deepEqual(connection.settings, { "$30": 1000, "$31": 0, "$32": 1 });
+  assert.deepEqual(serialPort.writes, ["$$\n"]);
+});
+
+test("GRBL settings query returns settings even when $30 is not present", async () => {
+  const serialPort = new MockSerialPort();
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+    if (data === "$$\n") setImmediate(() => this.emit("data", Buffer.from("$31=0\r\nok\r\n")));
+  };
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 100 });
+
+  assert.deepEqual(await connection.querySettings(), { "$31": 0 });
+});
+
+test("GRBL settings query rejects when the controller does not acknowledge the request", async () => {
+  const serialPort = new MockSerialPort();
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+  };
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 20 });
+
+  await assert.rejects(connection.querySettings(), /Timed out waiting for controller acknowledgement: \$\$/);
+  assert.deepEqual(connection.settings, {});
+});
+
+test("GRBL baud detection probes known speeds using status queries only", async () => {
+  const serialPort = new MockSerialPort();
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+    if (data === "?" && this.baudRate === 230400) {
+      setImmediate(() => this.emit("data", Buffer.from("<Idle|MPos:0,0,0>\r\n")));
+    }
+  };
+  const connection = new GrblConnection(serialPort);
+
+  assert.equal(await connection.detectBaudRate([115200, 230400], { probeTimeoutMs: 20 }), 230400);
+  assert.deepEqual(serialPort.writes, ["?", "?"]);
+  assert.equal(serialPort.baudRate, 230400);
+});
+
+test("GRBL baud detection reports when none of the tested speeds responds", async () => {
+  const serialPort = new MockSerialPort();
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+  };
+  const connection = new GrblConnection(serialPort);
+
+  assert.equal(await connection.detectBaudRate([115200, 57600], { probeTimeoutMs: 5 }), null);
 });
 
 test("GRBL sender rejects controller errors and requests feed hold", async () => {

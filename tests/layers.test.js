@@ -75,6 +75,29 @@ test("GRBL uses each layer operation, feed, power, pass count, fill spacing, and
   assert.doesNotMatch(gcode, /X30 Y1/);
 });
 
+test("GRBL plan estimates work time per operation using configured feed and passes", () => {
+  const plan = planGrblJob({
+    widthMm: 80,
+    heightMm: 50,
+    layers: [
+      { id: "engrave", operation: "engrave", feedMmPerMinute: 120 },
+      { id: "cut", operation: "cut", feedMmPerMinute: 60, passes: 2 },
+      { id: "fill", operation: "fill", feedMmPerMinute: 240, fillSpacingMm: 2 }
+    ],
+    elements: [
+      { id: "engrave-box", type: "rect", xMm: 1, yMm: 1, widthMm: 5, heightMm: 4, layerId: "engrave" },
+      { id: "cut-box", type: "rect", xMm: 10, yMm: 1, widthMm: 2, heightMm: 3, layerId: "cut" },
+      { id: "fill-box", type: "rect", xMm: 20, yMm: 1, widthMm: 4, heightMm: 4, layerId: "fill" }
+    ]
+  }, machineSettings);
+
+  assert.deepEqual(plan.stats.estimatedWorkTimeSecondsByOperation, {
+    engrave: 9,
+    cut: 20,
+    fill: 3
+  });
+});
+
 test("layer configurations and object layer references are validated", () => {
   assert.throws(() => createDocument({ layers: [] }), /at least one layer/);
   assert.throws(() => createDocument({
@@ -98,7 +121,47 @@ test("GRBL filled layers reject unsafe scan-line counts", () => {
   assert.throws(() => renderGrblJob({
     layers: [{ id: "dense", operation: "fill", fillSpacingMm: 0.000001 }],
     elements: [{ type: "rect", xMm: 1, yMm: 1, widthMm: 1, heightMm: 1, layerId: "dense" }]
-  }, machineSettings), /too many scan lines/);
+  }, machineSettings), /excede 50\.000 linhas de varredura/);
+});
+
+test("GRBL fills a 180 by 120 mm rectangle at 0.05 mm spacing", () => {
+  const plan = planGrblJob({
+    widthMm: 180,
+    heightMm: 120,
+    layers: [{ id: "fill", operation: "fill", fillSpacingMm: 0.05 }],
+    elements: [{ id: "full-area", type: "rect", xMm: 0, yMm: 0, widthMm: 180, heightMm: 120, layerId: "fill" }]
+  }, machineSettings);
+
+  assert.equal(plan.stats.workPathCount, 2401);
+  assert.equal(plan.paths.find((path) => path.kind === "work").points[0].yMm, 0);
+  assert.equal(plan.paths.filter((path) => path.kind === "work").at(-1).points[0].yMm, 120);
+});
+
+test("GRBL fills complex vector geometry at 0.05 mm spacing without a segment-count false rejection", () => {
+  const subdivisions = 1200;
+  const topEdge = Array.from({ length: subdivisions + 1 }, (_, index) => {
+    const xMm = 180 * index / subdivisions;
+    const yMm = index % 2 === 0 ? 0.5 : 1;
+    return `L ${xMm} ${yMm}`;
+  }).join(" ");
+  const plan = planGrblJob({
+    widthMm: 180,
+    heightMm: 120,
+    layers: [{ id: "fill", operation: "fill", fillSpacingMm: 0.05 }],
+    elements: [{
+      id: "detailed-area",
+      type: "path",
+      xMm: 0,
+      yMm: 0,
+      widthMm: 180,
+      heightMm: 120,
+      pathData: `M 0 0.5 ${topEdge} L 180 120 L 0 120 Z`,
+      layerId: "fill"
+    }]
+  }, machineSettings);
+
+  assert.ok(plan.stats.workPathCount >= 2400);
+  assert.ok(plan.stats.workPathCount < 100000);
 });
 
 test("GRBL fills closed vector paths and leaves holes unfilled", () => {

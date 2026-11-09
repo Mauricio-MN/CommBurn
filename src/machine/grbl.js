@@ -8,6 +8,8 @@ export class GrblConnection {
     this.busy = false;
     this.cancelRequested = false;
     this.status = null;
+    this.statusWaiter = null;
+    this.grblSettings = new Map();
     this.serialError = null;
     this.handleData = (data) => this.receive(data);
     this.handleError = (error) => {
@@ -25,16 +27,85 @@ export class GrblConnection {
     for (const line of lines) {
       const response = line.trim();
       if (!response) continue;
-      if (response.startsWith("<") && response.includes(">")) {
-        this.status = response.slice(1, response.indexOf(">")).split("|", 1)[0];
+      const status = /^<(Idle|Run|Jog|Hold(?::\d+)?|Alarm(?::\d+)?|Door(?::\d+)?|Check|Home|Sleep|Tool)(?:\||>)/i.exec(response);
+      if (status) {
+        this.status = status[1];
+        this.statusWaiter?.resolve(this.status);
       } else if (/^ALARM:/i.test(response)) {
         this.rejectPending(new Error(`Controller alarm: ${response}`));
       } else if (/^error:/i.test(response)) {
         this.rejectPending(new Error(`Controller rejected command: ${response}`));
-      } else if (/^ok$/i.test(response)) {
-        this.pending?.resolve();
+      } else {
+        const setting = /^\$(\d+)=([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)$/i.exec(response);
+        if (setting) {
+          const value = Number(setting[2]);
+          if (Number.isFinite(value)) this.grblSettings.set(Number(setting[1]), value);
+        } else if (/^ok$/i.test(response)) {
+          this.pending?.resolve();
+        }
       }
     }
+  }
+
+  get settings() {
+    return Object.fromEntries([...this.grblSettings].map(([number, value]) => [`$${number}`, value]));
+  }
+
+  async querySettings() {
+    if (this.busy) throw new Error("Cannot query controller settings while a machine job is running");
+    this.grblSettings.clear();
+    await this.sendLine("$$");
+    return this.settings;
+  }
+
+  async queryStatus({ timeoutMs = 250 } = {}) {
+    if (!this.serialPort.isOpen) throw new Error("Cannot query a closed serial connection");
+    if (this.serialError) throw this.serialError;
+    if (this.statusWaiter) throw new Error("A GRBL status query is already pending");
+    this.status = null;
+    const result = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.statusWaiter?.timer === timer) {
+          this.statusWaiter = null;
+          resolve(null);
+        }
+      }, timeoutMs);
+      this.statusWaiter = {
+        timer,
+        resolve: (status) => {
+          clearTimeout(timer);
+          this.statusWaiter = null;
+          resolve(status);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          this.statusWaiter = null;
+          reject(error);
+        }
+      };
+    });
+    try {
+      this.serialPort.write("?");
+      await new Promise((resolve, reject) => this.serialPort.drain((error) => error ? reject(error) : resolve()));
+    } catch (error) {
+      this.statusWaiter?.reject(error);
+    }
+    return result;
+  }
+
+  async detectBaudRate(baudRates, { probeTimeoutMs = 300 } = {}) {
+    if (this.busy) throw new Error("Cannot detect the serial baud rate while a machine job is running");
+    if (!Array.isArray(baudRates) || baudRates.length === 0
+      || baudRates.some((baudRate) => !Number.isSafeInteger(baudRate) || baudRate < 1200 || baudRate > 1000000)) {
+      throw new TypeError("Baud rate candidates must be valid serial speeds");
+    }
+    for (const baudRate of baudRates) {
+      await new Promise((resolve, reject) => {
+        this.serialPort.update({ baudRate }, (error) => error ? reject(error) : resolve());
+      });
+      if (await this.queryStatus({ timeoutMs: probeTimeoutMs })) return baudRate;
+    }
+    return null;
   }
 
   rejectPending(error) {
@@ -130,6 +201,7 @@ export class GrblConnection {
 
   async close() {
     if (this.busy) throw new Error("Cannot disconnect while a machine job is running; request feed hold first");
+    this.statusWaiter?.reject(new Error("Serial connection closed during a status query"));
     this.serialPort.off("data", this.handleData);
     this.serialPort.off("error", this.handleError);
     if (this.serialPort.isOpen) {

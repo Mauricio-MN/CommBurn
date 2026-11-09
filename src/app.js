@@ -11,6 +11,12 @@ import { LayersPanel } from "./ui/layers-panel.js";
 import { PathEditor } from "./ui/path-editor.js";
 import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "./core/svg-import.js";
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
+import {
+  createMachinePlayback,
+  formatOperationTimeEstimates,
+  getMachinePlaybackSegments,
+  groupMachinePreviewPaths
+} from "./ui/machine-preview.js";
 
 const byId = (id) => document.getElementById(id);
 const SIMULATOR_MAX_SPINDLE_SPEED = 1000;
@@ -114,6 +120,11 @@ let noticeTimer;
 let machineConnected = false;
 let machineSimulation = false;
 let machineBusy = false;
+let machineSimulationPlan = null;
+let machineSimulationDocument = null;
+let machineSimulationPlayback = [];
+let machineSimulationCompletedLines = 0;
+let machineSimulationCanvasSize = null;
 let statusPollTimer;
 const history = new DocumentHistory(currentDocument);
 const pathEditor = new PathEditor(byId("path-editor-dialog"));
@@ -158,7 +169,9 @@ function renderRuler(container, lengthMm, vertical = false) {
 function resizeBoard(widthMm = currentDocument.widthMm, heightMm = currentDocument.heightMm) {
   const ratio = widthMm / heightMm;
   const availableWidth = Math.max(0, stage.clientWidth - 72);
-  const availableHeight = Math.max(0, stage.clientHeight - 24);
+  const stageVerticalPadding = 10 + 24;
+  const topRulerHeight = 27;
+  const availableHeight = Math.max(0, stage.clientHeight - stageVerticalPadding - topRulerHeight);
   const drawingWidth = Math.min(1100, availableWidth - 42, availableHeight * ratio);
   boardFrame.style.width = `${Math.max(0, drawingWidth) + 42}px`;
   boardFrame.style.setProperty("--doc-ratio", `${widthMm} / ${heightMm}`);
@@ -317,10 +330,32 @@ function updateMachineControls() {
   disconnectButton.disabled = !machineConnected || machineBusy;
   serialPathInput.disabled = machineConnected;
   byId("baud-rate").disabled = machineConnected;
+  byId("read-machine-settings").disabled = !machineConnected || machineSimulation || machineBusy;
   byId("machine-safety-check").hidden = machineSimulation;
   startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy;
   startMachineButton.textContent = machineSimulation ? "Simular envio de contornos" : "Enviar contornos à máquina";
   holdMachineButton.disabled = !machineConnected || !machineBusy;
+}
+
+function applyControllerSettings(settings) {
+  const maxSpindleSpeed = settings?.$30;
+  if (typeof maxSpindleSpeed !== "number" || !Number.isFinite(maxSpindleSpeed) || maxSpindleSpeed <= 0) return false;
+  byId("machine-smax").value = String(maxSpindleSpeed);
+  return true;
+}
+
+function reportControllerSettings(result) {
+  if (applyControllerSettings(result.settings)) {
+    machineState.textContent += ` Valor $30 lido: ${result.settings.$30}.`;
+    updateMachineControls();
+    return true;
+  }
+  const details = result.settingsError ?? "A resposta não continha um valor $30 válido.";
+  const message = `Não foi possível ler $30. ${details} O campo continua editável para preenchimento manual.`;
+  machineState.textContent += ` ${message}`;
+  showNotice(message);
+  updateMachineControls();
+  return false;
 }
 
 async function restoreMachineConnection() {
@@ -339,15 +374,24 @@ async function restoreMachineConnection() {
       machineState.textContent = machineSimulation
         ? "Simulador GRBL conectado. Nenhum hardware ou laser será acionado."
         : "Controlador GRBL conectado. Confirme a máquina antes de enviar.";
+      if (!machineSimulation && state.settings) applyControllerSettings(state.settings);
     }
     updateMachineControls();
+    if (machineConnected && !machineSimulation && !machineBusy) {
+      try {
+        const result = await machineApi("/api/settings", "POST", {});
+        reportControllerSettings(result);
+      } catch (error) {
+        reportControllerSettings({ settingsError: error.message });
+      }
+    }
   } catch {
     machineState.textContent = "Estado da conexão indisponível neste modo de execução.";
   }
 }
 
 async function refreshPorts() {
-  const { ports } = await machineApi("/api/ports");
+  const { ports, warning } = await machineApi("/api/ports");
   const options = byId("serial-port-options");
   options.replaceChildren(...ports.map((port) => {
     const option = document.createElement("option");
@@ -355,12 +399,17 @@ async function refreshPorts() {
     option.label = [port.path, port.manufacturer].filter(Boolean).join(" — ");
     return option;
   }));
-  if (ports.length === 0) machineState.textContent = "Nenhuma porta serial encontrada.";
+  if (warning) machineState.textContent = warning;
+  else if (ports.length === 0) machineState.textContent = "Nenhuma porta serial encontrada. Você também pode digitar o caminho manualmente.";
+  return { warning };
 }
 
 async function pollMachineJob() {
   try {
     const result = await machineApi("/api/job-status");
+    if (machineSimulation && machineSimulationPlan) {
+      renderMachineSimulationProgress(result.completed, result.total, result.state);
+    }
     if (result.state === "running") {
       machineState.textContent = machineSimulation
         ? `Simulando comandos: ${result.completed}/${result.total}`
@@ -521,40 +570,213 @@ function createMachinePlan({ allowDefaultSmax = false } = {}) {
   });
 }
 
+function updateMachinePreviewStats(plan) {
+  const stats = plan.stats;
+  byId("machine-preview-stats").textContent =
+    `${stats.workPathCount} trajetórias de trabalho · ${stats.rapidMoveCount} saltos rápidos · `
+    + `${stats.workDistanceMm.toFixed(1)} mm de trabalho · ${stats.travelDistanceMm.toFixed(1)} mm de deslocamento conhecido`;
+  byId("machine-preview-time").textContent =
+    formatOperationTimeEstimates(stats.estimatedWorkTimeSecondsByOperation);
+  byId("machine-preview-code").textContent = plan.gcode;
+}
+
 function drawMachinePreview(plan) {
   const svg = byId("machine-path-preview");
   const documentModel = readDocument();
   svg.setAttribute("viewBox", `0 0 ${documentModel.widthMm} ${documentModel.heightMm}`);
   svg.style.aspectRatio = `${documentModel.widthMm} / ${documentModel.heightMm}`;
   svg.replaceChildren();
-  const layerColors = new Map(documentModel.layers.map((layer) => [layer.id, layer.color]));
-  for (const plannedPath of plan.paths) {
+  const layersById = new Map(documentModel.layers.map((layer) => [layer.id, layer]));
+  for (const plannedPath of groupMachinePreviewPaths(plan.paths)) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const [first, ...rest] = plannedPath.points;
-    path.setAttribute("d", `M${first.xMm} ${first.yMm}${rest.map((point) => ` L${point.xMm} ${point.yMm}`).join("")}`);
+    path.setAttribute("d", plannedPath.pathData);
     path.setAttribute("fill", "none");
-    path.setAttribute("stroke", plannedPath.kind === "travel" ? "#8994a4" : layerColors.get(plannedPath.layerId));
+    path.setAttribute("stroke", plannedPath.kind === "travel" ? "#8994a4" : layersById.get(plannedPath.layerId).color);
     path.setAttribute("stroke-width", plannedPath.kind === "travel" ? "0.35" : "0.6");
     path.setAttribute("vector-effect", "non-scaling-stroke");
     if (plannedPath.kind === "travel") path.setAttribute("stroke-dasharray", "3 2");
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
     title.textContent = plannedPath.kind === "travel"
       ? "Deslocamento rápido entre trajetórias; laser desligado"
-      : `${plannedPath.operation} · ${plannedPath.elementId} · passe ${plannedPath.pass}`;
+      : `Trajetórias de trabalho · ${layersById.get(plannedPath.layerId).name}`;
     path.append(title);
     svg.append(path);
   }
-  const stats = plan.stats;
-  byId("machine-preview-stats").textContent =
-    `${stats.workPathCount} trajetórias de trabalho · ${stats.rapidMoveCount} saltos rápidos · `
-    + `${stats.workDistanceMm.toFixed(1)} mm de trabalho · ${stats.travelDistanceMm.toFixed(1)} mm de deslocamento conhecido`;
-  byId("machine-preview-code").textContent = plan.gcode;
+  updateMachinePreviewStats(plan);
+}
+
+function machineSimulationCanvasDimensions() {
+  const visual = byId("machine-simulation-visual");
+  const rect = visual.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  const pixelRatio = window.devicePixelRatio || 1;
+  return {
+    width: rect.width,
+    height: rect.height,
+    pixelRatio,
+    pixelWidth: Math.max(1, Math.round(rect.width * pixelRatio)),
+    pixelHeight: Math.max(1, Math.round(rect.height * pixelRatio))
+  };
+}
+
+function prepareMachineSimulationCanvases() {
+  const dimensions = machineSimulationCanvasDimensions();
+  if (!dimensions) return false;
+  const resized = !machineSimulationCanvasSize
+    || dimensions.pixelWidth !== machineSimulationCanvasSize.pixelWidth
+    || dimensions.pixelHeight !== machineSimulationCanvasSize.pixelHeight;
+  if (!resized) return true;
+
+  machineSimulationCanvasSize = dimensions;
+  for (const id of ["machine-simulation-plan", "machine-simulation-playback"]) {
+    const canvas = byId(id);
+    canvas.width = dimensions.pixelWidth;
+    canvas.height = dimensions.pixelHeight;
+  }
+  drawMachineSimulationPlan();
+  machineSimulationCompletedLines = 0;
+  return true;
+}
+
+function setupMachineSimulationContext(canvas, { clear = true } = {}) {
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("O navegador não disponibilizou o canvas da simulação visual.");
+  const dimensions = machineSimulationCanvasSize;
+  context.setTransform(dimensions.pixelRatio, 0, 0, dimensions.pixelRatio, 0, 0);
+  if (clear) context.clearRect(0, 0, dimensions.width, dimensions.height);
+  const documentModel = machineSimulationDocument;
+  const scale = Math.min(
+    (dimensions.width - 24) / documentModel.widthMm,
+    (dimensions.height - 24) / documentModel.heightMm
+  );
+  const offsetX = (dimensions.width - documentModel.widthMm * scale) / 2;
+  const offsetY = (dimensions.height - documentModel.heightMm * scale) / 2;
+  context.save();
+  context.translate(offsetX, offsetY);
+  context.scale(scale, scale);
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  return { context, scale };
+}
+
+function drawMachineSimulationPlan() {
+  const canvas = byId("machine-simulation-plan");
+  const { context, scale } = setupMachineSimulationContext(canvas);
+  const { widthMm, heightMm } = machineSimulationDocument;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, widthMm, heightMm);
+  context.beginPath();
+  context.strokeStyle = "#cbd5e1";
+  context.lineWidth = 0.6 / scale;
+  context.rect(0, 0, widthMm, heightMm);
+  context.stroke();
+
+  context.beginPath();
+  context.strokeStyle = "#b8c4d4";
+  context.lineWidth = 0.55 / scale;
+  context.setLineDash([]);
+  for (const path of machineSimulationPlan.paths) {
+    if (path.kind !== "work") continue;
+    context.moveTo(path.points[0].xMm, path.points[0].yMm);
+    for (const point of path.points.slice(1)) context.lineTo(point.xMm, point.yMm);
+  }
+  context.stroke();
+
+  context.beginPath();
+  context.strokeStyle = "#8793a3";
+  context.lineWidth = 0.4 / scale;
+  context.setLineDash([3 / scale, 2 / scale]);
+  for (const path of machineSimulationPlan.paths) {
+    if (path.kind !== "travel") continue;
+    context.moveTo(path.points[0].xMm, path.points[0].yMm);
+    for (const point of path.points.slice(1)) context.lineTo(point.xMm, point.yMm);
+  }
+  context.stroke();
+  context.setLineDash([]);
+  context.restore();
+}
+
+function drawMachineSimulationSegments(segments) {
+  if (segments.length === 0) return;
+  const canvas = byId("machine-simulation-playback");
+  const { context, scale } = setupMachineSimulationContext(canvas, { clear: false });
+  const layerColors = new Map(machineSimulationDocument.layers.map((layer) => [layer.id, layer.color]));
+  for (const kind of ["work", "travel"]) {
+    const grouped = new Map();
+    for (const segment of segments) {
+      if (segment.kind !== kind) continue;
+      const color = kind === "travel" ? "#626f80" : layerColors.get(segment.layerId);
+      if (!grouped.has(color)) grouped.set(color, []);
+      grouped.get(color).push(segment);
+    }
+    for (const [color, paths] of grouped) {
+      context.beginPath();
+      context.strokeStyle = color;
+      context.lineWidth = (kind === "work" ? 1.4 : 0.9) / scale;
+      context.setLineDash(kind === "travel" ? [3 / scale, 2 / scale] : []);
+      for (const path of paths) {
+        context.moveTo(path.points[0].xMm, path.points[0].yMm);
+        context.lineTo(path.points.at(-1).xMm, path.points.at(-1).yMm);
+      }
+      context.stroke();
+    }
+  }
+  context.setLineDash([]);
+  context.restore();
+}
+
+function renderMachineSimulationProgress(completed, total, state) {
+  if (!machineSimulationPlan || !prepareMachineSimulationCanvases()) return;
+  const completedLines = Math.max(0, Math.min(completed, total));
+  if (completedLines < machineSimulationCompletedLines) {
+    byId("machine-simulation-playback").width = machineSimulationCanvasSize.pixelWidth;
+    byId("machine-simulation-playback").height = machineSimulationCanvasSize.pixelHeight;
+    machineSimulationCompletedLines = 0;
+  }
+  const segments = getMachinePlaybackSegments(
+    machineSimulationPlayback,
+    machineSimulationCompletedLines,
+    completedLines
+  );
+  drawMachineSimulationSegments(segments);
+  machineSimulationCompletedLines = completedLines;
+  const progress = byId("machine-simulation-progress");
+  progress.max = Math.max(1, total);
+  progress.value = completedLines;
+  const percent = total > 0 ? Math.floor(completedLines / total * 100) : 0;
+  byId("machine-simulation-status").textContent = state === "complete"
+    ? `Simulação concluída: ${completedLines}/${total} comandos (${percent}%). Nenhum hardware ou laser foi acionado.`
+    : state === "stopped"
+      ? `Simulação interrompida em ${completedLines}/${total} comandos (${percent}%).`
+      : `Percurso simulado: ${completedLines}/${total} comandos (${percent}%). Trabalho em cores; deslocamentos tracejados com laser desligado.`;
+}
+
+function showMachineSimulation(plan, documentModel, totalLines) {
+  machineSimulationPlan = plan;
+  machineSimulationDocument = documentModel;
+  machineSimulationPlayback = createMachinePlayback(plan).entries;
+  machineSimulationCompletedLines = 0;
+  machineSimulationCanvasSize = null;
+  const dialog = byId("machine-preview-dialog");
+  byId("machine-preview-title").textContent = "Simulação visual GRBL";
+  byId("machine-preview-description").textContent =
+    "Cinza claro mostra o plano completo; o traço colorido avança conforme os comandos são simulados. Tracejado indica deslocamento rápido com o laser desligado.";
+  byId("machine-simulation-panel").hidden = false;
+  byId("machine-path-preview").hidden = true;
+  updateMachinePreviewStats(plan);
+  if (!dialog.open) dialog.showModal();
+  renderMachineSimulationProgress(0, totalLines, "running");
 }
 
 function showMachinePreview() {
   try {
     const plan = createMachinePlan({ allowDefaultSmax: true });
     drawMachinePreview(plan);
+    byId("machine-preview-title").textContent = "Prévia do processamento GRBL";
+    byId("machine-preview-description").textContent =
+      "Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.";
+    byId("machine-simulation-panel").hidden = true;
+    byId("machine-path-preview").hidden = false;
     byId("machine-preview-dialog").showModal();
   } catch (error) {
     showNotice(`Não foi possível gerar a prévia GRBL: ${error.message}`);
@@ -1607,8 +1829,8 @@ for (const button of document.querySelectorAll('[data-action="add-rect"]')) butt
 
 byId("refresh-ports").addEventListener("click", async () => {
   try {
-    await refreshPorts();
-    showNotice("Lista de portas seriais atualizada.");
+    const { warning } = await refreshPorts();
+    showNotice(warning ?? "Lista de portas seriais atualizada.");
   } catch (error) {
     showNotice(error.message);
   }
@@ -1616,17 +1838,32 @@ byId("refresh-ports").addEventListener("click", async () => {
 connectButton.addEventListener("click", async () => {
   try {
     if (!serialPathInput.value.trim()) throw new Error("Informe o caminho da porta serial.");
+    const selectedBaudRate = byId("baud-rate").value;
     const result = await machineApi("/api/connect", "POST", {
       path: serialPathInput.value.trim(),
-      baudRate: Number(byId("baud-rate").value)
+      baudRate: selectedBaudRate === "auto" ? "auto" : Number(selectedBaudRate)
     });
     machineConnected = result.connected;
     machineSimulation = false;
-    machineState.textContent = `Conectado em ${result.path} a ${result.baudRate} baud. Verifique o firmware e a máquina antes de enviar.`;
+    if (result.autoDetected) byId("baud-rate").value = String(result.baudRate);
+    byId("machine-smax").value = "";
+    const baudDescription = result.autoDetected
+      ? `baud detectado automaticamente: ${result.baudRate}`
+      : `${result.baudRate} baud selecionado`;
+    machineState.textContent = `Conectado em ${result.path}; ${baudDescription}. Verifique o firmware e a máquina antes de enviar.`;
+    reportControllerSettings(result);
     updateMachineControls();
   } catch (error) {
     machineState.textContent = `Falha na conexão: ${error.message}`;
     showNotice(error.message);
+  }
+});
+byId("read-machine-settings").addEventListener("click", async () => {
+  try {
+    const result = await machineApi("/api/settings", "POST", {});
+    reportControllerSettings(result);
+  } catch (error) {
+    reportControllerSettings({ settingsError: error.message });
   }
 });
 simulateMachineButton.addEventListener("click", async () => {
@@ -1657,17 +1894,21 @@ byId("machine-smax").addEventListener("input", updateMachineControls);
 startMachineButton.addEventListener("click", async () => {
   try {
     if (!machineSimulation && !safetyCheckbox.checked) throw new Error("Confirme a lista de segurança antes de enviar.");
+    const documentModel = readDocument();
+    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation) };
+    const simulationPlan = machineSimulation
+      ? planGrblJob(documentModel, settings)
+      : null;
     const result = await machineApi("/api/job", "POST", {
       safetyConfirmed: safetyCheckbox.checked,
-      document: readDocument(),
-      settings: {
-        maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation)
-      }
+      document: documentModel,
+      settings
     });
     machineBusy = true;
     machineState.textContent = machineSimulation
       ? `Simulação aceita: ${result.lines} comandos. Nenhum hardware será acionado.`
       : `Trabalho aceito: ${result.lines} comandos.`;
+    if (simulationPlan) showMachineSimulation(simulationPlan, documentModel, result.lines);
     updateMachineControls();
     statusPollTimer = setInterval(pollMachineJob, 500);
     await pollMachineJob();

@@ -56,6 +56,59 @@ test("ImageTracer preserves white regions as selectable solid vectors", () => {
   assert.equal("layers" in result, false);
 });
 
+test("ImageTracer curve smoothing stays inside the source image and GRBL work area", () => {
+  const width = 32;
+  const height = 24;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const isBlack = (x * 7 + y * 13) % 11 < 5;
+      data[offset] = isBlack ? 0 : 255;
+      data[offset + 1] = isBlack ? 0 : 255;
+      data[offset + 2] = isBlack ? 0 : 255;
+      data[offset + 3] = 255;
+    }
+  }
+  const tracedSvg = ImageTracer.imagedataToSVG({ data, width, height }, {
+    numberofcolors: 8,
+    pathomit: 0,
+    ltres: 1,
+    qtres: 1,
+    colorsampling: 2,
+    colorquantcycles: 3,
+    layering: 0,
+    rightangleenhance: true,
+    scale: 1,
+    roundcoords: 1,
+    viewbox: true
+  });
+  const tracedTree = svgson.parseSync(tracedSvg);
+  const imported = importTracedImageSvg(tracedTree, {
+    widthMm: 180,
+    heightMm: 120,
+    sourceLayer: DEFAULT_LAYER,
+    idPrefix: "image-trace-bounds"
+  });
+  const bounds = imported.elements.reduce((result, element) => ({
+    minX: Math.min(result.minX, element.xMm),
+    minY: Math.min(result.minY, element.yMm),
+    maxX: Math.max(result.maxX, element.xMm + element.widthMm),
+    maxY: Math.max(result.maxY, element.yMm + element.heightMm)
+  }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+
+  assert.equal(bounds.minX, 0);
+  assert.equal(bounds.minY, 0);
+  assert.equal(bounds.maxX, 180);
+  assert.equal(bounds.maxY, 120);
+  assert.doesNotThrow(() => planGrblJob({
+    widthMm: 180,
+    heightMm: 120,
+    layers: [DEFAULT_LAYER],
+    elements: imported.elements
+  }, { maxSpindleSpeed: 1000 }));
+});
+
 test("ImageTracer paths can generate a GRBL fill on the current fill layer", () => {
   const fillLayer = { ...DEFAULT_LAYER, id: "image-fill", operation: "fill", fillSpacingMm: 1 };
   const tree = svgson.parseSync('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path fill="#ff0000" d="M 0 0 L 10 0 L 10 10 L 0 10 Z"/></svg>');

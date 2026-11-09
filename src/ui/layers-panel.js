@@ -77,7 +77,7 @@ export class LayersPanel {
         this.createField("Potência (%)", this.createInput("powerPercent", layer.powerPercent, "number", { min: "0.1", max: "100", step: "1" })),
         this.createField("Passes", this.createInput("passes", layer.passes, "number", { min: "1", max: "100", step: "1" }))
       );
-      const fillField = this.createField("Espaçamento do preenchimento (mm)", this.createInput("fillSpacingMm", layer.fillSpacingMm, "number", { min: "0.1", step: "0.1" }));
+      const fillField = this.createField("Espaçamento do preenchimento (mm)", this.createInput("fillSpacingMm", layer.fillSpacingMm, "number", { min: "0.05", step: "0.05" }));
       fillField.hidden = layer.operation !== "fill";
       fillField.dataset.fillSetting = "";
       settings.append(fillField);

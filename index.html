@@ -146,13 +146,19 @@
           <label class="field">Porta / caminho serial
             <span class="port-row"><input id="serial-path" list="serial-port-options" placeholder="/dev/ttyACM0 ou COM3"><datalist id="serial-port-options"></datalist><button class="button button-secondary" id="refresh-ports" type="button" aria-label="Atualizar portas">↻</button></span>
           </label>
-          <label class="field">Baud rate<select id="baud-rate"><option>115200</option><option>230400</option><option>57600</option><option>250000</option></select></label>
-          <label class="field">Velocidade máxima S configurada na máquina<input id="machine-smax" type="number" min="1" step="1" placeholder="Confira $30 no controlador"></label>
-          <p class="help-text">Prévia e simulador usam S máximo 1000 quando o campo acima está vazio. Para conectar hardware ou exportar G-code, informe o valor real de $30.</p>
+          <label class="field">Velocidade da comunicação serial (baud)
+            <select id="baud-rate"><option value="115200">115200</option><option value="230400">230400</option><option value="57600">57600</option><option value="250000">250000</option><option value="auto">Detectar automaticamente</option></select>
+          </label>
+          <p class="help-text">É a velocidade de comunicação pelo cabo; CommBurn e controladora precisam usar o mesmo valor. 115200 é comum. Você pode escolher “Detectar automaticamente”: o app testa velocidades conhecidas com uma consulta de estado que não move a máquina. Se não encontrar, selecione uma velocidade do manual.</p>
+          <label class="field">Valor máximo de potência do laser (GRBL $30)
+            <input id="machine-smax" type="number" min="1" step="any" placeholder="Lido da controladora ao conectar">
+          </label>
+          <p class="help-text">Ao conectar, o CommBurn tenta ler $30 automaticamente. Se não conseguir, o campo fica vazio para você preencher; use o botão abaixo para tentar de novo. Se a controladora mostrar $30=1000, informe 1000. Não é uma porcentagem.</p>
           <div class="machine-actions">
             <button class="button button-secondary" id="connect-machine" type="button">Conectar</button>
             <button class="button button-danger" id="disconnect-machine" type="button" disabled>Desconectar</button>
           </div>
+          <button class="button button-secondary full-width" id="read-machine-settings" type="button" disabled>Ler configuração da potência novamente</button>
           <button class="button button-secondary full-width" id="simulate-machine" type="button">Conectar simulador GRBL (sem hardware)</button>
           <button class="button button-secondary full-width" id="preview-machine-job" type="button">Pré-visualizar processo GRBL</button>
           <p class="machine-state" id="machine-state" role="status">Desconectado</p>
@@ -174,9 +180,9 @@
           <div class="stage-note"><span class="status-dot"></span> Escala e medidas em milímetros</div>
         </div>
         <footer class="statusbar"><span id="selection-status">Nenhum objeto selecionado</span><span id="active-tool-status">Selecionar · V</span><span>CommBurn · Rascunho inicial</span></footer>
+        <div id="notice" class="notice" role="status" aria-live="polite"></div>
       </section>
     </main>
-    <div id="notice" class="notice" role="status" aria-live="polite"></div>
     <input id="svg-file-input" type="file" accept=".svg,.json,image/*,application/json" hidden>
     <dialog id="image-edit-dialog" class="image-edit-dialog" aria-labelledby="image-edit-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar editor de imagem">×</button></form>
@@ -196,9 +202,19 @@
     <dialog id="machine-preview-dialog" class="machine-preview-dialog" aria-labelledby="machine-preview-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar prévia">×</button></form>
       <h2 id="machine-preview-title">Prévia do processamento GRBL</h2>
-      <p>Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.</p>
+      <p id="machine-preview-description">Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.</p>
+      <div id="machine-simulation-panel" class="machine-simulation-panel" hidden>
+        <p id="machine-simulation-status" class="machine-preview-stats" role="status">Simulação visual pronta; nenhum hardware ou laser será acionado.</p>
+        <progress id="machine-simulation-progress" class="machine-simulation-progress" max="1" value="0" aria-label="Progresso da simulação"></progress>
+        <div id="machine-simulation-visual" class="machine-simulation-visual">
+          <canvas id="machine-simulation-plan" role="img" aria-label="Plano completo do trabalho simulado"></canvas>
+          <canvas id="machine-simulation-playback" aria-hidden="true"></canvas>
+        </div>
+      </div>
       <svg id="machine-path-preview" class="machine-path-preview" role="img" aria-label="Trajetórias de trabalho e deslocamentos rápidos"></svg>
       <p id="machine-preview-stats" class="machine-preview-stats"></p>
+      <p id="machine-preview-time" class="machine-preview-stats" role="status"></p>
+      <p class="help-text">Estimativa calculada com os avanços configurados; não inclui deslocamentos rápidos, aceleração nem tempo de resposta do controlador.</p>
       <details class="gcode-details"><summary>Ver comandos G-code</summary><pre id="machine-preview-code"></pre></details>
       <div class="preview-actions">
         <button class="button button-secondary" type="button" data-action="export-gcode">Exportar G-code</button>

@@ -421,7 +421,9 @@ function flattenVectorPath(element) {
     }
   }
   if (points?.length > 1) paths.push(points);
-  if (paths.flat().length > 100000) throw new RangeError(`Path ${element.id} creates too many GRBL segments`);
+  if (paths.flat().length > 100000) {
+    throw new RangeError(`O caminho ${element.id} excede 100.000 segmentos GRBL; simplifique a geometria antes de gerar a prévia.`);
+  }
   return paths;
 }
 
@@ -434,7 +436,7 @@ function fillPaths(element, algorithm, spacingMm) {
   const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
   if ((usesHorizontal && rowCount > 50000) || (usesVertical && columnCount > 50000)
     || ((usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0)) > 50000) {
-    throw new RangeError(`Fill spacing creates too many scan lines for element ${element.id}`);
+    throw new RangeError(`O preenchimento de ${element.id} excede 50.000 linhas de varredura; aumente o espaçamento.`);
   }
   if (usesHorizontal) {
     for (let row = 0; row < rowCount; row += 1) {
@@ -463,68 +465,97 @@ function fillVectorPaths(element, algorithm, spacingMm) {
     || points[0][0] !== points.at(-1)[0] || points[0][1] !== points.at(-1)[1])) {
     throw new RangeError(`GRBL fill requires closed vector paths; path ${element.id} is open or degenerate`);
   }
-  const segmentCount = polygons.reduce((count, points) => count + points.length - 1, 0);
   const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
   const columnCount = Math.floor(element.widthMm / spacingMm) + 1;
   const usesHorizontal = ["horizontal-serpentine", "horizontal-unidirectional", "crosshatch"].includes(algorithm);
   const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
-  const scanlineCount = (usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0);
-  if (scanlineCount > 50000) throw new RangeError(`Fill spacing creates too many scan lines for element ${element.id}`);
-  if (segmentCount * scanlineCount > 2_000_000) {
-    throw new RangeError(`Path ${element.id} creates too many fill intersections; increase fill spacing or simplify the path`);
+  if ((usesHorizontal && rowCount > 50000) || (usesVertical && columnCount > 50000)
+    || ((usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0)) > 50000) {
+    throw new RangeError(`O preenchimento de ${element.id} excede 50.000 linhas de varredura; aumente o espaçamento.`);
   }
 
-  const spansAt = (fixedAxis, coordinate) => {
+  const visitScanlines = (fixedAxis, originMm, lengthMm, count, visit) => {
     const varyingAxis = 1 - fixedAxis;
-    const intersections = [];
+    const starts = Array.from({ length: count }, () => []);
+    const stops = Array.from({ length: count + 1 }, () => []);
+    const coordinateAt = (index) => Math.min(originMm + index * spacingMm, originMm + lengthMm);
+    const firstLineAtOrAbove = (value) => {
+      let low = 0;
+      let high = count;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        if (coordinateAt(middle) < value) low = middle + 1;
+        else high = middle;
+      }
+      return low;
+    };
+
     for (const polygon of polygons) {
       for (let index = 1; index < polygon.length; index += 1) {
         const start = polygon[index - 1];
         const end = polygon[index];
         const startFixed = start[fixedAxis];
         const endFixed = end[fixedAxis];
-        if ((startFixed <= coordinate && endFixed > coordinate)
-          || (endFixed <= coordinate && startFixed > coordinate)) {
-          const ratio = (coordinate - startFixed) / (endFixed - startFixed);
-          intersections.push(start[varyingAxis] + ratio * (end[varyingAxis] - start[varyingAxis]));
+        if (startFixed === endFixed) continue;
+        const first = firstLineAtOrAbove(Math.min(startFixed, endFixed));
+        const afterLast = firstLineAtOrAbove(Math.max(startFixed, endFixed));
+        if (first >= afterLast || first >= count) continue;
+        const edge = { start, end, startFixed, endFixed };
+        starts[first].push(edge);
+        stops[Math.min(afterLast, count)].push(edge);
+      }
+    }
+
+    const activeEdges = new Set();
+    for (let line = 0; line < count; line += 1) {
+      for (const edge of stops[line]) activeEdges.delete(edge);
+      for (const edge of starts[line]) activeEdges.add(edge);
+      const coordinate = coordinateAt(line);
+      const intersections = [];
+      for (const edge of activeEdges) {
+        if ((edge.startFixed <= coordinate && edge.endFixed > coordinate)
+          || (edge.endFixed <= coordinate && edge.startFixed > coordinate)) {
+          const ratio = (coordinate - edge.startFixed) / (edge.endFixed - edge.startFixed);
+          intersections.push(edge.start[varyingAxis] + ratio * (edge.end[varyingAxis] - edge.start[varyingAxis]));
         }
       }
-    }
-    intersections.sort((left, right) => left - right);
-    if (intersections.length % 2 !== 0) {
-      throw new RangeError(`Path ${element.id} has invalid fill geometry`);
-    }
-    const spans = [];
-    for (let index = 0; index < intersections.length; index += 2) {
-      if (intersections[index + 1] - intersections[index] > 1e-9) {
-        spans.push([intersections[index], intersections[index + 1]]);
+      intersections.sort((left, right) => left - right);
+      if (intersections.length % 2 !== 0) {
+        throw new RangeError(`Path ${element.id} has invalid fill geometry`);
       }
+      const spans = [];
+      for (let index = 0; index < intersections.length; index += 2) {
+        if (intersections[index + 1] - intersections[index] > 1e-9) {
+          spans.push([intersections[index], intersections[index + 1]]);
+        }
+      }
+      visit(line, coordinate, spans);
     }
-    return spans;
   };
 
   const paths = [];
-  if (usesHorizontal) {
-    for (let row = 0; row < rowCount; row += 1) {
-      const yMm = Math.min(element.yMm + row * spacingMm, element.yMm + element.heightMm);
-      const spans = spansAt(1, yMm);
-      const reverse = algorithm !== "horizontal-unidirectional" && row % 2 === 1;
-      if (reverse) spans.reverse();
-      for (const [left, right] of spans) {
-        paths.push(reverse ? [[right, yMm], [left, yMm]] : [[left, yMm], [right, yMm]]);
+  const appendSpans = (fixedAxis, coordinate, spans, reverse) => {
+    if (reverse) spans.reverse();
+    for (const [start, end] of spans) {
+      paths.push(fixedAxis === 1
+        ? reverse ? [[end, coordinate], [start, coordinate]] : [[start, coordinate], [end, coordinate]]
+        : reverse ? [[coordinate, end], [coordinate, start]] : [[coordinate, start], [coordinate, end]]);
+      if (paths.length > 100000) {
+        throw new RangeError(`O preenchimento de ${element.id} excede 100.000 trajetórias; aumente o espaçamento ou simplifique a geometria.`);
       }
     }
+  };
+  if (usesHorizontal) {
+    visitScanlines(1, element.yMm, element.heightMm, rowCount, (row, yMm, spans) => {
+      const reverse = algorithm !== "horizontal-unidirectional" && row % 2 === 1;
+      appendSpans(1, yMm, spans, reverse);
+    });
   }
   if (usesVertical) {
-    for (let column = 0; column < columnCount; column += 1) {
-      const xMm = Math.min(element.xMm + column * spacingMm, element.xMm + element.widthMm);
-      const spans = spansAt(0, xMm);
+    visitScanlines(0, element.xMm, element.widthMm, columnCount, (column, xMm, spans) => {
       const reverse = column % 2 === 1;
-      if (reverse) spans.reverse();
-      for (const [top, bottom] of spans) {
-        paths.push(reverse ? [[xMm, bottom], [xMm, top]] : [[xMm, top], [xMm, bottom]]);
-      }
-    }
+      appendSpans(0, xMm, spans, reverse);
+    });
   }
   return paths;
 }
@@ -545,7 +576,7 @@ function createElementWorkPaths(document, layer, element) {
       ? flattenVectorPath(element)
       : [outline];
   if (sourcePaths.length * layer.passes > 100000) {
-    throw new RangeError(`Layer ${layer.name} creates too many tool paths`);
+    throw new RangeError(`A camada ${layer.name} excede 100.000 trajetórias; aumente o espaçamento ou reduza o número de passagens.`);
   }
   const workPaths = [];
   for (let pass = 1; pass <= layer.passes; pass += 1) {
@@ -626,6 +657,7 @@ export function planGrblJob(input, settings) {
   let previousPoint = null;
   let travelDistanceMm = 0;
   let workDistanceMm = 0;
+  const estimatedWorkTimeSecondsByOperation = { engrave: 0, cut: 0, fill: 0 };
   for (const layer of activeLayers) {
     const layerElements = elements.filter((element) => element.layerId === layer.id);
     if (layerElements.length === 0) continue;
@@ -655,12 +687,16 @@ export function planGrblJob(input, settings) {
     const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint);
     for (const element of orderedElements) {
       for (const workPath of workByElement.get(element.id)) {
-        if (paths.length >= 100000) throw new RangeError("The job creates too many tool paths and rapid moves");
+        if (paths.length >= 100000) {
+          throw new RangeError("O trabalho excede o limite seguro de 100.000 trajetórias GRBL; reduza objetos/passagens ou aumente o espaçamento do preenchimento.");
+        }
         const start = workPath.points[0];
         if (previousPoint) {
           const travelMm = distanceBetween(previousPoint, start);
           if (travelMm > 0) {
-            if (paths.length >= 100000) throw new RangeError("The job creates too many tool paths and rapid moves");
+            if (paths.length >= 100000) {
+              throw new RangeError("O trabalho excede o limite seguro de 100.000 trajetórias GRBL; reduza objetos/passagens ou aumente o espaçamento do preenchimento.");
+            }
             paths.push({
               kind: "travel",
               elementId: element.id,
@@ -679,9 +715,13 @@ export function planGrblJob(input, settings) {
           gcode.push(`G1 X${point.xMm} Y${point.yMm}`);
         }
         paths.push(workPath);
+        let pathDistanceMm = 0;
         for (let index = 1; index < workPath.points.length; index += 1) {
-          workDistanceMm += distanceBetween(workPath.points[index - 1], workPath.points[index]);
+          const distanceMm = distanceBetween(workPath.points[index - 1], workPath.points[index]);
+          workDistanceMm += distanceMm;
+          pathDistanceMm += distanceMm;
         }
+        estimatedWorkTimeSecondsByOperation[layer.operation] += pathDistanceMm / feedMmPerMinute * 60;
         previousPoint = workPath.points.at(-1);
         if (layer.operation !== "fill") gcode.push("M5");
       }
@@ -695,7 +735,8 @@ export function planGrblJob(input, settings) {
       workPathCount: paths.filter((path) => path.kind === "work").length,
       rapidMoveCount: paths.filter((path) => path.kind === "travel").length,
       workDistanceMm,
-      travelDistanceMm
+      travelDistanceMm,
+      estimatedWorkTimeSecondsByOperation
     }
   };
 }

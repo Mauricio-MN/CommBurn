@@ -61,14 +61,36 @@ function sendJson(response, statusCode, body) {
   response.end(JSON.stringify(body));
 }
 
-function attachConnection(serialPort, simulated = false) {
-  connection = new GrblConnection(serialPort, {
+function createGrblConnection(serialPort) {
+  return new GrblConnection(serialPort, {
     onProgress: ({ completed, total }) => {
       jobStatus = { ...jobStatus, completed, total };
     }
   });
+}
+
+function attachConnection(serialPort, simulated = false, existingConnection = null) {
+  connection = existingConnection ?? createGrblConnection(serialPort);
   connection.isSimulation = simulated;
   return connection;
+}
+
+async function queryControllerSettings(currentConnection) {
+  try {
+    const settings = await currentConnection.querySettings();
+    if (typeof settings.$30 !== "number" || !Number.isFinite(settings.$30) || settings.$30 <= 0) {
+      return {
+        settings,
+        settingsError: "A controladora respondeu, mas não informou um valor $30 válido."
+      };
+    }
+    return { settings, settingsError: null };
+  } catch (error) {
+    return {
+      settings: currentConnection.settings,
+      settingsError: `Não foi possível consultar as configurações GRBL: ${error.message}`
+    };
+  }
 }
 
 function verifyLocalRequest(request, response) {
@@ -103,6 +125,20 @@ async function readJson(request) {
   return JSON.parse(body);
 }
 
+export async function listSerialPorts(listPorts = () => SerialPort.list()) {
+  try {
+    return { ports: await listPorts(), warning: null };
+  } catch (error) {
+    const missingUdevadm = error?.code === "ENOENT"
+      && (error?.path === "udevadm" || error?.message?.includes("spawn udevadm ENOENT"));
+    if (!missingUdevadm) throw error;
+    return {
+      ports: [],
+      warning: "A lista automática de portas não está disponível neste Linux. Você ainda pode digitar o caminho da porta manualmente."
+    };
+  }
+}
+
 async function handleApi(request, response, url) {
   if (!verifyLocalRequest(request, response)) return;
   try {
@@ -111,26 +147,55 @@ async function handleApi(request, response, url) {
         connected: Boolean(connection),
         simulated: Boolean(connection?.isSimulation),
         busy: activeJob,
+        settings: connection?.settings ?? null,
         jobStatus
       });
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/ports") {
-      sendJson(response, 200, { ports: await SerialPort.list() });
+      sendJson(response, 200, await listSerialPorts());
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/connect") {
       if (connection) throw new Error("Disconnect the current controller before connecting another");
       const input = await readJson(request);
       if (typeof input.path !== "string" || !input.path) throw new TypeError("A serial port path is required");
-      const baudRate = Number(input.baudRate);
-      if (!Number.isSafeInteger(baudRate) || baudRate < 1200 || baudRate > 1000000) {
+      const baudCandidates = [115200, 230400, 57600, 250000];
+      const detectBaud = input.baudRate === "auto";
+      const baudRate = detectBaud ? baudCandidates[0] : Number(input.baudRate);
+      if (!detectBaud && (!Number.isSafeInteger(baudRate) || baudRate < 1200 || baudRate > 1000000)) {
         throw new RangeError("Baud rate must be an integer between 1200 and 1000000");
       }
       const serialPort = new SerialPort({ path: input.path, baudRate, autoOpen: false });
       await new Promise((resolveOpen, rejectOpen) => serialPort.open((error) => error ? rejectOpen(error) : resolveOpen()));
-      attachConnection(serialPort);
-      sendJson(response, 200, { connected: true, path: input.path, baudRate });
+      let currentConnection;
+      if (detectBaud) {
+        currentConnection = createGrblConnection(serialPort);
+        try {
+          const detectedBaudRate = await currentConnection.detectBaudRate(baudCandidates);
+          if (!detectedBaudRate) {
+            await currentConnection.close();
+            throw new Error("Não foi possível detectar o baud. Selecione manualmente uma velocidade e tente novamente.");
+          }
+          currentConnection = attachConnection(serialPort, false, currentConnection);
+          const { settings, settingsError } = await queryControllerSettings(currentConnection);
+          sendJson(response, 200, {
+            connected: true,
+            path: input.path,
+            baudRate: detectedBaudRate,
+            autoDetected: true,
+            settings,
+            settingsError
+          });
+          return;
+        } catch (error) {
+          if (connection !== currentConnection && serialPort.isOpen) await currentConnection.close();
+          throw error;
+        }
+      }
+      currentConnection = attachConnection(serialPort);
+      const { settings, settingsError } = await queryControllerSettings(currentConnection);
+      sendJson(response, 200, { connected: true, path: input.path, baudRate, autoDetected: false, settings, settingsError });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/simulate-connect") {
@@ -146,6 +211,14 @@ async function handleApi(request, response, url) {
       await current.close();
       connection = null;
       sendJson(response, 200, { connected: false });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/settings") {
+      if (!connection) throw new Error("Conecte uma controladora GRBL para consultar as configurações.");
+      if (connection.isSimulation) throw new Error("O simulador não tem configurações de uma máquina real.");
+      if (activeJob) throw new Error("Não é possível consultar configurações durante o envio de um trabalho.");
+      const { settings, settingsError } = await queryControllerSettings(connection);
+      sendJson(response, 200, { settings, settingsError });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/hold") {
