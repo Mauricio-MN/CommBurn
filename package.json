@@ -69,7 +69,8 @@
       "applicationId": "CommBurn",
       "identityName": "CMBRN-Software.CommBurn",
       "publisher": "CN=7388B7C3-5297-4CC5-82D1-023AC104A00B",
-      "publisherDisplayName": "CMBRN - Software"
+      "publisherDisplayName": "CMBRN - Software",
+      "minVersion": "10.0.19041.0"
     },
     "linux": {
       "target": [
