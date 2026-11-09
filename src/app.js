@@ -17,6 +17,10 @@ import {
   getMachinePlaybackSegments,
   groupMachinePreviewPaths
 } from "./ui/machine-preview.js";
+import {
+  createPresentationDocument,
+  createPresentationSimulationDocument
+} from "./ui/presentation.js";
 
 const byId = (id) => document.getElementById(id);
 const SIMULATOR_MAX_SPINDLE_SPEED = 1000;
@@ -126,6 +130,12 @@ let machineSimulationPlayback = [];
 let machineSimulationCompletedLines = 0;
 let machineSimulationCanvasSize = null;
 let statusPollTimer;
+let presentationActive = false;
+let presentationPaused = false;
+let presentationRun = 0;
+let presentationSnapshot = null;
+let presentationTarget = null;
+let presentationInternalClose = false;
 const history = new DocumentHistory(currentDocument);
 const pathEditor = new PathEditor(byId("path-editor-dialog"));
 
@@ -148,6 +158,7 @@ function numberFrom(input, label, min = -Infinity) {
 }
 
 function commitHistory() {
+  if (presentationActive) return;
   history.push(currentDocument);
 }
 
@@ -564,8 +575,8 @@ function machineMaxSpindleSpeed(allowDefaultSmax = false) {
   return numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE);
 }
 
-function createMachinePlan({ allowDefaultSmax = false } = {}) {
-  return planGrblJob(readDocument(), {
+function createMachinePlan({ allowDefaultSmax = false, documentModel = readDocument() } = {}) {
+  return planGrblJob(documentModel, {
     maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax)
   });
 }
@@ -580,9 +591,8 @@ function updateMachinePreviewStats(plan) {
   byId("machine-preview-code").textContent = plan.gcode;
 }
 
-function drawMachinePreview(plan) {
+function drawMachinePreview(plan, documentModel = readDocument()) {
   const svg = byId("machine-path-preview");
-  const documentModel = readDocument();
   svg.setAttribute("viewBox", `0 0 ${documentModel.widthMm} ${documentModel.heightMm}`);
   svg.style.aspectRatio = `${documentModel.widthMm} / ${documentModel.heightMm}`;
   svg.replaceChildren();
@@ -770,8 +780,13 @@ function showMachineSimulation(plan, documentModel, totalLines) {
 
 function showMachinePreview() {
   try {
-    const plan = createMachinePlan({ allowDefaultSmax: true });
-    drawMachinePreview(plan);
+    const documentModel = presentationActive
+      ? createPresentationSimulationDocument(readDocument())
+      : readDocument();
+    const plan = presentationActive
+      ? planGrblJob(documentModel, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED })
+      : createMachinePlan({ allowDefaultSmax: true, documentModel });
+    drawMachinePreview(plan, documentModel);
     byId("machine-preview-title").textContent = "Prévia do processamento GRBL";
     byId("machine-preview-description").textContent =
       "Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.";
@@ -781,6 +796,354 @@ function showMachinePreview() {
   } catch (error) {
     showNotice(`Não foi possível gerar a prévia GRBL: ${error.message}`);
   }
+}
+
+function presentationUi() {
+  return {
+    card: byId("presentation-card"),
+    cursor: byId("presentation-cursor"),
+    dialog: byId("machine-preview-dialog")
+  };
+}
+
+function movePresentationUi(parent) {
+  const { card, cursor } = presentationUi();
+  parent.append(card, cursor);
+}
+
+function setPresentationInput(input, value) {
+  input.value = String(value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function setPresentationStep(index, title, description, total = 7) {
+  byId("presentation-step-count").textContent = `${index} / ${total}`;
+  byId("presentation-step-label").textContent = "Demonstração de exemplo";
+  byId("presentation-title").textContent = title;
+  byId("presentation-description").textContent = description;
+  byId("presentation-progress").max = total;
+  byId("presentation-progress").value = index;
+}
+
+function presentationCurrent(run) {
+  return presentationActive && run === presentationRun;
+}
+
+function waitPresentation(milliseconds, run) {
+  return new Promise((resolve) => {
+    let remaining = milliseconds;
+    const interval = setInterval(() => {
+      if (!presentationCurrent(run)) {
+        clearInterval(interval);
+        resolve(false);
+      } else if (!presentationPaused) {
+        remaining -= 40;
+        if (remaining <= 0) {
+          clearInterval(interval);
+          resolve(true);
+        }
+      }
+    }, 40);
+  });
+}
+
+async function movePresentationCursor(target, run) {
+  if (!target || !presentationCurrent(run)) return false;
+  target.scrollIntoView({ block: "center", behavior: "smooth" });
+  presentationTarget?.classList.remove("presentation-target");
+  presentationTarget = target;
+  target.classList.add("presentation-target");
+  const bounds = target.getBoundingClientRect();
+  const { cursor } = presentationUi();
+  cursor.style.left = `${bounds.left + Math.min(bounds.width / 2, 30) - 3}px`;
+  cursor.style.top = `${bounds.top + Math.min(bounds.height / 2, 20) - 2}px`;
+  if (!await waitPresentation(650, run)) return false;
+  cursor.classList.add("is-clicking");
+  const clicked = await waitPresentation(180, run);
+  cursor.classList.remove("is-clicking");
+  return clicked;
+}
+
+function savePresentationState() {
+  return {
+    currentDocument,
+    selectedId,
+    selectedIds: [...selectedIds],
+    activeLayerId,
+    nextId,
+    activeTool,
+    values: {
+      width: widthInput.value,
+      height: heightInput.value,
+      origin: originInput.value,
+      flipX: flipXInput.checked,
+      flipY: flipYInput.checked,
+      text: textInput.value,
+      fontFamily: fontFamilyInput.value,
+      fontSize: fontSizeInput.value,
+      newX: byId("new-x").value,
+      newY: byId("new-y").value,
+      shapeType: byId("new-shape-type").value,
+      shapeWidth: byId("new-shape-width").value,
+      shapeHeight: byId("new-shape-height").value
+    },
+    machineSimulationPlan,
+    machineSimulationDocument,
+    machineSimulationPlayback,
+    machineSimulationCompletedLines,
+    machineSimulationCanvasSize
+  };
+}
+
+function restorePresentationState() {
+  const saved = presentationSnapshot;
+  if (!saved) return;
+  currentDocument = saved.currentDocument;
+  selectedId = saved.selectedId;
+  selectedIds = saved.selectedIds;
+  activeLayerId = saved.activeLayerId;
+  nextId = saved.nextId;
+  widthInput.value = saved.values.width;
+  heightInput.value = saved.values.height;
+  originInput.value = saved.values.origin;
+  flipXInput.checked = saved.values.flipX;
+  flipYInput.checked = saved.values.flipY;
+  textInput.value = saved.values.text;
+  fontFamilyInput.value = saved.values.fontFamily;
+  fontSizeInput.value = saved.values.fontSize;
+  byId("new-x").value = saved.values.newX;
+  byId("new-y").value = saved.values.newY;
+  byId("new-shape-type").value = saved.values.shapeType;
+  byId("new-shape-type").dispatchEvent(new Event("change", { bubbles: true }));
+  byId("new-shape-width").value = saved.values.shapeWidth;
+  byId("new-shape-height").value = saved.values.shapeHeight;
+  machineSimulationPlan = saved.machineSimulationPlan;
+  machineSimulationDocument = saved.machineSimulationDocument;
+  machineSimulationPlayback = saved.machineSimulationPlayback;
+  machineSimulationCompletedLines = saved.machineSimulationCompletedLines;
+  machineSimulationCanvasSize = saved.machineSimulationCanvasSize;
+  toolbar.setTool(saved.activeTool);
+  syncInspector();
+  renderPreview();
+  presentationSnapshot = null;
+}
+
+function finishPresentation() {
+  if (!presentationActive) return;
+  presentationRun += 1;
+  presentationActive = false;
+  presentationPaused = false;
+  document.body.classList.remove("presentation-active");
+  const { card, cursor, dialog } = presentationUi();
+  presentationTarget?.classList.remove("presentation-target");
+  presentationTarget = null;
+  movePresentationUi(document.body);
+  card.hidden = true;
+  cursor.hidden = true;
+  if (dialog.open) {
+    presentationInternalClose = true;
+    dialog.close();
+  }
+  restorePresentationState();
+}
+
+async function animatePresentationSimulation(run) {
+  const totalLines = createMachinePlayback(machineSimulationPlan).totalLines;
+  const durationMs = 5200;
+  let elapsed = 0;
+  while (elapsed < durationMs && presentationCurrent(run)) {
+    if (!await waitPresentation(50, run)) return;
+    if (presentationPaused) continue;
+    elapsed += 50;
+    const completed = Math.min(totalLines, Math.floor(totalLines * elapsed / durationMs));
+    renderMachineSimulationProgress(completed, totalLines, "running");
+  }
+  if (presentationCurrent(run)) renderMachineSimulationProgress(totalLines, totalLines, "complete");
+}
+
+async function runPresentation(run) {
+  const steps = [
+    {
+      target: "#width",
+      title: "Comece pela área de trabalho",
+      description: "Defina o tamanho da mesa em milímetros. O CommBurn mantém a escala e as réguas alinhadas ao desenho.",
+      action: () => {
+        setPresentationInput(widthInput, 200);
+        setPresentationInput(heightInput, 140);
+      }
+    },
+    {
+      target: "#add-text",
+      title: "Adicione uma mensagem",
+      description: "Digite o texto, escolha a fonte e informe a posição. O objeto permanece editável.",
+      action: () => {
+        textInput.value = "COMMBURN";
+        fontFamilyInput.value = "sans-serif";
+        fontSizeInput.value = "12";
+        byId("new-x").value = "61";
+        byId("new-y").value = "72";
+        byId("add-text").click();
+      }
+    },
+    {
+      target: "#add-shape",
+      title: "Desenhe a moldura",
+      description: "Formas vetoriais usam dimensões e posições precisas em milímetros.",
+      action: () => {
+        setPresentationInput(byId("new-shape-type"), "rect");
+        byId("new-x").value = "35";
+        byId("new-y").value = "38";
+        byId("new-shape-width").value = "130";
+        byId("new-shape-height").value = "62";
+        byId("add-shape").click();
+      }
+    },
+    {
+      target: "#add-shape",
+      title: "Crie um detalhe vetorial",
+      description: "Combine formas simples para montar o desenho que será processado.",
+      action: () => {
+        byId("new-x").value = "48";
+        byId("new-y").value = "51";
+        byId("new-shape-width").value = "104";
+        byId("new-shape-height").value = "36";
+        byId("add-shape").click();
+      }
+    },
+    {
+      target: "#object-width",
+      title: "Ajuste com precisão",
+      description: "Selecione um objeto e refine posição e tamanho pelos campos métricos do inspetor.",
+      action: () => {
+        const selected = currentDocument.elements.at(-1);
+        selectObject(selected.id);
+        setPresentationInput(byId("object-x"), 50);
+        setPresentationInput(byId("object-width"), 100);
+        toolbar.setTool("move");
+      }
+    },
+    {
+      target: "#preview-machine-job",
+      title: "Confira o percurso",
+      description: "Veja as trajetórias e os deslocamentos rápidos antes de qualquer operação.",
+      action: () => {
+        byId("preview-machine-job").click();
+        const simulationDocument = createPresentationSimulationDocument(readDocument());
+        const plan = planGrblJob(simulationDocument, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED });
+        showMachineSimulation(plan, simulationDocument, createMachinePlayback(plan).totalLines);
+        movePresentationUi(byId("machine-preview-dialog"));
+      }
+    },
+    {
+      target: "#machine-simulation-visual",
+      title: "Simule o trabalho na mesa",
+      description: "A trajetória avança em cores; deslocamentos tracejados representam movimentos com o laser desligado. Nenhum hardware é acionado.",
+      action: async () => {
+        await animatePresentationSimulation(run);
+      }
+    }
+  ];
+
+  const { card } = presentationUi();
+  card.hidden = false;
+  byId("presentation-pause").hidden = false;
+  byId("presentation-restart").hidden = true;
+  for (let index = 0; index < steps.length; index += 1) {
+    const step = steps[index];
+    setPresentationStep(index + 1, step.title, step.description, steps.length);
+    if (!await movePresentationCursor(document.querySelector(step.target), run)) return;
+    if (!presentationCurrent(run)) return;
+    try {
+      await step.action();
+    } catch (error) {
+      showNotice(`A apresentação foi interrompida: ${error.message}`);
+      finishPresentation();
+      return;
+    }
+    if (!presentationCurrent(run)) return;
+    if (index < steps.length - 1 && !await waitPresentation(500, run)) return;
+  }
+  if (!presentationCurrent(run)) return;
+  setPresentationStep(steps.length, "Apresentação concluída", "O projeto de demonstração e a simulação estão prontos para gravar. Seu trabalho original será restaurado ao sair.", steps.length);
+  byId("presentation-step-label").textContent = "Pronto para gravar";
+  byId("presentation-pause").hidden = true;
+  byId("presentation-restart").hidden = false;
+}
+
+function beginPresentation() {
+  if (machineBusy) {
+    showNotice("Aguarde a operação atual terminar antes de iniciar a apresentação.");
+    return;
+  }
+  if (presentationActive) return;
+  presentationSnapshot = savePresentationState();
+  presentationActive = true;
+  presentationPaused = false;
+  presentationRun += 1;
+  const run = presentationRun;
+  currentDocument = createPresentationDocument();
+  selectedId = null;
+  selectedIds = [];
+  activeLayerId = currentDocument.layers[0].id;
+  nextId = 1;
+  toolbar.setTool("select");
+  widthInput.value = String(currentDocument.widthMm);
+  heightInput.value = String(currentDocument.heightMm);
+  originInput.value = currentDocument.origin.corner;
+  flipXInput.checked = currentDocument.origin.flipX;
+  flipYInput.checked = currentDocument.origin.flipY;
+  document.body.classList.add("presentation-active");
+  movePresentationUi(document.body);
+  presentationUi().card.hidden = false;
+  presentationUi().cursor.hidden = false;
+  setPresentationPauseLabel(false);
+  presentationTarget?.classList.remove("presentation-target");
+  presentationTarget = null;
+  presentationUi().cursor.classList.remove("is-clicking");
+  syncInspector();
+  renderPreview();
+  void runPresentation(run);
+}
+
+function restartPresentation() {
+  const { dialog, card, cursor } = presentationUi();
+  presentationRun += 1;
+  if (dialog.open) {
+    presentationInternalClose = true;
+    dialog.close();
+  }
+  movePresentationUi(document.body);
+  card.hidden = false;
+  cursor.hidden = false;
+  cursor.classList.remove("is-clicking");
+  presentationTarget?.classList.remove("presentation-target");
+  presentationTarget = null;
+  currentDocument = createPresentationDocument();
+  selectedId = null;
+  selectedIds = [];
+  activeLayerId = currentDocument.layers[0].id;
+  nextId = 1;
+  toolbar.setTool("select");
+  widthInput.value = String(currentDocument.widthMm);
+  heightInput.value = String(currentDocument.heightMm);
+  originInput.value = currentDocument.origin.corner;
+  flipXInput.checked = currentDocument.origin.flipX;
+  flipYInput.checked = currentDocument.origin.flipY;
+  setPresentationPauseLabel(false);
+  syncInspector();
+  renderPreview();
+  const run = presentationRun;
+  void runPresentation(run);
+}
+
+function setPresentationPauseLabel(paused) {
+  presentationPaused = paused;
+  const button = byId("presentation-pause");
+  const label = paused ? "Continuar" : "Pausar";
+  button.textContent = label;
+  button.setAttribute("aria-label", `${label} apresentação`);
+  button.title = `${label} a apresentação`;
 }
 
 function exportGcode() {
@@ -1824,6 +2187,26 @@ for (const button of document.querySelectorAll('[data-action="export-gcode"]')) 
   });
 }
 byId("machine-preview-dialog").querySelector(".dialog-close").addEventListener("click", () => byId("machine-preview-dialog").close());
+byId("start-presentation").addEventListener("click", beginPresentation);
+byId("presentation-exit").addEventListener("click", finishPresentation);
+byId("presentation-pause").addEventListener("click", () => {
+  setPresentationPauseLabel(!presentationPaused);
+});
+byId("presentation-restart").addEventListener("click", restartPresentation);
+byId("machine-preview-dialog").addEventListener("close", () => {
+  if (presentationInternalClose) {
+    presentationInternalClose = false;
+  } else if (presentationActive) {
+    finishPresentation();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (!presentationActive || event.target.closest?.("#presentation-card")) return;
+  if (event.key === "Tab" || event.key === "Shift" || event.key === "Enter" || event.key === " ") return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (event.key === "Escape") finishPresentation();
+}, true);
 for (const button of document.querySelectorAll('[data-action="add-text"]')) button.addEventListener("click", () => byId("add-text").click());
 for (const button of document.querySelectorAll('[data-action="add-rect"]')) button.addEventListener("click", () => byId("add-shape").click());
 

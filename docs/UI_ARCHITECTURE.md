@@ -12,6 +12,7 @@ Este guia descreve os limites atuais da interface e como acrescentar ferramentas
 - `src/ui/history.js`: snapshots imutáveis para desfazer/refazer.
 - `src/ui/shortcuts.js`: mapeamento global de atalhos; preserva a digitação em controles editáveis.
 - `src/ui/tooltips.js`: descrições nativas (`title`) e acessíveis (`aria-description`).
+- `src/ui/presentation.js`: documento de demonstração temporário e filtragem das formas aceitas na simulação.
 - `src/core/document.js`: normalização, validação, transformações e exportação compartilhadas.
 - `src/core/svg-import.js`: conversão controlada de SVG em elementos métricos do núcleo.
 
@@ -70,6 +71,10 @@ Atalhos:
 | `Ctrl+Enter` | Criar texto |
 | `Escape` | Voltar a selecionar e limpar seleção |
 | `?` | Abrir ajuda de atalhos |
+
+## Modo de apresentação
+
+O botão **Apresentação** executa um roteiro curto com cursor visual, criação de texto e formas, ajustes em milímetros e simulação GRBL somente visual. O roteiro usa as rotinas normais do editor em um documento temporário, não envia comandos ao hardware e restaura o documento, os campos, a seleção e a ferramenta anteriores ao sair. A simulação usa somente retângulos sem transformação, o subconjunto compatível com o adaptador GRBL; o texto permanece visível no desenho, mas não entra no plano simulado.
 
 ## Extensibilidade de interface
 

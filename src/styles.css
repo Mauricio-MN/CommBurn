@@ -27,6 +27,7 @@ button, summary, select { cursor: pointer; }
 .menu-popover button { padding: 9px 10px; text-align: left; color: #475368; background: transparent; border: 0; border-radius: 6px; font-size: 13px; }
 .menu-popover button:hover { background: #f2f5fa; }
 .topbar-end { margin-left: auto; }
+.topbar-end .button { white-space: nowrap; }
 .unit-pill, .saved-badge { display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; color: #536176; background: #f4f7fb; border: 1px solid #e8edf4; border-radius: 20px; font-size: 11px; }
 .status-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #31b981; }
 .button { display: inline-flex; justify-content: center; align-items: center; gap: 8px; min-height: 37px; padding: 8px 11px; border: 1px solid transparent; border-radius: 8px; font-size: 12px; font-weight: 650; transition: background .15s, border-color .15s; }
@@ -174,6 +175,27 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
 .gcode-details summary { color: #46556d; font-size: 12px; cursor: pointer; }
 .gcode-details pre { max-height: 280px; overflow: auto; padding: 12px; color: #dce7f8; background: #1e293b; border-radius: 8px; font: 11px/1.5 ui-monospace, monospace; }
 .preview-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.presentation-card { position: fixed; z-index: 20; right: 24px; bottom: 24px; width: min(390px, calc(100vw - 32px)); padding: 18px 20px; color: #f7f9ff; background: #19243aee; border: 1px solid #ffffff2b; border-radius: 14px; box-shadow: 0 16px 48px #101a2d4d; backdrop-filter: blur(12px); }
+.presentation-card[hidden], .presentation-cursor[hidden] { display: none; }
+.presentation-heading, .presentation-step, .presentation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.presentation-kicker { color: #a9c5ff; font-size: 9px; font-weight: 750; letter-spacing: 1.2px; }
+.presentation-exit { width: 28px; height: 28px; color: #e2e8f4; background: #ffffff14; border: 0; border-radius: 7px; font-size: 20px; line-height: 1; }
+.presentation-step { margin: 13px 0 9px; color: #aeb9ce; font-size: 10px; }
+.presentation-step span:first-child { color: #f4c66b; font-variant-numeric: tabular-nums; }
+.presentation-card h2 { margin: 0 0 6px; color: #fff; font-size: 17px; }
+.presentation-card > p:not(.presentation-step) { min-height: 36px; margin: 0; color: #d3d9e6; font-size: 11px; line-height: 1.5; }
+.presentation-card progress { display: block; width: 100%; height: 6px; margin: 14px 0; accent-color: #83aaff; }
+.presentation-actions { justify-content: flex-end; }
+.presentation-actions .button { min-height: 32px; font-size: 11px; }
+.presentation-actions [hidden] { display: none; }
+.presentation-cursor { position: fixed; z-index: 21; top: 0; left: 0; width: 30px; height: 38px; pointer-events: none; transition: left .48s cubic-bezier(.2,.8,.2,1), top .48s cubic-bezier(.2,.8,.2,1); filter: drop-shadow(0 2px 3px #11182780); }
+.presentation-cursor svg { width: 100%; height: 100%; overflow: visible; }
+.presentation-cursor path { fill: #ffcf5c; stroke: #172033; stroke-width: 1.8; stroke-linejoin: round; }
+.presentation-cursor.is-clicking { transform: scale(.86); transform-origin: 3px 2px; }
+.presentation-target { outline: 3px solid #ffcf5c !important; outline-offset: 3px !important; box-shadow: 0 0 0 6px #ffcf5c3d !important; }
+.presentation-active .workspace, .presentation-active .topbar > :not(.topbar-end), .presentation-active .topbar-end > :not(#start-presentation) { pointer-events: none; }
+.presentation-active #start-presentation { opacity: .6; }
+.presentation-active .presentation-card, .presentation-active .presentation-cursor { pointer-events: auto; }
 .image-edit-dialog { width: min(1180px, calc(100vw - 24px)); max-height: min(96dvh, 1000px); overflow: auto; }
 .image-editor-container { width: 100%; height: min(65dvh, 720px); min-height: 420px; overflow: auto; }
 .image-import-dimensions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-width: 420px; }
@@ -223,6 +245,7 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
   .canvas-area { min-height: 440px; }
   .canvas-toolbar { padding: 0 12px; }
   .canvas-actions { display: none; }
+  .presentation-card { right: 12px; bottom: 12px; }
   .stage { min-height: 340px; padding: 10px 14px 24px; }
   .board-frame { grid-template-columns: 32px minmax(0, 1fr); }
   .tool-grid { gap: 3px; }

@@ -26,6 +26,7 @@
       </nav>
       <div class="topbar-end">
         <span class="unit-pill"><span class="status-dot"></span> Milímetros</span>
+        <button class="button button-secondary" id="start-presentation" type="button">▶ Apresentação</button>
         <button class="button button-primary" type="button" data-action="export"><span aria-hidden="true">↓</span> Exportar SVG</button>
       </div>
     </header>
@@ -221,6 +222,23 @@
         <form method="dialog"><button class="button button-primary" type="submit">Fechar</button></form>
       </div>
     </dialog>
+    <aside id="presentation-card" class="presentation-card" aria-live="polite" hidden>
+      <div class="presentation-heading">
+        <span class="presentation-kicker">APRESENTAÇÃO GUIADA</span>
+        <button id="presentation-exit" class="presentation-exit" type="button" aria-label="Sair da apresentação">×</button>
+      </div>
+      <p class="presentation-step"><span id="presentation-step-count">1 / 6</span><span id="presentation-step-label">Demonstração de exemplo</span></p>
+      <h2 id="presentation-title"></h2>
+      <p id="presentation-description"></p>
+      <progress id="presentation-progress" max="6" value="0" aria-label="Progresso da apresentação"></progress>
+      <div class="presentation-actions">
+        <button id="presentation-pause" class="button button-secondary" type="button">Pausar</button>
+        <button id="presentation-restart" class="button button-primary" type="button" hidden>Recomeçar</button>
+      </div>
+    </aside>
+    <div id="presentation-cursor" class="presentation-cursor" aria-hidden="true">
+      <svg viewBox="0 0 28 36" focusable="false"><path d="M3 2v25l6.8-6.2 4.2 11 4.2-1.6-4.5-10.7 9.5-.3L3 2Z" /></svg>
+    </div>
     <dialog id="image-vector-dialog" class="image-vector-dialog" aria-labelledby="image-vector-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar conversor de imagem">×</button></form>
       <h2 id="image-vector-title">Vetorizar imagem</h2>
