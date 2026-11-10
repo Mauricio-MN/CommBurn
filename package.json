@@ -1,9 +1,9 @@
 {
   "name": "commburn",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Metric-first vector editor for laser jobs",
   "private": true,
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "test": "node --test",
@@ -39,10 +39,23 @@
       "electron-main.mjs",
       "server.mjs",
       "index.html",
+      "commburn-icon.svg",
+      "LICENSE",
+      "LICENSE-PLUGINS",
       "src/**/*",
       "!tests/**",
       "!docs/**",
       "!cli/**"
+    ],
+    "extraResources": [
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "LICENSE-PLUGINS",
+        "to": "LICENSE-PLUGINS"
+      }
     ],
     "directories": {
       "output": "dist"
@@ -52,6 +65,9 @@
         "dmg",
         "zip"
       ]
+    },
+    "dmg": {
+      "license": "LICENSE"
     },
     "win": {
       "target": [

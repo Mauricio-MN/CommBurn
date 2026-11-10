@@ -20,6 +20,28 @@ function traceSample(data = new Uint8ClampedArray([
   return svgson.parseSync(svg);
 }
 
+test("ImageTracer validation errors expose stable codes and preserve RangeError", () => {
+  assert.throws(() => importTracedImageSvg(null, {
+    widthMm: 0,
+    heightMm: 10,
+    sourceLayer: DEFAULT_LAYER
+  }), (error) => {
+    assert.ok(error instanceof RangeError);
+    assert.equal(error.code, "imageTrace.invalidDimension");
+    return true;
+  });
+  assert.throws(() => importTracedImageSvg(traceSample(), {
+    xMm: Number.NaN,
+    widthMm: 10,
+    heightMm: 10,
+    sourceLayer: DEFAULT_LAYER
+  }), (error) => {
+    assert.ok(error instanceof RangeError);
+    assert.equal(error.code, "imageTrace.invalidPosition");
+    return true;
+  });
+});
+
 test("ImageTracer regions stay as solid, individually colored metric paths without new layers", () => {
   const result = importTracedImageSvg(traceSample(), {
     widthMm: 20,
@@ -54,6 +76,22 @@ test("ImageTracer preserves white regions as selectable solid vectors", () => {
   assert.equal(result.elements.length, 1);
   assert.equal(result.elements[0].color, "#ffffff");
   assert.equal("layers" in result, false);
+});
+
+test("ImageTracer vectors preserve the source object's metric position", () => {
+  const result = importTracedImageSvg(traceSample(), {
+    xMm: 12,
+    yMm: 7,
+    widthMm: 20,
+    heightMm: 10,
+    sourceLayer: DEFAULT_LAYER,
+    idPrefix: "image-trace-offset"
+  });
+
+  assert.equal(Math.min(...result.elements.map((element) => element.xMm)), 12);
+  assert.equal(Math.min(...result.elements.map((element) => element.yMm)), 7);
+  assert.ok(result.elements.every((element) => element.xMm + element.widthMm <= 32));
+  assert.ok(result.elements.every((element) => element.yMm + element.heightMm <= 17));
 });
 
 test("ImageTracer curve smoothing stays inside the source image and GRBL work area", () => {

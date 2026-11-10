@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Versão em package.json, sem o prefixo v (por exemplo, 0.1.1)"
+        description: "Versão em package.json, sem o prefixo v (por exemplo, 0.1.2)"
         required: true
         type: string
 

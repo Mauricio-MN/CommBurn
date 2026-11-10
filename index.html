@@ -9,273 +9,280 @@
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="#" aria-label="CommBurn início"><span class="brand-mark" aria-hidden="true">C</span><span>CommBurn</span></a>
-      <nav class="menu-bar" aria-label="Menu principal">
-        <details class="menu"><summary>Arquivo</summary><div class="menu-popover">
-          <button type="button" data-action="new">Novo trabalho</button>
-          <button type="button" data-action="import-svg">Importar SVG, imagem ou projeto</button>
-          <button type="button" data-action="export-project">Salvar projeto editável</button>
-          <button type="button" data-action="export">Exportar SVG</button>
-          <button type="button" data-action="preview-machine">Pré-visualizar processamento GRBL</button>
-          <button type="button" data-action="export-gcode">Exportar G-code GRBL</button>
-        </div></details>
-        <details class="menu"><summary>Inserir</summary><div class="menu-popover">
-          <button type="button" data-action="add-text">Adicionar texto</button>
-          <button type="button" data-action="add-rect">Adicionar retângulo</button>
+      <a class="brand" href="#" aria-label="CommBurn início" data-i18n-aria-label="ui.header.home"><img class="brand-mark" src="./commburn-icon.svg" alt=""><span>CommBurn</span></a>
+      <nav class="menu-bar" aria-label="Menu principal" data-i18n-aria-label="ui.header.mainMenu">
+        <details class="menu"><summary data-i18n="ui.menu.file">Arquivo</summary><div class="menu-popover" aria-label="Ações de arquivo" data-i18n-aria-label="ui.menu.fileActions">
+          <span class="menu-group-label" data-i18n="ui.menu.project">Projeto</span>
+          <button type="button" data-action="new" data-i18n="ui.menu.new">Novo trabalho</button>
+          <button type="button" data-action="import-svg" data-i18n="ui.menu.import">Importar arquivo</button>
+          <hr class="menu-separator">
+          <span class="menu-group-label" data-i18n="ui.menu.export">Exportar</span>
+          <button type="button" data-action="export-project" data-i18n="ui.menu.saveProject">Baixar projeto editável</button>
+          <button type="button" data-action="export" data-i18n="ui.menu.svg">Exportar SVG</button>
+          <hr class="menu-separator">
+          <span class="menu-group-label" data-i18n="ui.menu.machine">Máquina</span>
+          <button type="button" data-action="preview-machine" data-i18n="ui.menu.previewGrbl">Pré-visualizar processamento GRBL</button>
+          <button type="button" data-action="export-gcode" data-i18n="ui.menu.exportGcode">Exportar G-code GRBL</button>
         </div></details>
       </nav>
       <div class="topbar-end">
-        <span class="unit-pill"><span class="status-dot"></span> Milímetros</span>
-        <button class="button button-secondary" id="start-presentation" type="button">▶ Apresentação</button>
-        <button class="button button-primary" type="button" data-action="export"><span aria-hidden="true">↓</span> Exportar SVG</button>
+        <label class="locale-control"><span data-i18n="ui.header.language">Idioma</span><select id="language-select" aria-label="Idioma" data-i18n-aria-label="ui.header.language"><option value="en">English</option><option value="pt-BR">Português (Brasil)</option></select></label>
+        <span class="unit-pill"><span class="status-dot"></span><span data-i18n="ui.header.millimeters"> Milímetros</span></span>
+        <button class="button button-secondary" id="start-presentation" type="button" data-i18n="ui.header.presentation">▶ Apresentação</button>
+        <button class="button button-primary" type="button" data-action="export"><span aria-hidden="true">↓</span> <span data-i18n="ui.header.exportSvg">Exportar SVG</span></button>
       </div>
     </header>
 
     <main class="workspace">
       <aside class="sidebar" aria-label="Ferramentas do trabalho">
         <section class="panel tool-panel" data-ui-module="action-toolbar" data-extension-slot="toolbar-tools">
-          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌘</span><div><h2>Ação</h2><p>Escolha como interagir com os objetos</p></div></div>
-          <div class="tool-grid" id="action-toolbar" role="toolbar" aria-label="Ferramentas de objeto"></div>
-          <p class="tool-status" id="tool-status" role="status">Selecionar: clique, arraste uma caixa ou use Shift+clique.</p>
+          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌘</span><div><h2 data-i18n="ui.action.title">Ação</h2><p data-i18n="ui.action.description">Escolha como interagir com os objetos</p></div></div>
+          <div class="tool-grid" id="action-toolbar" role="toolbar" aria-label="Ferramentas de objeto" data-i18n-aria-label="ui.action.toolbar"></div>
+          <p class="tool-status" id="tool-status" role="status" data-i18n="ui.action.selectStatus">Selecionar: clique, arraste uma caixa ou use Shift+clique.</p>
         </section>
         <section class="panel" data-ui-module="svg-import" data-extension-slot="document-settings">
-          <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2>Importar vetor ou imagem</h2><p>SVG visual completo ou vetores editáveis</p></div></div>
-          <label class="field">Modo de importação SVG
+          <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2 data-i18n="ui.import.title">Importar vetor ou imagem</h2><p data-i18n="ui.import.description">SVG visual completo ou vetores editáveis</p></div></div>
+          <label class="field" data-i18n="ui.import.mode">Modo de importação SVG
             <select id="svg-import-mode">
-              <option value="visual">Preservar aparência completa</option>
-              <option value="editable">Converter para vetores editáveis</option>
+              <option value="visual" data-i18n="ui.import.visual">Preservar aparência completa</option>
+              <option value="editable-colors" data-i18n="ui.import.editableColors">Separar vetores editáveis por cor</option>
+              <option value="editable" data-i18n="ui.import.editable">Usar a camada atual</option>
             </select>
           </label>
-          <p class="help-text">O modo visual conserva os recursos gráficos como um único objeto. Scripts e eventos são removidos; referências externas não são carregadas.</p>
-          <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importe SVG no modo visual ou converta a geometria editável; imagens raster são incorporadas.">Importar arquivo</button>
+          <p class="help-text" data-i18n="ui.import.help">O modo visual conserva os recursos gráficos como um único objeto. Scripts e eventos são removidos; referências externas não são carregadas.</p>
+          <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importe SVG no modo visual ou converta a geometria editável; imagens raster são incorporadas." data-i18n-title="ui.import.tooltip" data-i18n="ui.import.button">Importar arquivo</button>
         </section>
 
         <section class="panel" data-ui-module="document-settings" data-extension-slot="document-settings">
-          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">▦</span><div><h1>Área de trabalho</h1><p>Dimensões reais do material</p></div></div>
+          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">▦</span><div><h1 data-i18n="ui.document.title">Área de trabalho</h1><p data-i18n="ui.document.description">Dimensões reais do material</p></div></div>
           <div class="field-row">
-            <label class="field">Largura<span class="input-with-unit"><input id="width" type="number" min="0.1" step="1" value="180"><span>mm</span></span></label>
-            <label class="field">Altura<span class="input-with-unit"><input id="height" type="number" min="0.1" step="1" value="120"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="width" type="number" min="0.1" step="1" value="180"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="height" type="number" min="0.1" step="1" value="120"><span>mm</span></span></label>
           </div>
-          <button class="button button-secondary full-width" type="button" id="orientation"><span class="button-icon icon-violet" aria-hidden="true">↻</span> Alternar orientação</button>
+          <button class="button button-secondary full-width" type="button" id="orientation"><span class="button-icon icon-violet" aria-hidden="true">↻</span> <span data-i18n="ui.document.orientation">Alternar orientação</span></button>
         </section>
 
         <section class="panel" data-ui-module="coordinate-settings" data-extension-slot="coordinate-settings">
-          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌖</span><div><h2>Posição e sentido</h2><p>Definidos por você, sem sensores</p></div></div>
-          <label class="field">Origem das coordenadas<select id="origin">
-            <option value="top-left">Canto superior esquerdo</option><option value="top-right">Canto superior direito</option>
-            <option value="bottom-left">Canto inferior esquerdo</option><option value="bottom-right">Canto inferior direito</option>
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌖</span><div><h2 data-i18n="ui.document.coordinates">Posição e sentido</h2><p data-i18n="ui.document.coordinatesDescription">Definidos por você, sem sensores</p></div></div>
+          <label class="field" data-i18n="ui.document.origin">Origem das coordenadas<select id="origin">
+            <option value="top-left" data-i18n="ui.document.topLeft">Canto superior esquerdo</option><option value="top-right" data-i18n="ui.document.topRight">Canto superior direito</option>
+            <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
           </select></label>
           <div class="toggle-row">
-            <label class="toggle"><input id="flip-x" type="checkbox"><span class="toggle-track"></span> Inverter eixo X</label>
-            <label class="toggle"><input id="flip-y" type="checkbox"><span class="toggle-track"></span> Inverter eixo Y</label>
+            <label class="toggle"><input id="flip-x" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipX">Inverter eixo X</span></label>
+            <label class="toggle"><input id="flip-y" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipY">Inverter eixo Y</span></label>
           </div>
-          <p class="help-text">Origem e eixos são aplicados à exportação. O desenho do texto permanece legível.</p>
+          <p class="help-text" data-i18n="ui.document.coordinatesHelp">Origem e eixos são aplicados à exportação. O desenho do texto permanece legível.</p>
         </section>
 
         <section class="panel layers-panel" data-ui-module="layers" data-extension-slot="layers" aria-labelledby="layers-title">
-          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">▤</span><div><h2 id="layers-title">Camadas de trabalho</h2><p>Operação, potência e avanço independentes</p></div></div>
-          <div class="layers-list" id="layers-list" aria-label="Lista de camadas"></div>
-          <button class="button button-secondary full-width layer-add" id="add-layer" type="button" data-tooltip="Adicionar uma camada de gravação, corte ou preenchimento.">+ Nova camada</button>
-          <p class="help-text">Camadas desativadas não são enviadas; camadas ocultas não aparecem no desenho.</p>
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">▤</span><div><h2 id="layers-title" data-i18n="ui.layers.title">Camadas de trabalho</h2><p data-i18n="ui.layers.description">Operação, potência e avanço independentes</p></div></div>
+          <div class="layers-list" id="layers-list" aria-label="Lista de camadas" data-i18n-aria-label="ui.layers.list"></div>
+          <button class="button button-secondary full-width layer-add" id="add-layer" type="button" data-tooltip="Adicionar uma camada de gravação, corte ou preenchimento." data-i18n-title="ui.layers.addTooltip" data-i18n="ui.layers.add">+ Nova camada</button>
+          <p class="help-text" data-i18n="ui.layers.help">Camadas desativadas não são enviadas; camadas ocultas não aparecem no desenho.</p>
         </section>
 
         <section class="panel" data-ui-module="object-defaults" data-extension-slot="object-creation">
-          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌖</span><div><h2>Posição inicial</h2><p>Usada ao criar texto ou forma</p></div></div>
+          <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌖</span><div><h2 data-i18n="ui.creation.startPosition">Posição inicial</h2><p data-i18n="ui.creation.startPositionDescription">Usada ao criar texto ou forma</p></div></div>
           <div class="field-row">
-            <label class="field">X<span class="input-with-unit"><input id="new-x" type="number" step="0.1" value="10"><span>mm</span></span></label>
-            <label class="field">Y<span class="input-with-unit"><input id="new-y" type="number" step="0.1" value="20"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.creation.x">X<span class="input-with-unit"><input id="new-x" type="number" step="0.1" value="10"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.creation.y">Y<span class="input-with-unit"><input id="new-y" type="number" step="0.1" value="20"><span>mm</span></span></label>
           </div>
         </section>
 
         <section class="panel" data-ui-module="text-creation" data-extension-slot="object-creation">
-          <div class="panel-heading"><span class="section-icon icon-pink" aria-hidden="true">T</span><div><h2>Criar texto</h2><p>Escreva e posicione sua mensagem</p></div></div>
-          <label class="field">Texto<textarea id="text-content" rows="3" placeholder="Digite seu texto..."></textarea></label>
-          <label class="field">Fonte<select id="font-family"><option value="sans-serif">Sem serifa</option><option value="serif">Com serifa</option><option value="monospace">Monoespaçada</option></select></label>
-          <label class="field">Tamanho do texto<span class="input-with-unit"><input id="font-size" type="number" min="0.1" step="0.1" value="8"><span>mm</span></span></label>
-          <button class="button button-secondary full-width" id="add-text" type="button" data-tooltip="Criar um novo objeto de texto. Atalho Ctrl+Enter.">Adicionar texto</button>
+          <div class="panel-heading"><span class="section-icon icon-pink" aria-hidden="true">T</span><div><h2 data-i18n="ui.creation.textTitle">Criar texto</h2><p data-i18n="ui.creation.textDescription">Escreva e posicione sua mensagem</p></div></div>
+          <label class="field" data-i18n="ui.creation.textLabel">Texto<textarea id="text-content" rows="3" placeholder="Digite seu texto..." data-i18n-placeholder="ui.creation.textPlaceholder"></textarea></label>
+          <label class="field" data-i18n="ui.creation.font">Fonte<select id="font-family"><option value="sans-serif" data-i18n="ui.creation.sansSerif">Sem serifa</option><option value="serif" data-i18n="ui.creation.serif">Com serifa</option><option value="monospace" data-i18n="ui.creation.monospace">Monoespaçada</option></select></label>
+          <label class="field" data-i18n="ui.creation.textSize">Tamanho do texto<span class="input-with-unit"><input id="font-size" type="number" min="0.1" step="0.1" value="8"><span>mm</span></span></label>
+          <button class="button button-secondary full-width" id="add-text" type="button" data-tooltip="Criar um novo objeto de texto. Atalho Ctrl+Enter." data-i18n-title="ui.creation.addTextTooltip" data-i18n="ui.creation.addText">Adicionar texto</button>
         </section>
 
         <section class="panel" data-ui-module="shape-creation" data-extension-slot="object-creation">
-          <div class="panel-heading"><span class="section-icon icon-green" aria-hidden="true">▱</span><div><h2>Criar forma</h2><p>Tipo e dimensões editáveis em mm</p></div></div>
-          <label class="field">Forma<select id="new-shape-type"><option value="rect">Retângulo</option><option value="ellipse">Elipse</option><option value="line">Linha</option></select></label>
+          <div class="panel-heading"><span class="section-icon icon-green" aria-hidden="true">▱</span><div><h2 data-i18n="ui.creation.shapeTitle">Criar forma</h2><p data-i18n="ui.creation.shapeDescription">Tipo e dimensões editáveis em mm</p></div></div>
+          <label class="field" data-i18n="ui.creation.shape">Forma<select id="new-shape-type"><option value="rect" data-i18n="ui.creation.rectangle">Retângulo</option><option value="ellipse" data-i18n="ui.creation.ellipse">Elipse</option><option value="line" data-i18n="ui.creation.line">Linha</option></select></label>
           <div class="field-row">
-            <label class="field">Largura<span class="input-with-unit"><input id="new-shape-width" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
-            <label class="field">Altura<span class="input-with-unit"><input id="new-shape-height" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="new-shape-width" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="new-shape-height" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
           </div>
-          <p class="help-text" id="shape-help">O retângulo precisa de largura e altura maiores que zero.</p>
-          <button class="button button-secondary full-width" id="add-shape" type="button" data-tooltip="Criar a forma com o tipo e as dimensões acima.">Adicionar forma</button>
+          <p class="help-text" id="shape-help" data-i18n="ui.creation.shapeHelp">O retângulo precisa de largura e altura maiores que zero.</p>
+          <button class="button button-secondary full-width" id="add-shape" type="button" data-tooltip="Criar a forma com o tipo e as dimensões acima." data-i18n-title="ui.creation.addShapeTooltip" data-i18n="ui.creation.addShape">Adicionar forma</button>
         </section>
 
         <section class="panel inspector-panel" id="object-inspector" data-ui-module="object-inspector" data-extension-slot="object-inspector" hidden>
-          <div class="panel-heading"><span class="section-icon icon-violet icon-blue" aria-hidden="true">⚙</span><div><h2>Propriedades do objeto</h2><p id="inspector-kind">Objeto selecionado</p></div></div>
-          <p class="help-text multi-selection-message" id="multi-selection-message" hidden>Arraste para mover todos. Use Shift+clique ou uma caixa para ajustar a seleção; Delete e Duplicar atuam em todos.</p>
+          <div class="panel-heading"><span class="section-icon icon-violet icon-blue" aria-hidden="true">⚙</span><div><h2 data-i18n="ui.inspector.title">Propriedades do objeto</h2><p id="inspector-kind" data-i18n="ui.inspector.selected">Objeto selecionado</p></div></div>
+          <p class="help-text multi-selection-message" id="multi-selection-message" hidden data-i18n="ui.inspector.multiHelp">Arraste para mover todos. Use Shift+clique ou uma caixa para ajustar a seleção; Delete e Duplicar atuam em todos.</p>
           <div id="single-selection-fields">
           <div id="text-inspector-fields">
-            <label class="field">Texto<textarea id="object-text" rows="2"></textarea></label>
-            <label class="field">Fonte<select id="object-font"><option value="sans-serif">Sem serifa</option><option value="serif">Com serifa</option><option value="monospace">Monoespaçada</option></select></label>
+            <label class="field" data-i18n="ui.inspector.text">Texto<textarea id="object-text" rows="2"></textarea></label>
+            <label class="field" data-i18n="ui.inspector.font">Fonte<select id="object-font"><option value="sans-serif" data-i18n="ui.creation.sansSerif">Sem serifa</option><option value="serif" data-i18n="ui.creation.serif">Com serifa</option><option value="monospace" data-i18n="ui.creation.monospace">Monoespaçada</option></select></label>
           </div>
           <div id="path-inspector-fields" hidden>
-            <p class="help-text">Edite nós e alças em uma janela visual dedicada.</p>
-            <button class="button button-secondary full-width" id="open-path-editor" type="button">Abrir subeditor de traçado</button>
+            <p class="help-text" data-i18n="ui.inspector.pathHelp">Edite nós e alças em uma janela visual dedicada.</p>
+            <button class="button button-secondary full-width" id="open-path-editor" type="button" data-i18n="ui.inspector.openPathEditor">Abrir subeditor de traçado</button>
           </div>
           <div id="image-inspector-fields" hidden>
-            <p class="help-text">Edite, recorte, redimensione e aplique filtros antes de vetorizar.</p>
-            <button class="button button-secondary full-width" id="edit-image" type="button">Editar imagem</button>
-            <button class="button button-secondary full-width" id="open-image-vectorizer" type="button">Converter imagem para gravação vetorial</button>
+            <p class="help-text" data-i18n="ui.inspector.imageHelp">Edite, recorte, redimensione e aplique filtros antes de vetorizar.</p>
+            <button class="button button-secondary full-width" id="edit-image" type="button" data-i18n="ui.inspector.editImage">Editar imagem</button>
+            <button class="button button-secondary full-width" id="open-image-vectorizer" type="button" data-i18n="ui.inspector.vectorizeImage">Converter imagem para gravação vetorial</button>
+          </div>
+          <div id="svg-inspector-fields" hidden>
+            <p class="help-text" data-i18n="ui.inspector.svgHelp">Converta a aparência estática em regiões vetoriais antes de enviar ao GRBL.</p>
+            <button class="button button-secondary full-width" id="open-svg-vectorizer" type="button" data-i18n="ui.inspector.vectorizeSvg">Converter SVG para gravação vetorial</button>
           </div>
           <div class="field-row">
-            <label class="field">Posição X<span class="input-with-unit"><input id="object-x" type="number" step="0.1"><span>mm</span></span></label>
-            <label class="field">Posição Y<span class="input-with-unit"><input id="object-y" type="number" step="0.1"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.inspector.positionX">Posição X<span class="input-with-unit"><input id="object-x" type="number" step="0.1"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.inspector.positionY">Posição Y<span class="input-with-unit"><input id="object-y" type="number" step="0.1"><span>mm</span></span></label>
           </div>
           <div class="field-row shape-properties" id="shape-properties">
-            <label class="field">Largura<span class="input-with-unit"><input id="object-width" type="number" min="0" step="0.1"><span>mm</span></span></label>
-            <label class="field">Altura<span class="input-with-unit"><input id="object-height" type="number" min="0" step="0.1"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="object-width" type="number" min="0" step="0.1"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="object-height" type="number" min="0" step="0.1"><span>mm</span></span></label>
           </div>
           <div class="field-row">
-            <label class="field">Rotação<input id="object-rotation" type="number" step="1"><span class="unit-note">graus</span></label>
-            <label class="field">Inclinação X<input id="object-skew-x" type="number" min="-79" max="79" step="1"><span class="unit-note">graus</span></label>
+            <label class="field" data-i18n="ui.inspector.rotation">Rotação<input id="object-rotation" type="number" step="1"><span class="unit-note" data-i18n="ui.inspector.degrees">graus</span></label>
+            <label class="field" data-i18n="ui.inspector.skewX">Inclinação X<input id="object-skew-x" type="number" min="-79" max="79" step="1"><span class="unit-note" data-i18n="ui.inspector.degrees">graus</span></label>
           </div>
-          <label class="field">Inclinação Y<input id="object-skew-y" type="number" min="-79" max="79" step="1"><span class="unit-note">graus</span></label>
-          <label class="field">Camada<select id="object-layer"></select></label>
+          <label class="field" data-i18n="ui.inspector.skewY">Inclinação Y<input id="object-skew-y" type="number" min="-79" max="79" step="1"><span class="unit-note" data-i18n="ui.inspector.degrees">graus</span></label>
+          <label class="field" data-i18n="ui.inspector.layer">Camada<select id="object-layer"></select></label>
           </div>
-          <div class="editor-actions"><button class="button button-secondary" id="duplicate-selection" type="button">Duplicar</button><button class="button button-danger" id="remove-selection" type="button">Remover</button></div>
+          <div class="editor-actions"><button class="button button-secondary" id="duplicate-selection" type="button" data-i18n="ui.inspector.duplicate">Duplicar</button><button class="button button-danger" id="remove-selection" type="button" data-i18n="ui.inspector.remove">Remover</button></div>
         </section>
 
         <section class="panel machine-panel">
-          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌁</span><div><h2>Máquina · GRBL</h2><p>Conexão serial local ou simulador offline</p></div></div>
-          <p class="machine-warning">Controle limitado a controladores compatíveis com GRBL. Confirme firmware, limites, foco, exaustão e proteção ocular para sua máquina antes de conectar.</p>
-          <label class="field">Porta / caminho serial
-            <span class="port-row"><input id="serial-path" list="serial-port-options" placeholder="/dev/ttyACM0 ou COM3"><datalist id="serial-port-options"></datalist><button class="button button-secondary" id="refresh-ports" type="button" aria-label="Atualizar portas">↻</button></span>
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌁</span><div><h2 data-i18n="ui.machine.title">Máquina · GRBL</h2><p data-i18n="ui.machine.description">Conexão serial local ou simulador offline</p></div></div>
+          <p class="machine-warning" data-i18n="ui.machine.warning">Controle limitado a controladores compatíveis com GRBL. Confirme firmware, limites, foco, exaustão e proteção ocular para sua máquina antes de conectar.</p>
+          <label class="field" data-i18n="ui.machine.serialPort">Porta / caminho serial
+            <span class="port-row"><input id="serial-path" list="serial-port-options" placeholder="/dev/ttyACM0 ou COM3" data-i18n-placeholder="ui.machine.serialPlaceholder"><datalist id="serial-port-options"></datalist><button class="button button-secondary" id="refresh-ports" type="button" aria-label="Atualizar portas" data-i18n-aria-label="ui.machine.refreshPorts">↻</button></span>
           </label>
-          <label class="field">Velocidade da comunicação serial (baud)
-            <select id="baud-rate"><option value="115200">115200</option><option value="230400">230400</option><option value="57600">57600</option><option value="250000">250000</option><option value="auto">Detectar automaticamente</option></select>
+          <label class="field" data-i18n="ui.machine.baudRate">Velocidade da comunicação serial (baud)
+            <select id="baud-rate"><option value="115200">115200</option><option value="230400">230400</option><option value="57600">57600</option><option value="250000">250000</option><option value="auto" data-i18n="ui.machine.autoDetect">Detectar automaticamente</option></select>
           </label>
-          <p class="help-text">É a velocidade de comunicação pelo cabo; CommBurn e controladora precisam usar o mesmo valor. 115200 é comum. Você pode escolher “Detectar automaticamente”: o app testa velocidades conhecidas com uma consulta de estado que não move a máquina. Se não encontrar, selecione uma velocidade do manual.</p>
-          <label class="field">Valor máximo de potência do laser (GRBL $30)
-            <input id="machine-smax" type="number" min="1" step="any" placeholder="Lido da controladora ao conectar">
+          <p class="help-text" data-i18n="ui.machine.baudHelp">É a velocidade de comunicação pelo cabo; CommBurn e controladora precisam usar o mesmo valor. 115200 é comum. Você pode escolher “Detectar automaticamente”: o app testa velocidades conhecidas com uma consulta de estado que não move a máquina. Se não encontrar, selecione uma velocidade do manual.</p>
+          <label class="field" data-i18n="ui.machine.maxPower">Valor máximo de potência do laser (GRBL $30)
+            <input id="machine-smax" type="number" min="1" step="any" placeholder="Lido da controladora ao conectar" data-i18n-placeholder="ui.machine.powerPlaceholder">
           </label>
-          <p class="help-text">Ao conectar, o CommBurn tenta ler $30 automaticamente. Se não conseguir, o campo fica vazio para você preencher; use o botão abaixo para tentar de novo. Se a controladora mostrar $30=1000, informe 1000. Não é uma porcentagem.</p>
+          <p class="help-text" data-i18n="ui.machine.powerHelp">Ao conectar, o CommBurn tenta ler $30 automaticamente. Se não conseguir, o campo fica vazio para você preencher; use o botão abaixo para tentar de novo. Se a controladora mostrar $30=1000, informe 1000. Não é uma porcentagem.</p>
           <div class="machine-actions">
-            <button class="button button-secondary" id="connect-machine" type="button">Conectar</button>
-            <button class="button button-danger" id="disconnect-machine" type="button" disabled>Desconectar</button>
+            <button class="button button-secondary" id="connect-machine" type="button" data-i18n="ui.machine.connect">Conectar</button>
+            <button class="button button-danger" id="disconnect-machine" type="button" disabled data-i18n="ui.machine.disconnect">Desconectar</button>
           </div>
-          <button class="button button-secondary full-width" id="read-machine-settings" type="button" disabled>Ler configuração da potência novamente</button>
-          <button class="button button-secondary full-width" id="simulate-machine" type="button">Conectar simulador GRBL (sem hardware)</button>
-          <button class="button button-secondary full-width" id="preview-machine-job" type="button">Pré-visualizar processo GRBL</button>
-          <p class="machine-state" id="machine-state" role="status">Desconectado</p>
-          <label class="safety-check" id="machine-safety-check"><input id="safety-confirmed" type="checkbox"><span>Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
-          <button class="button button-primary full-width" id="start-machine-job" type="button" disabled>Enviar contornos à máquina</button>
-          <button class="button button-danger full-width" id="hold-machine-job" type="button" disabled>Parar envio e solicitar pausa</button>
-          <p class="help-text">O adaptador aceita retângulos e traçados SVG editáveis sem transformação. Texto, imagem raster original, elipses, linhas e formas transformadas ainda não são aceitos; converta imagens para trajetórias antes da prévia. A pausa não substitui o botão de emergência.</p>
+          <button class="button button-secondary full-width" id="read-machine-settings" type="button" disabled data-i18n="ui.machine.readSettings">Ler configuração da potência novamente</button>
+          <button class="button button-secondary full-width" id="simulate-machine" type="button" data-i18n="ui.machine.simulateConnect">Conectar simulador GRBL (sem hardware)</button>
+          <button class="button button-secondary full-width" id="preview-machine-job" type="button" data-i18n="ui.machine.preview">Pré-visualizar processo GRBL</button>
+          <p class="machine-state" id="machine-state" role="status" data-i18n="ui.machine.disconnected">Desconectado</p>
+          <label class="safety-check" id="machine-safety-check"><input id="safety-confirmed" type="checkbox"><span data-i18n="ui.machine.safety">Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
+          <button class="button button-primary full-width" id="start-machine-job" type="button" disabled data-i18n="ui.machine.sendJob">Enviar contornos à máquina</button>
+          <button class="button button-danger full-width" id="hold-machine-job" type="button" disabled data-i18n="ui.machine.hold">Parar envio e solicitar pausa</button>
+          <p class="help-text" data-i18n="ui.machine.limits">O GRBL grava texto com fontes de traço único integradas e envia retângulos e paths vetoriais editáveis sem transformação. Imagens raster precisam ser vetorizadas; elipses, linhas, texto preenchido e formas transformadas não são compatíveis. A pausa solicita feed hold e não substitui a parada de emergência.</p>
         </section>
       </aside>
 
       <section class="canvas-area" aria-label="Pré-visualização do trabalho">
-        <div class="canvas-toolbar" data-ui-module="canvas-header" data-extension-slot="canvas-header"><div class="document-name"><span class="document-icon" aria-hidden="true">◇</span><span>Trabalho sem título</span><span class="saved-badge">Rascunho</span></div><div class="canvas-actions"><span>Área</span><span class="zoom-value" id="canvas-size">180 × 120 mm</span><button class="button button-secondary shortcut-help" id="shortcut-help" type="button" data-tooltip="Ver atalhos de teclado.">Atalhos <kbd>?</kbd></button></div></div>
+        <div class="canvas-toolbar" data-ui-module="canvas-header" data-extension-slot="canvas-header"><div class="document-name"><span class="document-icon" aria-hidden="true">◇</span><input id="project-name" class="project-name" type="text" value="Trabalho sem título" maxlength="60" aria-label="Nome do projeto" data-i18n-aria-label="ui.canvas.projectName" title="Editar nome do projeto" data-i18n-title="ui.canvas.editProjectName"><span class="saved-badge" data-i18n="ui.canvas.unsavedBadge">Não salvo</span></div><div class="canvas-actions"><span data-i18n="ui.canvas.area">Área</span><span class="zoom-value" id="canvas-size">180 × 120 mm</span><button class="button button-secondary shortcut-help" id="shortcut-help" type="button" data-tooltip="Ver atalhos de teclado." data-i18n-title="ui.canvas.shortcutsTooltip"><span data-i18n="ui.canvas.shortcuts">Atalhos</span> <kbd>?</kbd></button></div></div>
         <div class="stage">
           <div class="board-frame" id="board-frame" data-ui-module="canvas" data-extension-slot="canvas">
             <div class="ruler ruler-top" id="ruler-x" aria-hidden="true"></div>
             <div class="ruler ruler-left" id="ruler-y" aria-hidden="true"></div>
-            <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial"><g id="objects"></g><rect id="selection-marquee" class="selection-marquee" visibility="hidden" pointer-events="none"/></svg>
+            <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial" data-i18n-aria-label="ui.canvas.artboard"><g id="objects"></g><rect id="selection-marquee" class="selection-marquee" visibility="hidden" pointer-events="none"/></svg>
           </div>
-          <div class="stage-note"><span class="status-dot"></span> Escala e medidas em milímetros</div>
+          <div class="stage-note"><span class="status-dot"></span> <span data-i18n="ui.canvas.scale">Escala e medidas em milímetros</span></div>
         </div>
-        <footer class="statusbar"><span id="selection-status">Nenhum objeto selecionado</span><span id="active-tool-status">Selecionar · V</span><span>CommBurn · Rascunho inicial</span></footer>
+        <footer class="statusbar"><span id="selection-status" data-i18n="ui.canvas.noSelection">Nenhum objeto selecionado</span><span id="active-tool-status">Selecionar · V</span><span>CommBurn</span></footer>
         <div id="notice" class="notice" role="status" aria-live="polite"></div>
       </section>
     </main>
     <input id="svg-file-input" type="file" accept=".svg,.json,image/*,application/json" hidden>
     <dialog id="image-edit-dialog" class="image-edit-dialog" aria-labelledby="image-edit-title">
-      <form method="dialog"><button class="dialog-close" aria-label="Fechar editor de imagem">×</button></form>
-      <h2 id="image-edit-title">Editar imagem</h2>
-      <p>Recorte, redimensione, gire, aplique filtros e ajuste tons. A imagem editada será incorporada ao trabalho em milímetros.</p>
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar editor de imagem" data-i18n-aria-label="ui.dialogs.closeImageEditor">×</button></form>
+      <h2 id="image-edit-title" data-i18n="ui.dialogs.editImage">Editar imagem</h2>
+      <p data-i18n="ui.dialogs.imageEditHelp">Recorte, redimensione, gire, aplique filtros e ajuste tons. A imagem editada será incorporada ao trabalho em milímetros.</p>
       <div id="image-editor-container" class="image-editor-container"></div>
-      <p id="image-editor-status" class="machine-preview-stats" role="status">Carregando editor de imagem…</p>
+      <p id="image-editor-status" class="machine-preview-stats" role="status" data-i18n="common.loadingImageEditor">Carregando editor de imagem…</p>
       <div class="image-import-dimensions">
-        <label class="field">Largura no trabalho<span class="input-with-unit"><input id="image-import-width" type="number" min="0.1" step="any"><span>mm</span></span></label>
-        <label class="field">Altura no trabalho<span class="input-with-unit"><input id="image-import-height" type="number" min="0.1" step="any"><span>mm</span></span></label>
+        <label class="field" data-i18n="ui.dialogs.widthInDocument">Largura no trabalho<span class="input-with-unit"><input id="image-import-width" type="number" min="0.1" step="any"><span>mm</span></span></label>
+        <label class="field" data-i18n="ui.dialogs.heightInDocument">Altura no trabalho<span class="input-with-unit"><input id="image-import-height" type="number" min="0.1" step="any"><span>mm</span></span></label>
       </div>
       <div class="preview-actions">
-        <button class="button button-secondary" id="cancel-image-edit" type="button">Cancelar</button>
-        <button class="button button-primary" id="apply-image-edit" type="button" disabled>Aplicar e importar</button>
+        <button class="button button-secondary" id="cancel-image-edit" type="button" data-i18n="common.cancel">Cancelar</button>
+        <button class="button button-primary" id="apply-image-edit" type="button" disabled data-i18n="ui.dialogs.applyAndImport">Aplicar e importar</button>
       </div>
     </dialog>
     <dialog id="machine-preview-dialog" class="machine-preview-dialog" aria-labelledby="machine-preview-title">
-      <form method="dialog"><button class="dialog-close" aria-label="Fechar prévia">×</button></form>
-      <h2 id="machine-preview-title">Prévia do processamento GRBL</h2>
-      <p id="machine-preview-description">Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.</p>
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar prévia" data-i18n-aria-label="ui.dialogs.closePreview">×</button></form>
+      <h2 id="machine-preview-title" data-i18n="ui.dialogs.machinePreview">Prévia do processamento GRBL</h2>
+      <p id="machine-preview-description" data-i18n="ui.dialogs.machinePreviewDescription">Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.</p>
       <div id="machine-simulation-panel" class="machine-simulation-panel" hidden>
-        <p id="machine-simulation-status" class="machine-preview-stats" role="status">Simulação visual pronta; nenhum hardware ou laser será acionado.</p>
-        <progress id="machine-simulation-progress" class="machine-simulation-progress" max="1" value="0" aria-label="Progresso da simulação"></progress>
+        <p id="machine-simulation-status" class="machine-preview-stats" role="status" data-i18n="ui.dialogs.simulationReady">Simulação visual pronta; nenhum hardware ou laser será acionado.</p>
+        <progress id="machine-simulation-progress" class="machine-simulation-progress" max="1" value="0" aria-label="Progresso da simulação" data-i18n-aria-label="ui.dialogs.simulationProgress"></progress>
         <div id="machine-simulation-visual" class="machine-simulation-visual">
-          <canvas id="machine-simulation-plan" role="img" aria-label="Plano completo do trabalho simulado"></canvas>
+          <canvas id="machine-simulation-plan" role="img" aria-label="Plano completo do trabalho simulado" data-i18n-aria-label="ui.dialogs.simulatedJobPlan"></canvas>
           <canvas id="machine-simulation-playback" aria-hidden="true"></canvas>
         </div>
       </div>
-      <svg id="machine-path-preview" class="machine-path-preview" role="img" aria-label="Trajetórias de trabalho e deslocamentos rápidos"></svg>
+      <svg id="machine-path-preview" class="machine-path-preview" role="img" aria-label="Trajetórias de trabalho e deslocamentos rápidos" data-i18n-aria-label="ui.dialogs.machinePaths"></svg>
       <p id="machine-preview-stats" class="machine-preview-stats"></p>
       <p id="machine-preview-time" class="machine-preview-stats" role="status"></p>
-      <p class="help-text">Estimativa calculada com os avanços configurados; não inclui deslocamentos rápidos, aceleração nem tempo de resposta do controlador.</p>
-      <details class="gcode-details"><summary>Ver comandos G-code</summary><pre id="machine-preview-code"></pre></details>
+      <p class="help-text" data-i18n="ui.dialogs.machineEstimateHelp">Estimativa calculada com os avanços configurados; não inclui deslocamentos rápidos, aceleração nem tempo de resposta do controlador.</p>
+      <details class="gcode-details"><summary data-i18n="ui.dialogs.showGcode">Ver comandos G-code</summary><pre id="machine-preview-code"></pre></details>
       <div class="preview-actions">
-        <button class="button button-secondary" type="button" data-action="export-gcode">Exportar G-code</button>
-        <form method="dialog"><button class="button button-primary" type="submit">Fechar</button></form>
+        <button class="button button-secondary" type="button" data-action="export-gcode" data-i18n="ui.menu.exportGcode">Exportar G-code</button>
+        <form method="dialog"><button class="button button-primary" type="submit" data-i18n="common.close">Fechar</button></form>
       </div>
     </dialog>
     <aside id="presentation-card" class="presentation-card" aria-live="polite" hidden>
       <div class="presentation-heading">
-        <span class="presentation-kicker">APRESENTAÇÃO GUIADA</span>
-        <button id="presentation-exit" class="presentation-exit" type="button" aria-label="Sair da apresentação">×</button>
+        <span class="presentation-kicker" data-i18n="ui.dialogs.guidedPresentation">APRESENTAÇÃO GUIADA</span>
+        <button id="presentation-exit" class="presentation-exit" type="button" aria-label="Sair da apresentação" data-i18n-aria-label="ui.dialogs.exitPresentation">×</button>
       </div>
-      <p class="presentation-step"><span id="presentation-step-count">1 / 6</span><span id="presentation-step-label">Demonstração de exemplo</span></p>
+      <p class="presentation-step"><span id="presentation-step-count">1 / 35</span><span id="presentation-step-label" data-i18n="ui.dialogs.exampleDemo">Demonstração de exemplo</span></p>
       <h2 id="presentation-title"></h2>
       <p id="presentation-description"></p>
-      <progress id="presentation-progress" max="6" value="0" aria-label="Progresso da apresentação"></progress>
+      <progress id="presentation-progress" max="35" value="0" aria-label="Progresso da apresentação"></progress>
       <div class="presentation-actions">
-        <button id="presentation-pause" class="button button-secondary" type="button">Pausar</button>
-        <button id="presentation-restart" class="button button-primary" type="button" hidden>Recomeçar</button>
+        <button id="presentation-pause" class="button button-secondary" type="button" data-i18n="ui.dialogs.pause">Pausar</button>
+        <button id="presentation-restart" class="button button-primary" type="button" hidden data-i18n="ui.dialogs.restart">Recomeçar</button>
       </div>
     </aside>
-    <div id="presentation-cursor" class="presentation-cursor" aria-hidden="true">
+    <div id="presentation-cursor" class="presentation-cursor" aria-hidden="true" hidden>
       <svg viewBox="0 0 28 36" focusable="false"><path d="M3 2v25l6.8-6.2 4.2 11 4.2-1.6-4.5-10.7 9.5-.3L3 2Z" /></svg>
     </div>
     <dialog id="image-vector-dialog" class="image-vector-dialog" aria-labelledby="image-vector-title">
-      <form method="dialog"><button class="dialog-close" aria-label="Fechar conversor de imagem">×</button></form>
-      <h2 id="image-vector-title">Vetorizar imagem</h2>
-      <p>A prévia preserva as cores da imagem para selecionar regiões. No editor, os vetores aplicados usam a cor da camada atual. A imagem fonte pode ser recuperada com Desfazer.</p>
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar conversor de imagem" data-i18n-aria-label="ui.dialogs.closeImageVectorizer">×</button></form>
+      <h2 id="image-vector-title" data-i18n="ui.dialogs.vectorizeImage">Vetorizar imagem</h2>
+      <p data-i18n="ui.dialogs.vectorizerHelp">A prévia preserva as cores da imagem para selecionar regiões. No editor, os vetores aplicados usam a cor da camada atual. A imagem fonte pode ser recuperada com Desfazer.</p>
       <div class="image-vector-settings">
-        <label class="field">Cores<input id="image-vector-colors" type="number" min="2" max="24" step="1" value="8"></label>
-        <label class="field">Remover detalhes menores<input id="image-vector-pathomit" type="number" min="0" max="1000" step="1" value="8"><span class="unit-note">pixels</span></label>
-        <label class="field">Suavização de regiões<input id="image-vector-line-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
-        <label class="field">Ajuste de curvas<input id="image-vector-curve-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
-        <label class="field">Borda<select id="image-vector-border-mode"><option value="layer">Cor da camada atual</option><option value="none">Sem borda</option></select></label>
-        <label class="field">Espessura da borda<span class="input-with-unit"><input id="image-vector-border-width" type="number" min="0.01" max="10" step="0.01" value="0.15"><span>mm</span></span></label>
+        <label class="field" data-i18n="ui.dialogs.colors">Cores<input id="image-vector-colors" type="number" min="2" max="24" step="1" value="8"></label>
+        <label class="field" data-i18n="ui.dialogs.removeSmallDetails">Remover detalhes menores<input id="image-vector-pathomit" type="number" min="0" max="1000" step="1" value="8"><span class="unit-note" data-i18n="ui.dialogs.pixels">pixels</span></label>
+        <label class="field" data-i18n="ui.dialogs.regionSmoothing">Suavização de regiões<input id="image-vector-line-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+        <label class="field" data-i18n="ui.dialogs.curveFitting">Ajuste de curvas<input id="image-vector-curve-tolerance" type="number" min="0.1" max="10" step="0.1" value="1"></label>
+        <label class="field" data-i18n="ui.dialogs.border">Borda<select id="image-vector-border-mode"><option value="layer" data-i18n="ui.dialogs.currentLayerColor">Cor da camada atual</option><option value="none" data-i18n="ui.dialogs.noBorder">Sem borda</option></select></label>
+        <label class="field" data-i18n="ui.dialogs.borderWidth">Espessura da borda<span class="input-with-unit"><input id="image-vector-border-width" type="number" min="0.01" max="10" step="0.01" value="0.15"><span>mm</span></span></label>
       </div>
-      <div id="image-vector-color-options" class="image-vector-color-options" role="group" aria-label="Cores incluídas na conversão"></div>
-      <canvas id="image-vector-preview" class="image-vector-preview" aria-label="Prévia da vetorização"></canvas>
-      <p id="image-vector-stats" class="machine-preview-stats" role="status">Ajuste os parâmetros para gerar a prévia.</p>
+      <div id="image-vector-color-options" class="image-vector-color-options" role="group" aria-label="Cores incluídas na conversão" data-i18n-aria-label="ui.dialogs.includedColors"></div>
+      <canvas id="image-vector-preview" class="image-vector-preview" aria-label="Prévia da vetorização" data-i18n-aria-label="ui.dialogs.vectorPreview"></canvas>
+      <p id="image-vector-stats" class="machine-preview-stats" role="status" data-i18n="ui.dialogs.adjustForPreview">Ajuste os parâmetros para gerar a prévia.</p>
       <div class="preview-actions">
-        <form method="dialog"><button class="button button-secondary" type="submit">Cancelar</button></form>
-        <button class="button button-primary" id="apply-image-vector" type="button" disabled>Substituir imagem pelos vetores</button>
+        <form method="dialog"><button class="button button-secondary" type="submit" data-i18n="common.cancel">Cancelar</button></form>
+        <button class="button button-primary" id="apply-image-vector" type="button" disabled data-i18n="ui.dialogs.replaceWithVectors">Substituir imagem pelos vetores</button>
       </div>
     </dialog>
     <dialog id="path-editor-dialog" class="path-editor-dialog" aria-labelledby="path-editor-title">
-      <form method="dialog"><button class="dialog-close" aria-label="Fechar subeditor">×</button></form>
-      <h2 id="path-editor-title">Subeditor de traçado SVG</h2>
-      <p>Arraste nós e alças de curva ou ajuste as coordenadas locais. Curvas importadas são normalizadas para segmentos cúbicos editáveis.</p>
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar subeditor" data-i18n-aria-label="ui.dialogs.closePathEditor">×</button></form>
+      <h2 id="path-editor-title" data-i18n="ui.dialogs.pathEditor">Subeditor de traçado SVG</h2>
+      <p data-i18n="ui.dialogs.pathEditorHelp">Arraste nós e alças de curva ou ajuste as coordenadas locais. Curvas importadas são normalizadas para segmentos cúbicos editáveis.</p>
       <div class="path-editor-layout">
-        <svg id="path-editor-canvas" class="path-editor-canvas" role="img" aria-label="Prévia vetorial com nós e alças editáveis"></svg>
-        <div id="path-editor-nodes" class="path-editor-nodes" aria-label="Coordenadas dos nós"></div>
+        <svg id="path-editor-canvas" class="path-editor-canvas" role="img" aria-label="Prévia vetorial com nós e alças editáveis" data-i18n-aria-label="ui.dialogs.pathPreview"></svg>
+        <div id="path-editor-nodes" class="path-editor-nodes" aria-label="Coordenadas dos nós" data-i18n-aria-label="ui.dialogs.nodeCoordinates"></div>
       </div>
       <div class="preview-actions">
-        <form method="dialog"><button class="button button-secondary" type="submit">Cancelar</button></form>
-        <button class="button button-primary" type="button" data-path-save>Aplicar alterações</button>
+        <form method="dialog"><button class="button button-secondary" type="submit" data-i18n="common.cancel">Cancelar</button></form>
+        <button class="button button-primary" type="button" data-path-save data-i18n="ui.dialogs.applyChanges">Aplicar alterações</button>
       </div>
     </dialog>
     <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
-      <form method="dialog"><button class="dialog-close" aria-label="Fechar atalhos">×</button></form>
-      <h2 id="shortcuts-title">Atalhos de teclado</h2>
-      <p>Atalhos de edição não interceptam a digitação em campos de texto.</p>
+      <form method="dialog"><button class="dialog-close" aria-label="Fechar atalhos" data-i18n-aria-label="ui.dialogs.closeShortcuts">×</button></form>
+      <h2 id="shortcuts-title" data-i18n="ui.dialogs.shortcutsTitle">Atalhos de teclado</h2>
+      <p data-i18n="ui.dialogs.shortcutsHelp">Atalhos de edição não interceptam a digitação em campos de texto.</p>
       <table><tbody id="shortcuts-list"></tbody></table>
     </dialog>
     <script src="./vendor/svgson.js"></script>

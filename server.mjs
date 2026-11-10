@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SerialPort } from "serialport";
@@ -14,6 +14,7 @@ let connection = null;
 let activeJob = false;
 let jobTask = null;
 let jobStatus = { state: "idle", completed: 0, total: 0, error: null };
+let desktopPluginDirectory = null;
 
 class SimulatedSerialPort extends EventEmitter {
   isOpen = true;
@@ -47,6 +48,7 @@ const contentTypes = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".svg": "image/svg+xml; charset=utf-8"
 };
 const securityHeaders = {
@@ -59,6 +61,87 @@ const securityHeaders = {
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, { ...securityHeaders, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
   response.end(JSON.stringify(body));
+}
+
+const pluginIdPattern = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const pluginLocales = new Set(["en", "pt-BR"]);
+const pluginLocaleSizeLimit = 256 * 1024;
+
+function isMessageCatalog(value, depth = 0) {
+  if (typeof value === "string") return true;
+  if (!value || typeof value !== "object" || Array.isArray(value) || depth >= 8) return false;
+  const entries = Object.entries(value);
+  return entries.every(([key, child]) => /^[\w.-]{1,100}$/.test(key) && isMessageCatalog(child, depth + 1));
+}
+
+async function readDesktopPlugin(id) {
+  if (!desktopPluginDirectory || !pluginIdPattern.test(id)) return null;
+  const pluginDirectory = resolve(desktopPluginDirectory, id);
+  try {
+    if (!(await lstat(pluginDirectory)).isDirectory()) return null;
+    const manifestPath = resolve(pluginDirectory, "manifest.json");
+    if (!(await lstat(manifestPath)).isFile()) return null;
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (manifest.id !== id
+      || manifest.apiVersion !== 1
+      || manifest.entry !== "plugin.mjs"
+      || typeof manifest.name !== "string"
+      || !manifest.name.trim()
+      || manifest.name.length > 80
+      || typeof manifest.version !== "string"
+      || !manifest.version.trim()
+      || manifest.version.length > 64) return null;
+    const entryPath = resolve(pluginDirectory, "plugin.mjs");
+    if (!(await lstat(entryPath)).isFile()) return null;
+    const localeUrls = {};
+    const localePaths = {};
+    const declaredLocales = manifest.locales ?? {};
+    if (!declaredLocales || typeof declaredLocales !== "object" || Array.isArray(declaredLocales)) return null;
+    const localeDirectory = resolve(pluginDirectory, "locales");
+    if (Object.keys(declaredLocales).length > 0 && !(await lstat(localeDirectory)).isDirectory()) return null;
+    for (const [locale, relativePath] of Object.entries(declaredLocales)) {
+      if (!pluginLocales.has(locale) || relativePath !== `locales/${locale}.json`) return null;
+      const localePath = resolve(pluginDirectory, relativePath);
+      if (!localePath.startsWith(`${pluginDirectory}${sep}`)) return null;
+      const localeFile = await lstat(localePath);
+      if (!localeFile.isFile() || localeFile.size > pluginLocaleSizeLimit) return null;
+      const messages = JSON.parse(await readFile(localePath, "utf8"));
+      if (!isMessageCatalog(messages)) return null;
+      localeUrls[locale] = `/desktop-plugins/${id}/locales/${locale}.json`;
+      localePaths[locale] = localePath;
+    }
+    return {
+      id,
+      name: manifest.name,
+      version: manifest.version,
+      apiVersion: 1,
+      url: `/desktop-plugins/${id}/plugin.mjs`,
+      localeUrls,
+      entryPath,
+      localePaths
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function listDesktopPlugins() {
+  if (!desktopPluginDirectory) return [];
+  let entries;
+  try {
+    entries = await readdir(desktopPluginDirectory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const plugins = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const plugin = await readDesktopPlugin(entry.name);
+    if (!plugin) continue;
+    const { entryPath, localePaths, ...metadata } = plugin;
+    plugins.push(metadata);
+  }
+  return plugins;
 }
 
 function createGrblConnection(serialPort) {
@@ -142,6 +225,10 @@ export async function listSerialPorts(listPorts = () => SerialPort.list()) {
 async function handleApi(request, response, url) {
   if (!verifyLocalRequest(request, response)) return;
   try {
+    if (request.method === "GET" && url.pathname === "/api/plugins") {
+      sendJson(response, 200, { plugins: await listDesktopPlugins() });
+      return;
+    }
     if (request.method === "GET" && url.pathname === "/api/connection-status") {
       sendJson(response, 200, {
         connected: Boolean(connection),
@@ -270,9 +357,37 @@ const server = createServer(async (request, response) => {
     sendJson(response, 405, { error: "Method not allowed" });
     return;
   }
+  if (url.pathname.startsWith("/desktop-plugins/")) {
+    const match = /^\/desktop-plugins\/([a-z0-9][a-z0-9-]{0,62})\/(plugin\.mjs|locales\/(en|pt-BR)\.json)$/.exec(url.pathname);
+    const plugin = match ? await readDesktopPlugin(match[1]) : null;
+    if (!plugin) {
+      response.writeHead(404).end("Not found");
+      return;
+    }
+    try {
+      const locale = match[3];
+      const filePath = locale ? plugin.localePaths[locale] : plugin.entryPath;
+      if (!filePath) {
+        response.writeHead(404).end("Not found");
+        return;
+      }
+      const content = await readFile(filePath);
+      response.writeHead(200, {
+        ...securityHeaders,
+        "Content-Type": locale ? "application/json; charset=utf-8" : contentTypes[".mjs"],
+        "Cache-Control": "no-store"
+      });
+      response.end(request.method === "HEAD" ? undefined : content);
+    } catch {
+      response.writeHead(404).end("Not found");
+    }
+    return;
+  }
   const requestedPath = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
   if (requestedPath !== "/index.html"
+    && requestedPath !== "/commburn-icon.svg"
     && requestedPath !== "/vendor/svgson.js"
+    && requestedPath !== "/src/core/hershey-fonts.json"
     && !/^\/src\/[a-zA-Z0-9_/-]+\.(?:js|css)$/.test(requestedPath)
     && !/^\/node_modules\/svg-pathdata\/lib\/[a-zA-Z0-9_.-]+\.js$/.test(requestedPath)
     && requestedPath !== "/node_modules/@jodit/image-editor/dist/jodit-image-editor.js"
@@ -296,7 +411,8 @@ const server = createServer(async (request, response) => {
   }
 });
 
-export function startServer({ port = portNumber } = {}) {
+export function startServer({ port = portNumber, pluginDirectory = null } = {}) {
+  desktopPluginDirectory = pluginDirectory;
   return new Promise((resolveStart, rejectStart) => {
     const onError = (error) => {
       server.off("listening", onListening);

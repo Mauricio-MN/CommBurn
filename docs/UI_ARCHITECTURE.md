@@ -5,6 +5,7 @@ Este guia descreve os limites atuais da interface e como acrescentar ferramentas
 ## Módulos do navegador
 
 - `src/app.js`: composição dos módulos, estado de documento e ligação dos controles.
+- `src/ui/plugins.js`: carregador desktop local API v1 para os slots de extensão documentados.
 - `src/ui/toolbar.js`: catálogo de ferramentas, atalhos visuais e estado ativo.
 - `src/ui/canvas-controller.js`: seleção, conversão de coordenadas SVG/mm e interações de ponteiro.
 - `src/ui/selection.js`: operações puras para substituir, alternar e combinar conjuntos selecionados.
@@ -17,6 +18,10 @@ Este guia descreve os limites atuais da interface e como acrescentar ferramentas
 - `src/core/svg-import.js`: conversão controlada de SVG em elementos métricos do núcleo.
 
 O núcleo não depende de DOM. A interface encaminha as operações ao modelo comum; não converta pixels em medidas por uma implementação paralela.
+
+## Internacionalização
+
+`src/core/i18n.js` resolve os locales suportados (`en`, `pt-BR`), faz fallback e formata mensagens sem depender do DOM. A interface persiste a escolha em `commburn.locale`; o locale não faz parte do documento. `translateDom` traduz elementos marcados e a toolbar, painel de camadas e atalhos recebem o tradutor para conteúdo dinâmico. A cobertura de diálogos, inspetor, máquina e notificações ainda está incompleta. Consulte o [plano e estado da internacionalização](./INTERNATIONALIZATION_PLAN.md).
 
 ## Prancheta e régua
 
@@ -32,7 +37,7 @@ O controle oferece dois modos. **Preservar aparência completa** incorpora o SVG
 
 O modo visual conserva recursos SVG estáticos ou animados mesmo que não sejam editáveis no modelo. Scripts e atributos de evento são removidos; referências externas, CSS `@import` e URLs CSS externas são recusados. Um `DOCTYPE svg` é removido sem buscar DTDs externos. Entidades textuais internas simples são expandidas com limites de tamanho e recursão; entidades externas/de parâmetro e defaults `ATTLIST` não são suportados. Referências XML predefinidas e numéricas são decodificadas. `foreignObject` é preservado após a mesma sanitização de scripts, eventos e referências remotas. O modo vetorial ignora `metadata`, `title` e `desc` (conteúdo não gráfico), aplica e compõe transforms `matrix`, `translate`, `scale`, `rotate`, `skewX` e `skewY` em grupos, formas, paths, texto e imagens compatíveis, e converte grupos, `rect`, `circle`, `ellipse`, `line`, `path`, `polygon`, `polyline`, texto plano e imagens raster incorporadas. Formas giradas/distorcidas viram paths editáveis; transforms de texto devem preservar escala uniforme; imagens aceitam transforms com eixos ortogonais e sem reflexão. A importação da interface atribui todos os objetos vetoriais à camada ativa; a API do núcleo ainda permite preservar camadas incorporadas quando desejado. Recursos que não podem ser representados pelo modelo são recusados em vez de importados parcialmente. O modo visual conserva a aparência do SVG como objeto único, sem criar camadas separadas; a importação vetorial pela API pode restaurar metadados de camadas quando `forceLayerId` não é informado. O limite de arquivo na interface é 10 MB para SVG e projetos; imagens raster aceitam até 25 MB e 20 milhões de pixels, passam pelo editor local e são incorporadas como PNG, dimensionadas inicialmente a 96 dpi e ajustadas em mm. Objetos de imagem não são aceitos diretamente pelo adaptador GRBL.
 
-Na ferramenta Selecionar (`V`), Shift+clique alterna objetos na seleção e arrastar no espaço vazio cria uma caixa de seleção. A ferramenta Seleção múltipla (`Q`) adiciona objetos por clique ou caixa. O conjunto selecionado pode ser movido, redimensionado proporcionalmente em torno do centro do conjunto, duplicado, removido e copiado/colado; `Ctrl+C` copia sem modificar o original e `Ctrl+V` cola com deslocamento de 5 mm na camada ativa, mesmo se os objetos copiados vierem de outra camada. Campos de texto mantêm os atalhos nativos do navegador. Uma operação em objetos de camadas bloqueadas é recusada; colar exige uma camada ativa desbloqueada. Rotação e distorção continuam disponíveis para um objeto por vez. Cada cartão de camada tem ação para duplicar a configuração da camada e todos os seus objetos na mesma posição; a cópia começa desbloqueada.
+Na ferramenta Selecionar (`V`), Shift+clique alterna objetos na seleção e arrastar no espaço vazio cria uma caixa de seleção. O conjunto selecionado pode ser movido, redimensionado proporcionalmente em torno do centro do conjunto, duplicado, removido e copiado/colado; `Ctrl+C` copia sem modificar o original e `Ctrl+V` cola com deslocamento de 5 mm na camada ativa, mesmo se os objetos copiados vierem de outra camada. Campos de texto mantêm os atalhos nativos do navegador. Uma operação em objetos de camadas bloqueadas é recusada; colar exige uma camada ativa desbloqueada. Rotação e distorção continuam disponíveis para um objeto por vez. Cada cartão de camada tem ação para duplicar a configuração da camada e todos os seus objetos na mesma posição; a cópia começa desbloqueada.
 
 A sidebar tem altura limitada à área visível no desktop e rolagem vertical própria; em telas estreitas a rolagem é limitada ao painel de ferramentas antes da área de desenho.
 
@@ -55,7 +60,6 @@ Atalhos:
 | Tecla | Ação |
 |---|---|
 | `V` | Selecionar |
-| `Q` | Seleção múltipla |
 | `M` | Mover |
 | `S` | Redimensionar proporcionalmente |
 | `E` | Editar |
@@ -74,13 +78,13 @@ Atalhos:
 
 ## Modo de apresentação
 
-O botão **Apresentação** executa um roteiro curto com cursor visual, criação de texto e formas, ajustes em milímetros e simulação GRBL somente visual. O roteiro usa as rotinas normais do editor em um documento temporário, não envia comandos ao hardware e restaura o documento, os campos, a seleção e a ferramenta anteriores ao sair. A simulação usa somente retângulos sem transformação, o subconjunto compatível com o adaptador GRBL; o texto permanece visível no desenho, mas não entra no plano simulado.
+O botão **Apresentação** executa um roteiro curto com cursor visual, criação de texto e formas, ajustes em milímetros e simulação GRBL somente visual. O roteiro usa as rotinas normais do editor em um documento temporário, não envia comandos ao hardware e restaura o documento, os campos, a seleção e a ferramenta anteriores ao sair. A simulação usa somente retângulos sem transformação, o subconjunto compatível com o adaptador GRBL; o texto permanece como referência visual, mas não entra no plano simulado.
 
 ## Extensibilidade de interface
 
-Seções do HTML identificam sua responsabilidade por `data-ui-module` e pontos de composição por `data-extension-slot`. Os slots atuais são `toolbar-tools`, `document-settings`, `coordinate-settings`, `object-creation`, `object-inspector`, `canvas-header` e `canvas`.
+Seções do HTML identificam sua responsabilidade por `data-ui-module` e pontos de composição por `data-extension-slot`. Os slots atuais são `toolbar-tools`, `document-settings`, `coordinate-settings`, `layers`, `object-creation`, `object-inspector`, `canvas-header` e `canvas`.
 
-Esses atributos são **pontos de extensão documentados**, não um carregador de plugins. Não use `eval`, imports remotos ou execução automática de código externo. Um futuro registro de plugins deve ser versionado, validado, isolado e seguir a mesma licença MIT do CommBurn. Extensões de geometria devem registrar tipos/operações pelo núcleo e também declarar suporte por exportador; não alterar HTML interno de outra ferramenta para fazer um plugin parecer integrado.
+Esses atributos são pontos de extensão nomeados. O host local de plugins API v1 existe apenas nas versões desktop empacotadas: carrega um `plugin.mjs` por plugin, instalado em `app.getPath("userData")/plugins/<id>/`, e só registra elementos nesses slots. `npm start` não carrega plugins. O módulo executa com o acesso do renderer, sem sandbox; não use plugins remotos e instale somente código local revisado. Desde `0.1.2`, o core é AGPL-3.0-only; plugins independentes podem manter licenças permissivas, como MIT, conforme `LICENSE-PLUGINS`, sem relicenciar o core. Extensões de geometria devem usar `context.document.addElement`, que valida pelo núcleo, e não alterar HTML interno de outra ferramenta para parecer integrada.
 
 ## Guia para novas mudanças
 

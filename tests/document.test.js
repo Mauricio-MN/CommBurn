@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, renderGrblJob, renderSvg } from "../src/core/document.js";
+import { createDocument, planGrblJob, renderGrblJob, renderSvg } from "../src/core/document.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
 const embeddedSvg = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><circle cx="5" cy="5" r="4"/></svg>').toString("base64")}`;
@@ -35,8 +35,8 @@ test("SVG text and identifiers are escaped", () => {
 });
 
 test("invalid metric dimensions, positions, and axis settings are rejected", () => {
-  assert.throws(() => createDocument({ widthMm: 0 }), /greater than zero/);
-  assert.throws(() => createDocument({ widthMm: Infinity }), /finite number/);
+  assert.throws(() => createDocument({ widthMm: 0 }), { code: "document.positiveNumber" });
+  assert.throws(() => createDocument({ widthMm: Infinity }), { code: "document.invalidNumber" });
   assert.throws(() => createDocument({ elements: [{ type: "text", xMm: NaN, yMm: 0, text: "x", fontSizeMm: 1 }] }), /finite number/);
   assert.throws(() => createDocument({ origin: { flipX: "yes" } }), /must be boolean/);
   assert.throws(() => createDocument({
@@ -44,7 +44,7 @@ test("invalid metric dimensions, positions, and axis settings are rejected", () 
       { id: "same", type: "rect", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1 },
       { id: "same", type: "ellipse", xMm: 2, yMm: 2, widthMm: 1, heightMm: 1 }
     ]
-  }), /Duplicate object id/);
+  }), { code: "document.duplicateId" });
   assert.throws(() => createDocument({
     elements: [{ id: "warp", type: "rect", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1, skewXDeg: 80 }]
   }), /between -80 and 80/);
@@ -63,15 +63,19 @@ test("GRBL job output uses explicit millimetres, user coordinates, and laser-off
   assert.match(gcode, /G1 X70 Y75\nG1 X70 Y60\nG1 X90 Y60\nG1 X90 Y75\nM5\nM5\n$/);
 });
 
-test("GRBL jobs reject text, out-of-area geometry, and invalid machine settings", () => {
+test("GRBL exports text and rejects out-of-area geometry and invalid machine settings", () => {
   const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 };
-  assert.throws(() => renderGrblJob({
-    elements: [{ type: "text", xMm: 1, yMm: 1, text: "No path", fontSizeMm: 2 }]
-  }, settings), /editable vector paths/);
+  const textJob = renderGrblJob({
+    widthMm: 100, heightMm: 80,
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "Ação", fontSizeMm: 8 }]
+  }, settings);
+  assert.match(textJob, /M4 S100/);
+  assert.match(textJob, /G1 X/);
+  assert.ok(textJob.split("\n").filter((line) => line.startsWith("G0 ")).length > 5);
   assert.throws(() => renderGrblJob({
     widthMm: 10, heightMm: 10,
     elements: [{ type: "rect", xMm: 8, yMm: 1, widthMm: 4, heightMm: 2 }]
-  }, settings), /outside the document work area/);
+  }, settings), { code: "grbl.outsideWorkArea" });
   assert.throws(() => renderGrblJob({
     elements: [{ type: "rect", xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }]
   }, { ...settings, powerPercent: 101 }), /at most 100/);
@@ -87,6 +91,45 @@ test("GRBL paths honor explicit axis inversions", () => {
 
   assert.match(gcode, /G0 X45 Y34/);
   assert.match(gcode, /G1 X35 Y34\nG1 X35 Y22\nG1 X45 Y22/);
+});
+
+test("GRBL text stays upright when the selected origin inverts an axis", () => {
+  const documentModel = {
+    widthMm: 100,
+    heightMm: 80,
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "AB", fontSizeMm: 8 }]
+  };
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000 };
+  const normalPaths = planGrblJob(documentModel, settings).paths
+    .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
+  const flippedPaths = planGrblJob({ ...documentModel, origin: { corner: "top-right" } }, settings).paths
+    .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
+  const normalPoints = normalPaths.flatMap(({ points }) => points);
+  const flippedPoints = flippedPaths.flatMap(({ points }) => points);
+
+  assert.equal(flippedPoints.length, normalPoints.length);
+  assert.equal(new Set(normalPoints.map((point, index) => (flippedPoints[index].xMm - point.xMm).toFixed(6))).size, 1);
+  assert.ok(flippedPoints[0].xMm > normalPoints[0].xMm);
+});
+
+test("GRBL engraves stroke-font text in fill layers and fills closed shapes", () => {
+  const plan = planGrblJob({
+    layers: [{ id: "fill", operation: "fill" }],
+    elements: [
+      { type: "text", xMm: 1, yMm: 8, text: "Open strokes", fontSizeMm: 4, layerId: "fill" },
+      { id: "closed", type: "rect", xMm: 20, yMm: 20, widthMm: 2, heightMm: 2, layerId: "fill" }
+    ]
+  }, { maxSpindleSpeed: 1000 });
+  const textPaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "element-1");
+  const closedShapePaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "closed");
+
+  assert.ok(textPaths.length > 0);
+  assert.ok(textPaths.every(({ operation, algorithm }) => operation === "engrave" && algorithm === "single-line"));
+  assert.ok(closedShapePaths.length > 0);
+  assert.ok(closedShapePaths.every(({ operation, algorithm }) => operation === "fill" && algorithm === "horizontal-serpentine"));
+  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.engrave > 0);
+  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.fill > 0);
+  assert.match(plan.gcode, /M4 S/);
 });
 
 test("SVG renders configurable ellipses, lines, and object transforms", () => {
@@ -171,7 +214,7 @@ test("GRBL rejects rotated, warped, and non-rectangular objects", () => {
   const settings = { feedMmPerMinute: 100, maxSpindleSpeed: 1000, powerPercent: 5 };
   assert.throws(() => renderGrblJob({
     elements: [{ type: "rect", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10, rotationDeg: 2 }]
-  }, settings), /untransformed rectangles/);
+  }, settings), /untransformed text, rectangles/);
   assert.throws(() => renderGrblJob({
     elements: [{ type: "ellipse", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10 }]
   }, settings), /editable vector paths/);

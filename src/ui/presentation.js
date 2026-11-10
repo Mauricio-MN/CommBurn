@@ -17,7 +17,7 @@ export function createPresentationDocument() {
 
 export function createPresentationSimulationDocument(documentModel) {
   const elements = documentModel.elements.filter((element) =>
-    element.type === "rect"
+    ["rect", "path", "text"].includes(element.type)
     && (element.rotationDeg ?? 0) === 0
     && (element.skewXDeg ?? 0) === 0
     && (element.skewYDeg ?? 0) === 0

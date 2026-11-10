@@ -1,29 +1,31 @@
 const OPERATIONS = [
-  { value: "engrave", label: "Gravação" },
-  { value: "cut", label: "Corte" },
-  { value: "fill", label: "Preenchimento" }
+  { value: "engrave", labelKey: "ui.layers.operation.engrave" },
+  { value: "cut", labelKey: "ui.layers.operation.cut" },
+  { value: "fill", labelKey: "ui.layers.operation.fill" }
 ];
 const FILL_ALGORITHMS = [
-  { value: "horizontal-serpentine", label: "Horizontal serpentina" },
-  { value: "vertical-serpentine", label: "Vertical serpentina" },
-  { value: "crosshatch", label: "Cruzado (horizontal + vertical)" },
-  { value: "horizontal-unidirectional", label: "Horizontal unidirecional" }
+  { value: "horizontal-serpentine", labelKey: "ui.layers.algorithm.horizontal" },
+  { value: "vertical-serpentine", labelKey: "ui.layers.algorithm.vertical" },
+  { value: "crosshatch", labelKey: "ui.layers.algorithm.crosshatch" },
+  { value: "horizontal-unidirectional", labelKey: "ui.layers.algorithm.unidirectional" }
 ];
 const OBJECT_ORDERS = [
-  { value: "document", label: "Ordem da lista" },
-  { value: "nearest", label: "Mais próximo primeiro" },
-  { value: "center-out", label: "Centro para bordas" }
+  { value: "document", labelKey: "ui.layers.order.document" },
+  { value: "nearest", labelKey: "ui.layers.order.nearest" },
+  { value: "center-out", labelKey: "ui.layers.order.centerOut" }
 ];
 
 export class LayersPanel {
-  constructor(root, { onSelect, onAdd, onUpdate, onDelete, onDuplicate }) {
+  constructor(root, { onSelect, onAdd, onUpdate, onDelete, onDuplicate, t = (key) => key }) {
     this.root = root;
+    this.t = t;
     this.callbacks = { onSelect, onAdd, onUpdate, onDelete, onDuplicate };
     root.addEventListener("click", (event) => this.handleClick(event));
     root.addEventListener("change", (event) => this.handleChange(event));
   }
 
   render(layers, elements, activeLayerId) {
+    const t = this.t;
     const list = document.createDocumentFragment();
     for (const layer of layers) {
       const item = document.createElement("article");
@@ -39,7 +41,7 @@ export class LayersPanel {
       select.type = "button";
       select.dataset.layerSelect = "";
       select.setAttribute("aria-pressed", String(layer.id === activeLayerId));
-      select.title = "Selecionar camada para criar novos objetos";
+      select.title = t("ui.layers.selectTooltip");
       const swatch = document.createElement("span");
       swatch.className = "layer-swatch";
       swatch.style.backgroundColor = layer.color;
@@ -55,7 +57,7 @@ export class LayersPanel {
       remove.type = "button";
       remove.dataset.layerDelete = "";
       remove.textContent = "×";
-      remove.title = "Remover camada e mover seus objetos para outra camada";
+      remove.title = t("ui.layers.removeTooltip");
       remove.setAttribute("aria-label", remove.title);
       remove.disabled = layers.length <= 1;
       const duplicate = document.createElement("button");
@@ -63,36 +65,36 @@ export class LayersPanel {
       duplicate.type = "button";
       duplicate.dataset.layerDuplicate = "";
       duplicate.textContent = "⧉";
-      duplicate.title = "Duplicar camada e seus objetos";
+      duplicate.title = t("ui.layers.duplicateTooltip");
       duplicate.setAttribute("aria-label", duplicate.title);
       header.append(select, duplicate, remove);
 
       const settings = document.createElement("div");
       settings.className = "layer-settings";
       settings.append(
-        this.createField("Tipo de operação", this.createSelect("operation", layer.operation, OPERATIONS)),
-        this.createField("Nome", this.createInput("name", layer.name, "text")),
-        this.createField("Cor de visualização", this.createInput("color", layer.color, "color")),
-        this.createField("Avanço (mm/min)", this.createInput("feedMmPerMinute", layer.feedMmPerMinute, "number", { min: "0.1", step: "10" })),
-        this.createField("Potência (%)", this.createInput("powerPercent", layer.powerPercent, "number", { min: "0.1", max: "100", step: "1" })),
-        this.createField("Passes", this.createInput("passes", layer.passes, "number", { min: "1", max: "100", step: "1" }))
+        this.createField("ui.layers.operationType", this.createSelect("operation", layer.operation, OPERATIONS)),
+        this.createField("ui.layers.name", this.createInput("name", layer.name, "text")),
+        this.createField("ui.layers.color", this.createInput("color", layer.color, "color")),
+        this.createField("ui.layers.feed", this.createInput("feedMmPerMinute", layer.feedMmPerMinute, "number", { min: "0.1", step: "10" })),
+        this.createField("ui.layers.power", this.createInput("powerPercent", layer.powerPercent, "number", { min: "0.1", max: "100", step: "1" })),
+        this.createField("ui.layers.passes", this.createInput("passes", layer.passes, "number", { min: "1", max: "100", step: "1" }))
       );
-      const fillField = this.createField("Espaçamento do preenchimento (mm)", this.createInput("fillSpacingMm", layer.fillSpacingMm, "number", { min: "0.05", step: "0.05" }));
+      const fillField = this.createField("ui.layers.fillSpacing", this.createInput("fillSpacingMm", layer.fillSpacingMm, "number", { min: "0.05", step: "0.05" }));
       fillField.hidden = layer.operation !== "fill";
       fillField.dataset.fillSetting = "";
       settings.append(fillField);
-      const algorithmField = this.createField("Algoritmo de preenchimento", this.createSelect("fillAlgorithm", layer.fillAlgorithm, FILL_ALGORITHMS));
+      const algorithmField = this.createField("ui.layers.fillAlgorithm", this.createSelect("fillAlgorithm", layer.fillAlgorithm, FILL_ALGORITHMS));
       algorithmField.hidden = layer.operation !== "fill";
       algorithmField.dataset.fillSetting = "";
       settings.append(algorithmField);
-      settings.append(this.createField("Ordem dos objetos", this.createSelect("objectOrder", layer.objectOrder, OBJECT_ORDERS)));
+      settings.append(this.createField("ui.layers.objectOrder", this.createSelect("objectOrder", layer.objectOrder, OBJECT_ORDERS)));
 
       const switches = document.createElement("div");
       switches.className = "layer-switches";
       switches.append(
-        this.createToggle("enabled", "Incluir no envio", layer.enabled),
-        this.createToggle("visible", "Visível no desenho", layer.visible),
-        this.createToggle("locked", "Bloquear edição", layer.locked)
+        this.createToggle("enabled", "ui.layers.enabled", layer.enabled),
+        this.createToggle("visible", "ui.layers.visible", layer.visible),
+        this.createToggle("locked", "ui.layers.locked", layer.locked)
       );
       item.append(header, settings, switches);
       list.append(item);
@@ -100,10 +102,15 @@ export class LayersPanel {
     this.root.replaceChildren(list);
   }
 
-  createField(labelText, control) {
+  setTranslator(t) {
+    this.t = t;
+  }
+
+  createField(labelKey, control) {
+    const labelText = this.t(labelKey);
     const label = document.createElement("label");
     label.className = "field layer-field";
-    control.title = `${labelText} da camada`;
+    control.title = this.t("ui.layers.fieldDescription", { label: labelText });
     control.setAttribute("aria-description", control.title);
     label.append(document.createTextNode(labelText), control);
     return label;
@@ -124,14 +131,15 @@ export class LayersPanel {
     for (const optionData of options) {
       const option = document.createElement("option");
       option.value = optionData.value;
-      option.textContent = optionData.label;
+      option.textContent = this.t(optionData.labelKey);
       select.append(option);
     }
     select.value = value;
     return select;
   }
 
-  createToggle(key, labelText, checked) {
+  createToggle(key, labelKey, checked) {
+    const labelText = this.t(labelKey);
     const label = document.createElement("label");
     label.className = "layer-toggle";
     const checkbox = document.createElement("input");

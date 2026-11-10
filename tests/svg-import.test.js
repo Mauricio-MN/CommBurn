@@ -106,6 +106,22 @@ test("SVG can be imported entirely into the explicitly selected active layer", (
   assert.deepEqual(imported.elements.map((element) => element.layerId), ["selected-layer", "selected-layer"]);
 });
 
+test("SVG editable import can group geometry into layers by source color", () => {
+  const imported = importSvg(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10">
+      <rect x="1" y="1" width="4" height="4" fill="#ff0000"/>
+      <rect x="8" y="1" width="4" height="4" fill="#0000ff"/>
+    </svg>`, { layerId: "active", idPrefix: "colors" });
+  const redLayer = imported.layers.find((layer) => layer.color === "#ff0000");
+  const blueLayer = imported.layers.find((layer) => layer.color === "#0000ff");
+
+  assert.ok(redLayer);
+  assert.ok(blueLayer);
+  assert.equal(redLayer.operation, "fill");
+  assert.equal(blueLayer.operation, "fill");
+  assert.deepEqual(imported.elements.map((element) => element.layerId), [redLayer.id, blueLayer.id]);
+});
+
 test("SVG import strips external doctypes without fetching them and decodes standard XML references", () => {
   const source = `<?xml version="1.0"?>
     <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "https://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">

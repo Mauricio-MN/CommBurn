@@ -11,9 +11,10 @@ Use this workflow when changing automation surfaces or plugin support.
 2. Reuse the shared document core; do not fork geometry or unit-conversion behavior in an adapter.
 3. Keep machine-dependent actions opt-in and outside the document model unless explicitly requested.
 4. Provide deterministic, machine-readable input/output and explicit errors for invalid requests.
-5. Keep plugin licensing identical to this repository's MIT license; reject incompatible alternate license terms.
-6. Keep UI integration modular through the documented `data-extension-slot` seams; do not execute remote plugin code or bypass core validation.
-7. Test the same document through the core and CLI, including malformed input, transforms, and coordinate settings.
+5. License the CommBurn core under AGPL-3.0-only from v0.1.2; independent plugins may keep permissive licenses such as MIT and must not relicense the core.
+6. Keep UI integration modular through documented `data-extension-slot` seams; packaged desktop builds may load trusted local plugins only, never remote plugin code or bypass core validation.
+7. Treat `context.i18n` and plugin locale resources as planned, not implemented; when implementing them, follow `docs/INTERNATIONALIZATION_PLAN.md` and validate declared local paths only.
+8. Test the same document through the core and CLI, including malformed input, transforms, and coordinate settings.
 
 ## References
 

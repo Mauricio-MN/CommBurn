@@ -28,7 +28,12 @@ test("editable projects round-trip document dimensions, origin, layers, and obje
 });
 
 test("editable project loading rejects malformed, unknown, and invalid documents", () => {
-  assert.throws(() => parseProject("{"), /valid JSON/);
+  assert.throws(() => parseProject("{"), (error) => {
+    assert.ok(error instanceof TypeError);
+    assert.equal(error.code, "project.invalidJson");
+    assert.ok(error.cause instanceof SyntaxError);
+    return true;
+  });
   assert.throws(() => parseProject(JSON.stringify({ format: "other", version: 1, document: {} })), /Unknown CommBurn project/);
   assert.throws(() => parseProject(JSON.stringify({
     format: "commburn-project",

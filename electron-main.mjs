@@ -1,4 +1,6 @@
 import { app, BrowserWindow, shell } from "electron";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { startServer } from "./server.mjs";
 
 let serverHandle;
@@ -12,12 +14,14 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: "CommBurn",
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
     }
   });
+  mainWindow.setMenuBarVisibility(false);
 
   const trustedOrigin = new URL(serverHandle.url).origin;
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -43,7 +47,10 @@ if (app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     try {
-      serverHandle = await startServer({ port: 0 });
+      app.setApplicationMenu(null);
+      const pluginDirectory = join(app.getPath("userData"), "plugins");
+      await mkdir(pluginDirectory, { recursive: true });
+      serverHandle = await startServer({ port: 0, pluginDirectory });
       await createWindow();
     } catch (error) {
       console.error(`Unable to start CommBurn: ${error.message}`);
