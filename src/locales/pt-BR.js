@@ -76,6 +76,10 @@ export default Object.freeze({
       bottomRight: "Canto inferior direito",
       flipX: "Inverter esquerda/direita",
       flipY: "Inverter cima/baixo",
+      imageMode: "Imagens na gravação",
+      imageGrayscale: "Tons de cinza (intensidade do laser)",
+      imageDither: "Pontilhado (preto e branco com meios-tons)",
+      imageThreshold: "Preto e branco simples",
       startFrom: "O trabalho começa",
       startAbsolute: "No ponto zero da mesa",
       startObjects: "Onde a cabeça estiver, sobre o desenho",
@@ -399,6 +403,8 @@ export default Object.freeze({
       duplicateId: "ID de objeto duplicado: {id}."
     },
     grbl: {
+      invalidRaster: "A imagem raster é inválida para gravação.",
+      invalidRasterMode: "Modo de gravação de imagem não suportado.",
       noObjects: "O trabalho não tem objetos em camadas ativadas.",
       unsupportedGeometry: "O GRBL aceita retângulos, paths vetoriais editáveis e texto das fontes OpenType incorporadas. Imagens raster podem ser vetorizadas localmente; SVG visual precisa ser reimportado no modo editável para criar trajetórias.",
       outsideWorkArea: "O elemento {id} está fora da área de trabalho do documento.",

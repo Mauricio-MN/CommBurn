@@ -1,6 +1,7 @@
 import { DEFAULT_LAYER, normalizeLayers } from "./layers.js";
 import { CommBurnRangeError, CommBurnTypeError } from "./i18n.js";
 import { createTextOutlinePathData, getTextFontAsset, getTextSvgFamily } from "./text-to-path.js";
+import { decodeRaster, rasterLevels, rasterRowRuns } from "./raster-engrave.js";
 import { SVGPathData } from "../../node_modules/svg-pathdata/lib/SVGPathData.module.js";
 
 const ORIGIN_CORNERS = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
@@ -672,6 +673,38 @@ function transformDocumentPoints(element, points) {
   });
 }
 
+function createImageWorkPaths(document, layer, element, raster, mode) {
+  if (element.rotationDeg || element.skewXDeg || element.skewYDeg || element.flipX || element.flipY) {
+    throw new CommBurnRangeError("grbl.unsupportedGeometry", {}, { message: "Image engraving supports only untransformed images" });
+  }
+  const decoded = decodeRaster(element.id, raster);
+  const { levels, maxLevel } = rasterLevels(decoded, mode);
+  const pixelWidth = element.widthMm / decoded.widthPx;
+  const pixelHeight = element.heightMm / decoded.heightPx;
+  const workPaths = [];
+  for (let pass = 1; pass <= layer.passes; pass += 1) {
+    for (let row = 0; row < decoded.heightPx; row += 1) {
+      const runs = rasterRowRuns(levels, decoded.widthPx, row);
+      if (runs.length === 0) continue;
+      const yMm = element.yMm + (row + 0.5) * pixelHeight;
+      const ordered = row % 2 === 0 ? runs : runs.map(({ fromPx, toPx, level }) => ({ fromPx: toPx, toPx: fromPx, level })).reverse();
+      const xs = [ordered[0].fromPx, ...ordered.map(({ toPx }) => toPx)].map((px) => element.xMm + px * pixelWidth);
+      workPaths.push({
+        kind: "work",
+        elementId: element.id,
+        layerId: layer.id,
+        operation: "fill",
+        algorithm: "raster",
+        pass,
+        powerPercent: 0,
+        segmentPowerFractions: ordered.map(({ level }) => level / maxLevel),
+        points: mapPoints(document, xs.map((xMm) => [xMm, yMm]))
+      });
+    }
+  }
+  return workPaths;
+}
+
 function createElementWorkPaths(document, layer, element) {
   let geometryElement = element;
   if (element.type === "text") {
@@ -878,6 +911,9 @@ export function jobReferencePoints(input, settings) {
 
 function buildGrblJob(input, settings, offset) {
   const document = createDocument(input);
+  const rasters = settings.rasters ?? {};
+  const rasterMode = settings.imageMode ?? "grayscale";
+  const isRaster = (element) => element.type === "image" && rasters[element.id] !== undefined;
   const shiftNumber = (value, by) => by === 0 ? value : Number((value - by).toFixed(6));
   const shift = (point) => offset.xMm === 0 && offset.yMm === 0
     ? point
@@ -899,7 +935,7 @@ function buildGrblJob(input, settings, offset) {
   const elements = document.elements.filter((element) => activeLayerIds.has(element.layerId)
     && (element.type !== "text" || element.text.trim().length > 0));
   if (elements.length === 0) throw new CommBurnRangeError("grbl.noObjects", {}, { message: "The job has no objects in enabled layers" });
-  if (elements.some((element) => !["rect", "path", "text"].includes(element.type))) {
+  if (elements.some((element) => !["rect", "path", "text"].includes(element.type) && !isRaster(element))) {
     throw new CommBurnRangeError("grbl.unsupportedGeometry", {}, { message: "GRBL supports rectangles, editable vector paths, and editable text in the built-in engraving fonts" });
   }
 
@@ -918,7 +954,9 @@ function buildGrblJob(input, settings, offset) {
     const power = Math.round(maxSpindleSpeed * powerPercent / 100);
     const workByElement = new Map(layerElements.map((element) => [
       element.id,
-      createElementWorkPaths(document, layer, element)
+      isRaster(element)
+        ? createImageWorkPaths(document, layer, element, rasters[element.id], rasterMode)
+        : createElementWorkPaths(document, layer, element)
     ]));
     for (const element of layerElements) {
       const points = workByElement.get(element.id).flatMap(({ points: pathPoints }) => pathPoints);
@@ -963,8 +1001,10 @@ function buildGrblJob(input, settings, offset) {
         const pathPower = workPath.powerPercent ?? powerPercent;
         gcode.push(`M4 S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
         gcode.push(`G1 F${feedMmPerMinute}`);
-        for (const point of shiftedPath.points.slice(1)) {
-          gcode.push(`G1 X${point.xMm} Y${point.yMm}`);
+        for (const [pointIndex, point] of shiftedPath.points.slice(1).entries()) {
+          const fraction = workPath.segmentPowerFractions?.[pointIndex];
+          const spindle = fraction === undefined ? "" : ` S${Math.round(maxSpindleSpeed * powerPercent / 100 * fraction)}`;
+          gcode.push(`G1 X${point.xMm} Y${point.yMm}${spindle}`);
         }
         paths.push(shiftedPath);
         let pathDistanceMm = 0;

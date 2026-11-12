@@ -76,6 +76,10 @@ export default Object.freeze({
       bottomRight: "Bottom right corner",
       flipX: "Flip left/right",
       flipY: "Flip up/down",
+      imageMode: "Images when engraving",
+      imageGrayscale: "Grayscale (laser intensity)",
+      imageDither: "Dithered (black and white with halftones)",
+      imageThreshold: "Plain black and white",
       startFrom: "The job starts",
       startAbsolute: "At the table zero point",
       startObjects: "Wherever the head is, over the drawing",
@@ -398,6 +402,8 @@ export default Object.freeze({
       duplicateId: "Duplicate object ID: {id}."
     },
     grbl: {
+      invalidRaster: "The raster image is invalid for engraving.",
+      invalidRasterMode: "Unsupported image engraving mode.",
       noObjects: "The job has no objects in enabled layers.",
       unsupportedGeometry: "GRBL supports rectangles, editable vector paths, and text from the bundled OpenType fonts. Raster images can be vectorized locally; visual SVG objects must be reimported in editable mode to create paths.",
       outsideWorkArea: "Element {id} extends outside the document work area.",

@@ -312,3 +312,24 @@ test("GRBL flattens cubic SVG path curves into metric line segments", () => {
   assert.ok((gcode.match(/G1 X/g) ?? []).length > 8);
   assert.match(gcode, /G0 X2 Y3/);
 });
+
+test("raster images engrave as scan lines with per-segment power", () => {
+  const image = {
+    widthMm: 100, heightMm: 100, origin: "top-left",
+    layers: [{ id: "L1", name: "Img", operation: "engrave", color: "#000000", feedMmPerMinute: 1000, powerPercent: 50, passes: 1, fillSpacingMm: 1, fillAlgorithm: "horizontal-serpentine", objectOrder: "document", enabled: true, visible: true, locked: false }],
+    elements: [{ id: "photo", type: "image", xMm: 10, yMm: 10, widthMm: 4, heightMm: 2, layerId: "L1",
+      imageDataUri: "data:image/png;base64,iVBORw0KGgo=" }]
+  };
+  const gray = Buffer.from([0, 128, 255, 0, 255, 255, 255, 255]).toString("base64");
+  const rasters = { photo: { widthPx: 4, heightPx: 2, gray } };
+  const plan = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, imageMode: "grayscale" });
+  const rows = plan.paths.filter(({ kind }) => kind === "work");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].points.map(({ xMm }) => xMm), [10, 11, 12, 13, 14]);
+  assert.match(plan.gcode, /G1 X11 Y10\.5 S500/);
+  assert.match(plan.gcode, /G1 X12 Y10\.5 S\d{3}/);
+  const dither = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, imageMode: "threshold" });
+  assert.doesNotMatch(dither.gcode, /S2\d\d/);
+  assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000, rasters: { photo: { widthPx: 4, heightPx: 2, gray: "AA==" } } }), /does not match/);
+  assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000 }), /GRBL supports/);
+});

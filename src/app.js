@@ -844,9 +844,57 @@ function machineMaxSpindleSpeed(allowDefaultSmax = false) {
   return numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE);
 }
 
+const rasterCache = new Map();
+
+async function decodeImageGray(element, spacingMm) {
+  const widthPx = Math.max(1, Math.min(2000, Math.round(element.widthMm / spacingMm)));
+  const heightPx = Math.max(1, Math.min(2000, Math.round(element.heightMm / spacingMm)));
+  const key = `${element.id}|${element.imageDataUri.length}|${widthPx}x${heightPx}`;
+  if (rasterCache.has(key)) return { key, raster: rasterCache.get(key) };
+  const image = new Image();
+  image.src = element.imageDataUri;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, widthPx, heightPx);
+  context.drawImage(image, 0, 0, widthPx, heightPx);
+  const { data } = context.getImageData(0, 0, widthPx, heightPx);
+  const gray = new Uint8Array(widthPx * heightPx);
+  for (let index = 0; index < gray.length; index += 1) {
+    gray[index] = Math.round(0.299 * data[index * 4] + 0.587 * data[index * 4 + 1] + 0.114 * data[index * 4 + 2]);
+  }
+  let binary = "";
+  for (let index = 0; index < gray.length; index += 8192) binary += String.fromCharCode(...gray.subarray(index, index + 8192));
+  const raster = { widthPx, heightPx, gray: btoa(binary) };
+  rasterCache.set(key, raster);
+  return { key, raster };
+}
+
+let currentRasters = {};
+
+async function prepareRasters(documentModel = readDocument()) {
+  const rasters = {};
+  for (const element of documentModel.elements) {
+    if (element.type !== "image") continue;
+    const layer = documentModel.layers.find(({ id }) => id === element.layerId);
+    if (!layer?.enabled) continue;
+    try {
+      rasters[element.id] = (await decodeImageGray(element, Math.max(0.05, layer.fillSpacingMm))).raster;
+    } catch {
+      // The planner reports the unsupported image with its stable error code.
+    }
+  }
+  currentRasters = rasters;
+}
+
 function readJobPlacement() {
   const workCoordinateSystem = byId("work-system").value;
   return {
+    rasters: currentRasters,
+    imageMode: byId("image-mode").value,
     startFrom: byId("start-from").value,
     startAnchor: byId("start-anchor").value,
     ...(workCoordinateSystem ? { workCoordinateSystem } : {})
@@ -1105,8 +1153,9 @@ function showTimelinePreview(plan, documentModel) {
   setTimelinePosition(total);
 }
 
-function showMachinePreview() {
+async function showMachinePreview() {
   try {
+    await prepareRasters();
     const referenceDocument = readDocument();
     const documentModel = presentationActive
       ? createPresentationSimulationDocument(referenceDocument)
@@ -1469,7 +1518,8 @@ function togglePresentationPlayback() {
   setPresentationPauseLabel(!presentationPaused);
 }
 
-function exportGcode() {
+async function exportGcode() {
+  await prepareRasters();
   const plan = createMachinePlan();
   downloadFile(plan.gcode, "commburn-trabalho.gcode", "text/plain;charset=utf-8");
   showNotice("G-code GRBL exportado. Confira a origem e os limites da máquina antes de executar.");
@@ -2555,8 +2605,8 @@ for (const button of document.querySelectorAll('[data-action="preview-machine"]'
 }
 byId("preview-machine-job").addEventListener("click", showMachinePreview);
 for (const button of document.querySelectorAll('[data-action="export-gcode"]')) {
-  button.addEventListener("click", () => {
-    try { exportGcode(); } catch (error) {
+  button.addEventListener("click", async () => {
+    try { await exportGcode(); } catch (error) {
       showNotice(error instanceof FieldValidationError
         ? error
         : `Não foi possível exportar G-code: ${formatError(error)}`);
@@ -2685,6 +2735,7 @@ startMachineButton.addEventListener("click", async () => {
   try {
     if (!machineSimulation && !safetyCheckbox.checked) throw new Error(i18n.t("ui.machine.confirmSafety"));
     const documentModel = readDocument();
+    await prepareRasters(documentModel);
     const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), ...readJobPlacement() };
     const simulationPlan = machineSimulation
       ? planGrblJob(documentModel, settings)
