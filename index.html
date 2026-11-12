@@ -74,11 +74,11 @@
             <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
             <option value="center" data-i18n="ui.document.center">Centro</option>
           </select></label>
-          <label class="field" data-i18n="ui.document.workSystem">Sistema de coordenadas do controlador<select id="work-system">
+          <details class="advanced-details"><summary data-i18n="ui.document.advanced">Avançado</summary><label class="field" data-i18n="ui.document.workSystem">Sistema de coordenadas do controlador<select id="work-system">
             <option value="" data-i18n="ui.document.workSystemDefault">Atual do controlador (não enviar)</option>
             <option value="G54">G54</option><option value="G55">G55</option><option value="G56">G56</option>
             <option value="G57">G57</option><option value="G58">G58</option><option value="G59">G59</option>
-          </select></label>
+          </select></label></details>
           <label class="toggle"><input id="show-job-markers" type="checkbox" checked><span class="toggle-track"></span> <span data-i18n="ui.document.showMarkers">Mostrar origem, início e fim no desenho</span></label>
           <p class="help-text" data-i18n="ui.document.coordinatesHelp">Método manual: o G-code usa coordenadas absolutas (G90) a partir da origem escolhida aqui. Antes de executar, posicione a cabeça do laser nesse canto e defina-o como zero (X0 Y0) no controlador. O CommBurn não lê sensores nem fins de curso. O desenho do texto permanece legível.</p>
         </section>
@@ -180,7 +180,7 @@
           <div class="machine-actions">
             <button class="button button-secondary" id="read-position" type="button" disabled data-i18n="ui.machine.readPosition">Ler posição</button>
             <button class="button button-secondary" id="set-zero" type="button" disabled data-i18n="ui.machine.setZero">Definir zero aqui</button>
-            <button class="button button-secondary" id="home-machine" type="button" disabled data-i18n="ui.machine.home">Homing ($H)</button>
+            <button class="button button-secondary" id="home-machine" type="button" disabled data-i18n="ui.machine.home">Levar ao início da máquina</button>
           </div>
           <p class="help-text" id="machine-position" role="status" data-i18n="ui.machine.positionUnknown">Posição da cabeça: não lida.</p>
           <p class="help-text" data-i18n="ui.machine.positionHelp">Métodos opcionais e explícitos: “Definir zero aqui” grava a posição atual como X0 Y0 no sistema de coordenadas escolhido (G10 L20); “Homing” move a máquina até os fins de curso ($H) e exige confirmação; “Ler posição” só consulta, sem mover.</p>
@@ -248,6 +248,10 @@
       <div id="machine-simulation-panel" class="machine-simulation-panel" hidden>
         <p id="machine-simulation-status" class="machine-preview-stats" role="status" data-i18n="ui.dialogs.simulationReady">Simulação visual pronta; nenhum hardware ou laser será acionado.</p>
         <progress id="machine-simulation-progress" class="machine-simulation-progress" max="1" value="0" aria-label="Progresso da simulação" data-i18n-aria-label="ui.dialogs.simulationProgress"></progress>
+        <div id="machine-timeline" class="machine-timeline" hidden>
+          <button id="machine-timeline-play" class="button button-secondary" type="button" data-i18n="ui.dialogs.timelinePlay">Reproduzir</button>
+          <input id="machine-timeline-scrub" type="range" min="0" max="1" step="1" value="0" aria-label="Posição na trajetória" data-i18n-aria-label="ui.dialogs.timelineScrub">
+        </div>
         <div id="machine-simulation-visual" class="machine-simulation-visual">
           <canvas id="machine-simulation-plan" role="img" aria-label="Plano completo do trabalho simulado" data-i18n-aria-label="ui.dialogs.simulatedJobPlan"></canvas>
           <canvas id="machine-simulation-playback" aria-hidden="true"></canvas>

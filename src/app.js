@@ -634,6 +634,13 @@ async function pollMachineJob() {
   }
 }
 
+byId("machine-timeline-play").addEventListener("click", toggleTimelinePlayback);
+byId("machine-timeline-scrub").addEventListener("input", (event) => {
+  stopTimelinePlayback();
+  setTimelinePosition(Number(event.target.value));
+});
+byId("machine-preview-dialog").addEventListener("close", stopTimelinePlayback);
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 let jobMarkersTimer = null;
@@ -642,6 +649,25 @@ let jobMarkersTimer = null;
 function renderJobMarkers(documentModel) {
   clearTimeout(jobMarkersTimer);
   jobMarkersTimer = setTimeout(() => drawJobMarkers(documentModel), 120);
+}
+
+// Rotated or skewed objects cannot be sent to GRBL yet, so only the visual extents and origin are shown.
+function visualReference(documentModel) {
+  const objectsLayer = byId("objects");
+  if (!objectsLayer.hasChildNodes()) return null;
+  const box = objectsLayer.getBBox();
+  if (box.width <= 0 && box.height <= 0) return null;
+  const { corner = "top-left", flipX = false, flipY = false } = documentModel.origin ?? {};
+  const atRight = corner.endsWith("right") !== flipX;
+  const atBottom = corner.startsWith("bottom") !== flipY;
+  return {
+    bounds: { minXMm: box.x, minYMm: box.y, maxXMm: box.x + box.width, maxYMm: box.y + box.height },
+    origin: { xMm: atRight ? documentModel.widthMm : 0, yMm: atBottom ? documentModel.heightMm : 0 },
+    xDirection: atRight ? -1 : 1,
+    yDirection: atBottom ? -1 : 1,
+    start: null,
+    end: null
+  };
 }
 
 function drawJobMarkers(documentModel) {
@@ -653,7 +679,7 @@ function drawJobMarkers(documentModel) {
   try {
     reference = jobReferencePoints(documentModel, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() });
   } catch {
-    return;
+    reference = visualReference(documentModel);
   }
   if (!reference) return;
   const size = Math.max(1.4, Math.max(documentModel.widthMm, documentModel.heightMm) / 75);
@@ -676,10 +702,12 @@ function drawJobMarkers(documentModel) {
   arrow(0, yDirection, "Y+");
   make("circle", { cx: origin.xMm, cy: origin.yMm, r: size * 0.35, fill: "#fff", stroke: "#8a5a00", "stroke-width": size * 0.12 });
   label(origin, "ui.canvas.markerOrigin", "#8a5a00", 0.6, xDirection === 1 && yDirection === 1 ? -0.6 : 1.4);
-  make("circle", { cx: start.xMm, cy: start.yMm, r: size * 0.3, fill: "#1f9d55", stroke: "#fff", "stroke-width": size * 0.12 });
-  label(start, "ui.canvas.markerStart", "#1f9d55");
-  make("rect", { x: end.xMm - size * 0.28, y: end.yMm - size * 0.28, width: size * 0.56, height: size * 0.56, fill: "#d64545", stroke: "#fff", "stroke-width": size * 0.12 });
-  label(end, "ui.canvas.markerEnd", "#d64545", 1.0, 1.8);
+  if (start && end) {
+    make("circle", { cx: start.xMm, cy: start.yMm, r: size * 0.3, fill: "#1f9d55", stroke: "#fff", "stroke-width": size * 0.12 });
+    label(start, "ui.canvas.markerStart", "#1f9d55");
+    make("rect", { x: end.xMm - size * 0.28, y: end.yMm - size * 0.28, width: size * 0.56, height: size * 0.56, fill: "#d64545", stroke: "#fff", "stroke-width": size * 0.12 });
+    label(end, "ui.canvas.markerEnd", "#d64545", 1.0, 1.8);
+  }
 }
 
 function renderPreview() {
@@ -1020,10 +1048,52 @@ function showMachineSimulation(plan, documentModel, totalLines) {
   byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machineSimulationTitle");
   byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machineSimulationDescription");
   byId("machine-simulation-panel").hidden = false;
+  byId("machine-timeline").hidden = true;
+  stopTimelinePlayback();
   byId("machine-path-preview").hidden = true;
   updateMachinePreviewStats(plan);
   if (!dialog.open) dialog.showModal();
   renderMachineSimulationProgress(0, totalLines, "running");
+}
+
+let timelineTimer = null;
+
+function stopTimelinePlayback() {
+  clearInterval(timelineTimer);
+  timelineTimer = null;
+  byId("machine-timeline-play").textContent = i18n.t("ui.dialogs.timelinePlay");
+}
+
+function setTimelinePosition(value) {
+  const scrub = byId("machine-timeline-scrub");
+  scrub.value = String(value);
+  renderMachineSimulationProgress(value, Number(scrub.max), "running");
+}
+
+function toggleTimelinePlayback() {
+  if (timelineTimer) return stopTimelinePlayback();
+  const scrub = byId("machine-timeline-scrub");
+  const total = Number(scrub.max);
+  if (Number(scrub.value) >= total) setTimelinePosition(0);
+  const step = Math.max(1, Math.ceil(total / 240));
+  byId("machine-timeline-play").textContent = i18n.t("ui.dialogs.timelinePause");
+  timelineTimer = setInterval(() => {
+    const next = Math.min(total, Number(scrub.value) + step);
+    setTimelinePosition(next);
+    if (next >= total) stopTimelinePlayback();
+  }, 25);
+}
+
+function showTimelinePreview(plan, documentModel) {
+  const total = createMachinePlayback(plan).totalLines;
+  showMachineSimulation(plan, documentModel, total);
+  const scrub = byId("machine-timeline-scrub");
+  scrub.max = String(Math.max(1, total));
+  byId("machine-timeline").hidden = false;
+  byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machinePreview");
+  byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machinePreviewDescription");
+  stopTimelinePlayback();
+  setTimelinePosition(total);
 }
 
 function showMachinePreview() {
@@ -1036,6 +1106,11 @@ function showMachinePreview() {
       ? planGrblJob(documentModel, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED })
       : createMachinePlan({ allowDefaultSmax: true, documentModel });
     drawMachinePreview(plan, documentModel);
+    if (!presentationActive) {
+      showTimelinePreview(plan, documentModel);
+      return;
+    }
+    byId("machine-timeline").hidden = true;
     byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machinePreview");
     byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machinePreviewDescription");
     byId("machine-simulation-panel").hidden = true;
