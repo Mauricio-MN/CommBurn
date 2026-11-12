@@ -251,11 +251,19 @@ test("embedded SVG visual objects are preserved by SVG export and rejected by GR
   assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /editable vector paths/);
 });
 
-test("GRBL rejects rotated, warped, and non-rectangular objects", () => {
+test("GRBL follows rotation and skew, and rejects non-rectangular primitives", () => {
   const settings = { feedMmPerMinute: 100, maxSpindleSpeed: 1000, powerPercent: 5 };
-  assert.throws(() => renderGrblJob({
-    elements: [{ type: "rect", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10, rotationDeg: 2 }]
-  }, settings), /untransformed text, rectangles/);
+  const rotated = planGrblJob({
+    widthMm: 100, heightMm: 100,
+    elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, rotationDeg: 90 }]
+  }, settings);
+  // A square rotated 90 degrees around its centre (15, 15) keeps the same corners, starting from the next one.
+  assert.deepEqual(rotated.paths[0].points.slice(0, 2), [{ xMm: 20, yMm: 10 }, { xMm: 20, yMm: 20 }]);
+  const skewed = planGrblJob({
+    widthMm: 100, heightMm: 100,
+    elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, skewXDeg: 45 }]
+  }, settings);
+  assert.deepEqual(skewed.paths[0].points[0], { xMm: 5, yMm: 10 });
   assert.throws(() => renderGrblJob({
     elements: [{ type: "ellipse", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10 }]
   }, settings), /editable vector paths/);

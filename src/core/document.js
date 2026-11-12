@@ -650,6 +650,31 @@ function fillVectorPaths(element, algorithm, spacingMm, polygonsOverride) {
   return paths;
 }
 
+// Mirrors the SVG transform (rotate, skewX, skewY around the object centre) so G-code follows what the STAGE shows.
+function transformMappedPoints(document, element, points) {
+  const { rotationDeg, skewXDeg, skewYDeg } = element;
+  if (rotationDeg === 0 && skewXDeg === 0 && skewYDeg === 0) return points;
+  const center = element.type === "text"
+    ? mapDocumentPoint(document, element.xMm, element.yMm)
+    : mapDocumentPoint(document, element.xMm + element.widthMm / 2, element.yMm + element.heightMm / 2);
+  const radians = rotationDeg * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const tanX = Math.tan(skewXDeg * Math.PI / 180);
+  const tanY = Math.tan(skewYDeg * Math.PI / 180);
+  return points.map(({ xMm, yMm }) => {
+    const x0 = xMm - center.xMm;
+    const y0 = yMm - center.yMm;
+    // skewX(a) skewY(b): x' = x + tan(a) y ; y' = tan(b) x' + y
+    const sx = x0 + tanX * y0;
+    const sy = tanY * sx + y0;
+    return {
+      xMm: Number((center.xMm + cos * sx - sin * sy).toFixed(6)),
+      yMm: Number((center.yMm + sin * sx + cos * sy).toFixed(6))
+    };
+  });
+}
+
 function createElementWorkPaths(document, layer, element) {
   let geometryElement = element;
   if (element.type === "text") {
@@ -694,7 +719,7 @@ function createElementWorkPaths(document, layer, element) {
         algorithm: layer.operation === "fill" ? layer.fillAlgorithm : "outline",
         pass,
         ...(element.powerPercent === undefined ? {} : { powerPercent: element.powerPercent }),
-        points: mappedTextPaths?.[sourceIndex] ?? mapPoints(document, points)
+        points: transformMappedPoints(document, element, mappedTextPaths?.[sourceIndex] ?? mapPoints(document, points))
       });
     }
   }
@@ -852,9 +877,6 @@ function buildGrblJob(input, settings, offset) {
   if (elements.length === 0) throw new CommBurnRangeError("grbl.noObjects", {}, { message: "The job has no objects in enabled layers" });
   if (elements.some((element) => !["rect", "path", "text"].includes(element.type))) {
     throw new CommBurnRangeError("grbl.unsupportedGeometry", {}, { message: "GRBL supports rectangles, editable vector paths, and editable text in the built-in engraving fonts" });
-  }
-  if (elements.some((element) => element.rotationDeg !== 0 || element.skewXDeg !== 0 || element.skewYDeg !== 0)) {
-    throw new CommBurnRangeError("grbl.transformedGeometry", {}, { message: "GRBL output supports only untransformed text, rectangles, and editable vector paths" });
   }
 
   const gcode = ["G21", "G90", "G94", "M5"];

@@ -606,11 +606,13 @@ test("job reference bounds cover every work point in document coordinates for an
   assert.deepEqual(shifted.end, { xMm: 60, yMm: 50 });
 });
 
-test("job reference points are unavailable for rotated objects instead of guessing", () => {
+test("job reference points follow rotated objects", () => {
   const rotated = {
     widthMm: 100, heightMm: 80,
     layers: [{ ...DEFAULT_LAYER, id: "l" }],
-    elements: [{ id: "a", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, rotationDeg: 30, layerId: "l" }]
+    elements: [{ id: "a", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 10, rotationDeg: 90, layerId: "l" }]
   };
-  assert.throws(() => jobReferencePoints(rotated, { maxSpindleSpeed: 1000 }), /transform/i);
+  const reference = jobReferencePoints(rotated, { maxSpindleSpeed: 1000 });
+  assert.deepEqual(reference.start, { xMm: 40, yMm: 20 });
+  assert.deepEqual(reference.bounds, { minXMm: 30, minYMm: 20, maxXMm: 40, maxYMm: 30 });
 });
