@@ -814,7 +814,11 @@ export function jobReferencePoints(input, settings) {
     xMm: flipX ? document.widthMm - (xMm + offsetX) : xMm + offsetX,
     yMm: flipY ? document.heightMm - (yMm + offsetY) : yMm + offsetY
   });
+  const corners = work.flatMap(({ points }) => points).map(toDocument);
+  const xs = corners.map(({ xMm }) => xMm);
+  const ys = corners.map(({ yMm }) => yMm);
   return {
+    bounds: { minXMm: Math.min(...xs), minYMm: Math.min(...ys), maxXMm: Math.max(...xs), maxYMm: Math.max(...ys) },
     origin: toDocument({ xMm: 0, yMm: 0 }),
     start: toDocument(work[0].points[0]),
     end: toDocument(work.at(-1).points.at(-1)),

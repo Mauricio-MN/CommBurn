@@ -294,3 +294,7 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
   .statusbar { flex-wrap: wrap; }
   .statusbar { padding: 9px 12px; }
 }
+.layer-card:not(.is-active) { opacity: .6; }
+.layer-card.is-active { position: relative; margin: 3px; }
+.layer-card.is-active .layer-select { padding: 5px 7px; color: #fff; background: #1f2a44; border-radius: 6px; }
+.layer-card.is-active .layer-count { color: #1f2a44; background: #ffd9b3; }

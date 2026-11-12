@@ -666,7 +666,8 @@ function drawJobMarkers(documentModel) {
   const label = (point, key, color, dx = 1.2, dy = -1.2) => make("text", {
     x: point.xMm + size * dx, y: point.yMm + size * dy, "font-size": size * 0.9, fill: color, "font-family": "sans-serif"
   }, i18n.t(key));
-  const { origin, start, end, xDirection, yDirection } = reference;
+  const { origin, start, end, xDirection, yDirection, bounds } = reference;
+  make("rect", { x: bounds.minXMm, y: bounds.minYMm, width: bounds.maxXMm - bounds.minXMm, height: bounds.maxYMm - bounds.minYMm, fill: "none", stroke: "#8a5a00", "stroke-width": size * 0.1, "stroke-dasharray": `${size * 0.5} ${size * 0.3}` });
   const arrow = (dx, dy, name) => {
     make("line", { x1: origin.xMm, y1: origin.yMm, x2: origin.xMm + dx * size * 2, y2: origin.yMm + dy * size * 2, stroke: "#8a5a00", "stroke-width": size * 0.12 });
     make("text", { x: origin.xMm + dx * size * 2.3, y: origin.yMm + dy * size * 2.3 + size * 0.3, "font-size": size * 0.8, fill: "#8a5a00", "font-family": "sans-serif", "text-anchor": "middle" }, name);
