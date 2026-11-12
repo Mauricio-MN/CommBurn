@@ -32,7 +32,7 @@ test("CLI reports invalid documents with a failure exit code", async (t) => {
   const inputPath = join(directory, "invalid.json");
   await writeFile(inputPath, JSON.stringify({ widthMm: 0 }));
 
-  const result = spawnSync(process.execPath, ["cli/commburn.mjs", inputPath, join(directory, "job.svg")], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, ["cli/commburn.mjs", inputPath, join(directory, "job.svg"), "--locale", "pt-BR"], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /widthMm deve ser maior que zero/);
 });
