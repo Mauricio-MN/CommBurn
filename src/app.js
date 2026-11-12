@@ -647,7 +647,7 @@ function renderJobMarkers(documentModel) {
 function drawJobMarkers(documentModel) {
   const layer = byId("job-markers");
   layer.replaceChildren();
-  layer.style.filter = "drop-shadow(0 0 0.6px #fff) drop-shadow(0 0 0.6px #fff) drop-shadow(0 0 0.3px #000)";
+  layer.style.opacity = "0.7";
   if (!byId("show-job-markers").checked) return;
   let reference;
   try {
@@ -667,7 +667,7 @@ function drawJobMarkers(documentModel) {
     x: point.xMm + size * dx, y: point.yMm + size * dy, "font-size": size * 0.9, fill: color, "font-family": "sans-serif"
   }, i18n.t(key));
   const { origin, start, end, xDirection, yDirection, bounds } = reference;
-  make("rect", { x: bounds.minXMm, y: bounds.minYMm, width: bounds.maxXMm - bounds.minXMm, height: bounds.maxYMm - bounds.minYMm, fill: "none", stroke: "#8a5a00", "stroke-width": size * 0.1, "stroke-dasharray": `${size * 0.5} ${size * 0.3}` });
+  make("rect", { x: bounds.minXMm, y: bounds.minYMm, width: bounds.maxXMm - bounds.minXMm, height: bounds.maxYMm - bounds.minYMm, fill: "none", stroke: "#8a5a00", "stroke-width": size * 0.05, "stroke-dasharray": `${size * 0.15} ${size * 0.5}`, opacity: 0.45 });
   const arrow = (dx, dy, name) => {
     make("line", { x1: origin.xMm, y1: origin.yMm, x2: origin.xMm + dx * size * 2, y2: origin.yMm + dy * size * 2, stroke: "#8a5a00", "stroke-width": size * 0.12 });
     make("text", { x: origin.xMm + dx * size * 2.3, y: origin.yMm + dy * size * 2.3 + size * 0.3, "font-size": size * 0.8, fill: "#8a5a00", "font-family": "sans-serif", "text-anchor": "middle" }, name);
@@ -676,9 +676,9 @@ function drawJobMarkers(documentModel) {
   arrow(0, yDirection, "Y+");
   make("circle", { cx: origin.xMm, cy: origin.yMm, r: size * 0.35, fill: "#fff", stroke: "#8a5a00", "stroke-width": size * 0.12 });
   label(origin, "ui.canvas.markerOrigin", "#8a5a00", 0.6, xDirection === 1 && yDirection === 1 ? -0.6 : 1.4);
-  make("circle", { cx: start.xMm, cy: start.yMm, r: size * 0.55, fill: "#1f9d55", stroke: "#fff", "stroke-width": size * 0.12 });
+  make("circle", { cx: start.xMm, cy: start.yMm, r: size * 0.3, fill: "#1f9d55", stroke: "#fff", "stroke-width": size * 0.12 });
   label(start, "ui.canvas.markerStart", "#1f9d55");
-  make("rect", { x: end.xMm - size * 0.5, y: end.yMm - size * 0.5, width: size, height: size, fill: "#d64545", stroke: "#fff", "stroke-width": size * 0.12 });
+  make("rect", { x: end.xMm - size * 0.28, y: end.yMm - size * 0.28, width: size * 0.56, height: size * 0.56, fill: "#d64545", stroke: "#fff", "stroke-width": size * 0.12 });
   label(end, "ui.canvas.markerEnd", "#d64545", 1.0, 1.8);
 }
 
