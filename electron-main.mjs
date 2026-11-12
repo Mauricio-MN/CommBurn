@@ -1,11 +1,33 @@
 import { app, BrowserWindow, shell } from "electron";
-import { mkdir } from "node:fs/promises";
+import { cp, mkdir, readdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import { startServer } from "./server.mjs";
 
 let serverHandle;
 let mainWindow;
 let isClosing = false;
+
+async function installBundledPlugins(pluginDirectory) {
+  if (!app.isPackaged) return;
+  const bundledDirectory = join(process.resourcesPath, "bundled-plugins");
+  let entries;
+  try {
+    entries = await readdir(bundledDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const target = join(pluginDirectory, entry.name);
+    try {
+      await access(target);
+      continue;
+    } catch {
+      await cp(join(bundledDirectory, entry.name), target, { recursive: true });
+    }
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -50,6 +72,11 @@ if (app.requestSingleInstanceLock()) {
       app.setApplicationMenu(null);
       const pluginDirectory = join(app.getPath("userData"), "plugins");
       await mkdir(pluginDirectory, { recursive: true });
+      try {
+        await installBundledPlugins(pluginDirectory);
+      } catch (error) {
+        console.error(`Unable to install bundled plugins: ${error.message}`);
+      }
       serverHandle = await startServer({ port: 0, pluginDirectory });
       await createWindow();
     } catch (error) {

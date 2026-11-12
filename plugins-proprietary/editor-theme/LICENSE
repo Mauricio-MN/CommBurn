@@ -1,0 +1,12 @@
+Editor Theme plugin for CommBurn
+Copyright (c) 2025 Mauricio-MN
+
+This work is licensed under the Creative Commons Attribution-NonCommercial-NoDerivatives
+4.0 International License. To view a copy of this license, visit:
+https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode
+
+You may view and share this work with attribution, for non-commercial purposes only,
+and you may not distribute modified versions.
+
+Distribution note: this plugin is included only in the official MSIX package of CommBurn
+(see electron-builder.msix.cjs). It is excluded from the other build targets.

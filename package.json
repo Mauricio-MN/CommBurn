@@ -10,7 +10,7 @@
     "start": "node server.mjs",
     "desktop": "electron .",
     "dist": "electron-builder --publish never",
-    "dist:msix": "electron-builder --win appx --publish never && node scripts/rename-msix.mjs"
+    "dist:msix": "electron-builder --win appx --publish never --config electron-builder.msix.cjs && node scripts/rename-msix.mjs"
   },
   "dependencies": {
     "@jodit/image-editor": "^0.2.5",
