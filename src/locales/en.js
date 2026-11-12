@@ -400,7 +400,6 @@ export default Object.freeze({
     grbl: {
       noObjects: "The job has no objects in enabled layers.",
       unsupportedGeometry: "GRBL supports rectangles, editable vector paths, and text from the bundled OpenType fonts. Raster images can be vectorized locally; visual SVG objects must be reimported in editable mode to create paths.",
-      transformedGeometry: "GRBL output supports only untransformed text, rectangles, and editable vector paths.",
       outsideWorkArea: "Element {id} extends outside the document work area.",
       unsupportedTextGlyph: "The bundled vector fonts do not support character '{character}'.",
       unsupportedTextFont: "The bundled vector fonts do not support font family '{fontFamily}'.",

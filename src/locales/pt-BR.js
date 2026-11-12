@@ -401,7 +401,6 @@ export default Object.freeze({
     grbl: {
       noObjects: "O trabalho não tem objetos em camadas ativadas.",
       unsupportedGeometry: "O GRBL aceita retângulos, paths vetoriais editáveis e texto das fontes OpenType incorporadas. Imagens raster podem ser vetorizadas localmente; SVG visual precisa ser reimportado no modo editável para criar trajetórias.",
-      transformedGeometry: "A saída GRBL aceita apenas texto, retângulos e paths vetoriais editáveis sem transformação.",
       outsideWorkArea: "O elemento {id} está fora da área de trabalho do documento.",
       unsupportedTextGlyph: "As fontes vetoriais incorporadas não oferecem o caractere '{character}'.",
       unsupportedTextFont: "As fontes vetoriais incorporadas não oferecem a família '{fontFamily}'.",
