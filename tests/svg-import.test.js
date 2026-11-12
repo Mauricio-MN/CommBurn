@@ -540,3 +540,33 @@ test("diagonal and vertical-unidirectional fills stay inside the shape and follo
   assert.ok(vertical.every(({ points: [a, b] }) => b.yMm !== a.yMm && a.xMm === b.xMm));
   assert.equal(new Set(vertical.map(({ points: [a, b] }) => Math.sign(b.yMm - a.yMm))).size, 1);
 });
+
+test("starting from the objects shifts the job so the chosen anchor becomes X0 Y0 for every origin", () => {
+  const document = (origin) => ({
+    widthMm: 100, heightMm: 80, origin,
+    layers: [{ ...DEFAULT_LAYER, id: "l", operation: "engrave" }],
+    elements: [{ id: "r", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, layerId: "l" }]
+  });
+  const bounds = (job) => {
+    const points = job.paths.filter(({ kind }) => kind === "work").flatMap(({ points: list }) => list);
+    return [Math.min(...points.map((p) => p.xMm)), Math.min(...points.map((p) => p.yMm)),
+      Math.max(...points.map((p) => p.xMm)), Math.max(...points.map((p) => p.yMm))];
+  };
+  const settings = (extra) => ({ maxSpindleSpeed: 1000, ...extra });
+  for (const origin of [{}, { corner: "bottom-right" }, { flipX: true }, { corner: "bottom-left", flipY: true }]) {
+    const absolute = planGrblJob(document(origin), settings());
+    assert.ok(bounds(absolute)[0] >= 20, "absolute keeps table coordinates");
+    const left = bounds(planGrblJob(document(origin), settings({ startFrom: "objects", startAnchor: "top-left" })));
+    const right = bounds(planGrblJob(document(origin), settings({ startFrom: "objects", startAnchor: "bottom-right" })));
+    const flipX = (origin.corner?.endsWith("right") ?? false) !== (origin.flipX ?? false);
+    const flipY = (origin.corner?.startsWith("bottom") ?? false) !== (origin.flipY ?? false);
+    // The anchor point lands on 0 and the rest of the drawing extends away from it in machine axes.
+    assert.deepEqual([left[flipX ? 2 : 0], left[flipY ? 3 : 1]], [0, 0]);
+    assert.deepEqual([right[flipX ? 0 : 2], right[flipY ? 1 : 3]], [0, 0]);
+    assert.ok(Math.abs(left[2] - left[0] - 10) < 1e-9 && Math.abs(left[3] - left[1] - 6) < 1e-9);
+  }
+  const centered = planGrblJob(document({}), settings({ startFrom: "objects", startAnchor: "center" }));
+  assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: 23 });
+  assert.match(planGrblJob(document({}), settings({ workCoordinateSystem: "G55" })).gcode, /^G21\nG55\nG90/);
+  assert.throws(() => planGrblJob(document({}), settings({ startFrom: "nowhere" })), /start mode/);
+});

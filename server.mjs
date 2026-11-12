@@ -19,15 +19,18 @@ let desktopPluginDirectory = null;
 class SimulatedSerialPort extends EventEmitter {
   isOpen = true;
   status = "Idle";
+  position = { xMm: 10, yMm: 20 };
+  zero = { xMm: 0, yMm: 0 };
 
   write(data) {
     setTimeout(() => {
       if (data === "?") {
-        this.emit("data", Buffer.from(`<${this.status}|MPos:0,0,0>\r\n`));
+        this.emit("data", Buffer.from(`<${this.status}|MPos:${this.position.xMm},${this.position.yMm},0|WCO:${this.zero.xMm},${this.zero.yMm},0>\r\n`));
       } else if (data === "!") {
         this.status = "Hold:0";
         this.emit("data", Buffer.from(`<${this.status}|MPos:0,0,0>\r\n`));
       } else if (data.endsWith("\n")) {
+        if (/^G10 L20 P\d X0 Y0\n$/.test(data)) this.zero = { ...this.position };
         this.emit("data", Buffer.from("ok\r\n"));
       }
     }, 2);
@@ -314,6 +317,30 @@ async function handleApi(request, response, url) {
       if (!connection) throw new Error("No controller is connected");
       connection.feedHold();
       sendJson(response, 200, { holdRequested: true });
+      return;
+    }
+    if (request.method === "GET" && url.pathname === "/api/position") {
+      if (!connection) throw new Error("Conecte uma controladora GRBL para ler a posição.");
+      if (activeJob) throw new Error("Não é possível ler a posição durante o envio de um trabalho.");
+      sendJson(response, 200, await connection.readPosition());
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/set-zero") {
+      if (!connection) throw new Error("Conecte uma controladora GRBL para definir o zero.");
+      if (activeJob) throw new Error("Não é possível definir o zero durante o envio de um trabalho.");
+      const input = await readJson(request);
+      const slot = input.slot ?? 1;
+      await connection.setZeroHere(slot);
+      sendJson(response, 200, { zeroSet: true, slot });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/home") {
+      if (!connection) throw new Error("Conecte uma controladora GRBL para fazer o homing.");
+      if (activeJob) throw new Error("Não é possível fazer homing durante o envio de um trabalho.");
+      const input = await readJson(request);
+      if (input.confirmed !== true) throw new Error("Confirme que a máquina pode se mover até os fins de curso antes do homing.");
+      await connection.home();
+      sendJson(response, 200, { homed: true });
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/job-status") {

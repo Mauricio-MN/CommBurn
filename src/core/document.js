@@ -770,8 +770,47 @@ function withoutShadowedPaintParts(layerElements, layer) {
   return layerElements.filter(keep);
 }
 
+export const START_FROM_MODES = Object.freeze(["absolute", "objects"]);
+export const START_ANCHORS = Object.freeze(["top-left", "top-right", "bottom-left", "bottom-right", "center"]);
+export const WORK_COORDINATE_SYSTEMS = Object.freeze(["G54", "G55", "G56", "G57", "G58", "G59"]);
+
+// "absolute" keeps machine coordinates from the chosen origin; "objects" makes the job start at the
+// chosen anchor of the objects' bounding box, so the head position set by the user becomes X0 Y0.
 export function planGrblJob(input, settings) {
+  const startFrom = settings.startFrom ?? "absolute";
+  if (!START_FROM_MODES.includes(startFrom)) {
+    throw new CommBurnRangeError("grbl.invalidStartFrom", { startFrom }, { message: `Unsupported start mode: ${startFrom}` });
+  }
+  const anchor = settings.startAnchor ?? "top-left";
+  if (!START_ANCHORS.includes(anchor)) {
+    throw new CommBurnRangeError("grbl.invalidStartAnchor", { anchor }, { message: `Unsupported start anchor: ${anchor}` });
+  }
+  const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 });
+  if (startFrom === "absolute") return absolute;
+  const points = absolute.paths.filter(({ kind }) => kind === "work").flatMap((path) => path.points);
+  const xs = points.map((point) => point.xMm);
+  const ys = points.map((point) => point.yMm);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const { flipX, flipY } = mapDocumentPoint(createDocument(input), 0, 0);
+  const horizontal = anchor.endsWith("left") ? "left" : anchor.endsWith("right") ? "right" : "center";
+  const vertical = anchor.startsWith("top") ? "top" : anchor.startsWith("bottom") ? "bottom" : "center";
+  const offset = {
+    xMm: horizontal === "center" ? (minX + maxX) / 2 : (horizontal === "left") !== flipX ? minX : maxX,
+    yMm: vertical === "center" ? (minY + maxY) / 2 : (vertical === "top") !== flipY ? minY : maxY
+  };
+  return buildGrblJob(input, settings, offset);
+}
+
+function buildGrblJob(input, settings, offset) {
   const document = createDocument(input);
+  const shiftNumber = (value, by) => by === 0 ? value : Number((value - by).toFixed(6));
+  const shift = (point) => offset.xMm === 0 && offset.yMm === 0
+    ? point
+    : { ...point, xMm: shiftNumber(point.xMm, offset.xMm), yMm: shiftNumber(point.yMm, offset.yMm) };
+  const coordinateSystem = settings.workCoordinateSystem;
+  if (coordinateSystem !== undefined && !WORK_COORDINATE_SYSTEMS.includes(coordinateSystem)) {
+    throw new CommBurnRangeError("grbl.invalidWorkCoordinateSystem", { coordinateSystem }, { message: `Unsupported work coordinate system: ${coordinateSystem}` });
+  }
   const feedOverride = settings.feedMmPerMinute === undefined
     ? null
     : positiveNumber(settings.feedMmPerMinute, "feedMmPerMinute");
@@ -793,6 +832,7 @@ export function planGrblJob(input, settings) {
   }
 
   const gcode = ["G21", "G90", "G94", "M5"];
+  if (coordinateSystem) gcode.splice(1, 0, coordinateSystem);
   const paths = [];
   let previousPoint = null;
   let travelDistanceMm = 0;
@@ -826,6 +866,7 @@ export function planGrblJob(input, settings) {
           throw new RangeError("O trabalho excede o limite seguro de 100.000 trajetórias GRBL; reduza objetos/passagens ou aumente o espaçamento do preenchimento.");
         }
         const start = workPath.points[0];
+        const shiftedPath = { ...workPath, points: workPath.points.map(shift) };
         if (previousPoint) {
           const travelMm = distanceBetween(previousPoint, start);
           if (travelMm > 0) {
@@ -836,20 +877,20 @@ export function planGrblJob(input, settings) {
               kind: "travel",
               elementId: element.id,
               layerId: layer.id,
-              points: [previousPoint, start]
+              points: [shift(previousPoint), shift(start)]
             });
             travelDistanceMm += travelMm;
           }
         }
         gcode.push("M5");
-        gcode.push(`G0 X${start.xMm} Y${start.yMm}`);
+        gcode.push(`G0 X${shiftedPath.points[0].xMm} Y${shiftedPath.points[0].yMm}`);
         const pathPower = workPath.powerPercent ?? powerPercent;
         gcode.push(`M4 S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
         gcode.push(`G1 F${feedMmPerMinute}`);
-        for (const point of workPath.points.slice(1)) {
+        for (const point of shiftedPath.points.slice(1)) {
           gcode.push(`G1 X${point.xMm} Y${point.yMm}`);
         }
-        paths.push(workPath);
+        paths.push(shiftedPath);
         let pathDistanceMm = 0;
         for (let index = 1; index < workPath.points.length; index += 1) {
           const distanceMm = distanceBetween(workPath.points[index - 1], workPath.points[index]);
@@ -871,6 +912,7 @@ export function planGrblJob(input, settings) {
       rapidMoveCount: paths.filter((path) => path.kind === "travel").length,
       workDistanceMm,
       travelDistanceMm,
+      startOffsetMm: { xMm: offset.xMm, yMm: offset.yMm },
       estimatedWorkTimeSecondsByOperation
     }
   };

@@ -130,3 +130,24 @@ test("feed hold cancels an in-flight command without waiting for its timeout", a
   await assert.rejects(job, /feed hold/);
   assert.ok(serialPort.writes.includes("!"));
 });
+
+test("GRBL position, zero and homing are explicit commands that read or set work coordinates", async () => {
+  const serialPort = new MockSerialPort();
+  const baseWrite = serialPort.write.bind(serialPort);
+  serialPort.write = (data) => {
+    if (data === "?") {
+      serialPort.writes.push(data);
+      setImmediate(() => serialPort.emit("data", Buffer.from("<Idle|MPos:15.000,25.000,0.000|WCO:10.000,5.000,0.000>\r\n")));
+    } else baseWrite(data);
+  };
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 100 });
+
+  const { status, position } = await connection.readPosition();
+  assert.equal(status, "Idle");
+  assert.deepEqual(position, { machine: { xMm: 15, yMm: 25 }, work: { xMm: 5, yMm: 20 } });
+
+  await connection.setZeroHere(2);
+  await connection.home();
+  assert.deepEqual(serialPort.writes.filter((line) => line.endsWith("\n")), ["G10 L20 P2 X0 Y0\n", "$H\n"]);
+  await assert.rejects(connection.setZeroHere(7), /1 to 6/);
+});

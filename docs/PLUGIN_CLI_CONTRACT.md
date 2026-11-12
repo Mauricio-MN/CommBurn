@@ -123,3 +123,9 @@ export function activate(context) {
 - Cada plugin é um módulo local autocontido `plugin.mjs`; imports remotos e submódulos externos não são servidos pelo host. Plugins têm acesso ao DOM e à origem local do aplicativo, incluindo a API serial. Eles executam no contexto do renderer e **não são sandboxed**: instale somente código que você revisou e confia. Remova a pasta do plugin e reinicie o app para desativá-lo.
 - O servidor iniciado por `npm start` não recebe diretório de plugins e retorna uma lista vazia. Plugins não são carregados de URLs remotas nem incluídos automaticamente no instalador.
 - Adaptadores de máquina não devem presumir sensores; qualquer dependência de hardware deve ser opt-in e visível ao usuário.
+
+## Posição inicial e métodos opcionais de origem
+
+`planGrblJob` aceita, além de `maxSpindleSpeed`, as opções `startFrom` (`absolute`, padrão, ou `objects`), `startAnchor` (`top-left`, `top-right`, `bottom-left`, `bottom-right` ou `center`, usada com `objects`) e `workCoordinateSystem` (`G54` a `G59`, emitido no cabeçalho do G-code). Em `objects`, o ponto escolhido do retângulo envolvente dos objetos vira X0 Y0 e `stats.startOffsetMm` informa o deslocamento. Essas opções não fazem parte do projeto salvo.
+
+A API local da máquina oferece `GET /api/position` (somente leitura), `POST /api/set-zero` (`{ "slot": 1-6 }`, envia `G10 L20 P<slot> X0 Y0`) e `POST /api/home` (`{ "confirmed": true }`, envia `$H`). Todos são ações explícitas do usuário; o CommBurn nunca infere origem ou sentido sozinho.

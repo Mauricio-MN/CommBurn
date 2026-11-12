@@ -509,6 +509,8 @@ function updateMachineControls() {
   startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy;
   startMachineButton.textContent = i18n.t(machineSimulation ? "ui.machine.simulateJob" : "ui.machine.sendJob");
   holdMachineButton.disabled = !machineConnected || !machineBusy;
+  for (const id of ["read-position", "set-zero", "home-machine"]) byId(id).disabled = !machineConnected || machineBusy;
+  byId("start-anchor-field").hidden = byId("start-from").value !== "objects";
 }
 
 function renderSelectionStatus() {
@@ -758,9 +760,19 @@ function machineMaxSpindleSpeed(allowDefaultSmax = false) {
   return numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE);
 }
 
+function readJobPlacement() {
+  const workCoordinateSystem = byId("work-system").value;
+  return {
+    startFrom: byId("start-from").value,
+    startAnchor: byId("start-anchor").value,
+    ...(workCoordinateSystem ? { workCoordinateSystem } : {})
+  };
+}
+
 function createMachinePlan({ allowDefaultSmax = false, documentModel = readDocument() } = {}) {
   return planGrblJob(documentModel, {
-    maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax)
+    maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax),
+    ...readJobPlacement()
   });
 }
 
@@ -2497,12 +2509,45 @@ disconnectButton.addEventListener("click", async () => {
   }
 });
 safetyCheckbox.addEventListener("change", updateMachineControls);
+byId("start-from").addEventListener("change", () => {
+  updateMachineControls();
+  renderPreview();
+});
+byId("read-position").addEventListener("click", async () => {
+  try {
+    const { position } = await machineApi("/api/position");
+    const format = (value) => value === undefined || value === null ? "?" : value.toFixed(3);
+    byId("machine-position").textContent = position?.work
+      ? i18n.t("ui.machine.positionRead", { mx: format(position.machine?.xMm), my: format(position.machine?.yMm), wx: format(position.work.xMm), wy: format(position.work.yMm) })
+      : i18n.t("ui.machine.positionMachineOnly", { mx: format(position?.machine?.xMm), my: format(position?.machine?.yMm) });
+  } catch (error) {
+    showNotice(error);
+  }
+});
+byId("set-zero").addEventListener("click", async () => {
+  try {
+    const system = byId("work-system").value || "G54";
+    await machineApi("/api/set-zero", "POST", { slot: Number(system.slice(1)) - 53 });
+    showNotice(i18n.t("ui.machine.zeroSet", { slot: system }));
+  } catch (error) {
+    showNotice(error);
+  }
+});
+byId("home-machine").addEventListener("click", async () => {
+  try {
+    if (!window.confirm(i18n.t("ui.machine.homeConfirm"))) return;
+    await machineApi("/api/home", "POST", { confirmed: true });
+    showNotice(i18n.t("ui.machine.homed"));
+  } catch (error) {
+    showNotice(error);
+  }
+});
 byId("machine-smax").addEventListener("input", updateMachineControls);
 startMachineButton.addEventListener("click", async () => {
   try {
     if (!machineSimulation && !safetyCheckbox.checked) throw new Error(i18n.t("ui.machine.confirmSafety"));
     const documentModel = readDocument();
-    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation) };
+    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), ...readJobPlacement() };
     const simulationPlan = machineSimulation
       ? planGrblJob(documentModel, settings)
       : null;
