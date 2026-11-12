@@ -7,6 +7,14 @@ on:
         description: "Versão em package.json, sem o prefixo v (por exemplo, 0.1.2)"
         required: true
         type: string
+      channel:
+        description: "store: publisher da Partner Center, para envio à loja. local: publisher CN=CMBRN - Software, para assinatura local"
+        required: true
+        type: choice
+        options:
+          - store
+          - local
+        default: store
 
 permissions:
   contents: read
@@ -37,9 +45,11 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run dist:msix
+        env:
+          MSIX_CHANNEL: ${{ inputs.channel }}
       - uses: actions/upload-artifact@v4
         with:
-          name: commburn-msix-v${{ inputs.version }}
+          name: commburn-msix-v${{ inputs.version }}-${{ inputs.channel }}
           path: dist/*.msix
           if-no-files-found: error
           retention-days: 90

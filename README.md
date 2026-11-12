@@ -31,7 +31,9 @@ A partir da versão `0.1.2`, o núcleo do CommBurn é licenciado sob GNU AGPL-3.
   3. No GitHub, abra **Actions → Desktop release → Run workflow**, selecione `main`, informe `0.1.2` (sem `v`) e inicie.
   4. Quando a execução terminar com sucesso, a GitHub Release `v0.1.2` terá os instaladores de Linux, Windows e macOS com a licença AGPL incluída.
 - A publicação inclui instalador `.msi` e executável portátil `.exe` para Windows, `.dmg` e `.zip` para macOS, e `.AppImage` e `.deb` para Linux. As builds macOS ainda não são assinadas nem notarizadas; isso requer certificados e credenciais Apple configurados como secrets do repositório.
-- Para gerar um `.msix` versionado, use a mesma versão já enviada para `main` e abra **Actions → Build MSIX → Run workflow**. Escolha `main`, informe a versão (por exemplo, `0.1.2`) e inicie. Ao terminar, baixe `commburn-msix-v0.1.2` na seção **Artifacts** da execução. O arquivo fica disponível por 90 dias e não é adicionado à GitHub Release. O pacote usa a identidade e o publisher reservados no Partner Center; assine-o conforme os requisitos da conta antes do envio. Também é possível executar `npm run dist:msix` localmente no Windows.
+- Para gerar um `.msix` versionado, use a mesma versão já enviada para `main` e abra **Actions → Build MSIX → Run workflow**. Escolha `main`, informe a versão (por exemplo, `0.1.2`) e o canal (`store` ou `local`) e inicie. Ao terminar, baixe `commburn-msix-v0.1.2-<canal>` na seção **Artifacts** da execução. O arquivo fica disponível por 90 dias e não é adicionado à GitHub Release.
+- `store`: usa a identidade e o publisher reservados no Partner Center, para envio à loja (a Store assina o pacote).
+- `local`: usa o publisher `CN=CMBRN - Software`, para ser assinado localmente com um certificado de mesmo subject. Também é possível executar `npm run dist:msix` localmente no Windows.
 
 ### Plugins no desktop
 
