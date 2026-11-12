@@ -650,28 +650,25 @@ function fillVectorPaths(element, algorithm, spacingMm, polygonsOverride) {
   return paths;
 }
 
-// Mirrors the SVG transform (rotate, skewX, skewY around the object centre) so G-code follows what the STAGE shows.
-function transformMappedPoints(document, element, points) {
+// Mirrors the SVG transform (rotate, skewX, skewY around the object centre) in document space,
+// before mapping to machine coordinates, so rotation never reverses with the origin or axis inversions.
+function transformDocumentPoints(element, points) {
   const { rotationDeg, skewXDeg, skewYDeg } = element;
   if (rotationDeg === 0 && skewXDeg === 0 && skewYDeg === 0) return points;
-  const center = element.type === "text"
-    ? mapDocumentPoint(document, element.xMm, element.yMm)
-    : mapDocumentPoint(document, element.xMm + element.widthMm / 2, element.yMm + element.heightMm / 2);
+  const centerX = element.type === "text" ? element.xMm : element.xMm + element.widthMm / 2;
+  const centerY = element.type === "text" ? element.yMm : element.yMm + element.heightMm / 2;
   const radians = rotationDeg * Math.PI / 180;
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
   const tanX = Math.tan(skewXDeg * Math.PI / 180);
   const tanY = Math.tan(skewYDeg * Math.PI / 180);
-  return points.map(({ xMm, yMm }) => {
-    const x0 = xMm - center.xMm;
-    const y0 = yMm - center.yMm;
+  return points.map(([x, y]) => {
+    const x0 = x - centerX;
+    const y0 = y - centerY;
     // skewX(a) skewY(b): x' = x + tan(a) y ; y' = tan(b) x' + y
     const sx = x0 + tanX * y0;
     const sy = tanY * sx + y0;
-    return {
-      xMm: Number((center.xMm + cos * sx - sin * sy).toFixed(6)),
-      yMm: Number((center.yMm + sin * sx + cos * sy).toFixed(6))
-    };
+    return [Number((centerX + cos * sx - sin * sy).toFixed(6)), Number((centerY + sin * sx + cos * sy).toFixed(6))];
   });
 }
 
@@ -719,7 +716,7 @@ function createElementWorkPaths(document, layer, element) {
         algorithm: layer.operation === "fill" ? layer.fillAlgorithm : "outline",
         pass,
         ...(element.powerPercent === undefined ? {} : { powerPercent: element.powerPercent }),
-        points: transformMappedPoints(document, element, mappedTextPaths?.[sourceIndex] ?? mapPoints(document, points))
+        points: mappedTextPaths?.[sourceIndex] ?? mapPoints(document, transformDocumentPoints(element, points))
       });
     }
   }
@@ -828,25 +825,39 @@ export function planGrblJob(input, settings) {
 
 // Where the job starts, ends and where machine X0 Y0 sits, in document (STAGE) millimetres,
 // plus the document direction of +X and +Y, so the editor can draw the same reference the G-code uses.
+// Machine-space plan points back in document (STAGE) millimetres, so previews match what the editor shows
+// whatever the origin corner, axis inversions or start offset are. G-code itself stays in machine space.
+export function planToDocumentSpace(input, plan) {
+  const document = createDocument(input);
+  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm ?? { xMm: 0, yMm: 0 };
+  const toDocument = (point) => ({
+    xMm: flipX ? document.widthMm - (point.xMm + offsetX) : point.xMm + offsetX,
+    yMm: flipY ? document.heightMm - (point.yMm + offsetY) : point.yMm + offsetY
+  });
+  return { ...plan, paths: plan.paths.map((path) => ({ ...path, points: path.points.map(toDocument) })) };
+}
+
+// Where the job starts, ends and where machine X0 Y0 sits, in document (STAGE) millimetres,
+// plus the document direction of +X and +Y, so the editor can draw the same reference the G-code uses.
 export function jobReferencePoints(input, settings) {
   const plan = planGrblJob(input, settings);
-  const work = plan.paths.filter(({ kind }) => kind === "work");
+  const work = planToDocumentSpace(input, plan).paths.filter(({ kind }) => kind === "work");
   if (work.length === 0) return null;
   const document = createDocument(input);
   const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
   const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm;
-  const toDocument = ({ xMm, yMm }) => ({
-    xMm: flipX ? document.widthMm - (xMm + offsetX) : xMm + offsetX,
-    yMm: flipY ? document.heightMm - (yMm + offsetY) : yMm + offsetY
-  });
-  const corners = work.flatMap(({ points }) => points).map(toDocument);
+  const corners = work.flatMap(({ points }) => points);
   const xs = corners.map(({ xMm }) => xMm);
   const ys = corners.map(({ yMm }) => yMm);
   return {
     bounds: { minXMm: Math.min(...xs), minYMm: Math.min(...ys), maxXMm: Math.max(...xs), maxYMm: Math.max(...ys) },
-    origin: toDocument({ xMm: 0, yMm: 0 }),
-    start: toDocument(work[0].points[0]),
-    end: toDocument(work.at(-1).points.at(-1)),
+    origin: {
+      xMm: flipX ? document.widthMm - offsetX : offsetX,
+      yMm: flipY ? document.heightMm - offsetY : offsetY
+    },
+    start: work[0].points[0],
+    end: work.at(-1).points.at(-1),
     xDirection: flipX ? -1 : 1,
     yDirection: flipY ? -1 : 1
   };

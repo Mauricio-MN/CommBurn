@@ -123,8 +123,9 @@ button, summary, select { cursor: pointer; }
 .port-row input { flex: 1; min-width: 0; }
 .port-row button { min-width: 36px; padding: 6px; }
 .unit-note { color: #96a0b0; font-size: 10px; font-weight: 500; }
-.machine-actions { display: flex; gap: 7px; margin: 2px 0 8px; }
-.machine-actions .button { flex: 1; }
+.machine-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 2px 0 8px; }
+.machine-actions .button { flex: 1 1 100%; }
+.machine-actions .button:first-child:nth-last-child(2), .machine-actions .button:last-child:nth-child(2) { flex: 1 1 40%; }
 .machine-state { margin: 0 0 10px; color: #6e7b8e; font-size: 11px; }
 .safety-check { display: flex; gap: 8px; margin: 12px 0; color: #536176; font-size: 10px; line-height: 1.5; cursor: pointer; }
 .safety-check[hidden] { display: none; }

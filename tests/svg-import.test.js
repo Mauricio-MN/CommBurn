@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSync, stringify } from "svgson";
 import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "../src/core/svg-import.js";
-import { jobReferencePoints, planGrblJob, renderSvg } from "../src/core/document.js";
+import { jobReferencePoints, planGrblJob, planToDocumentSpace, renderSvg } from "../src/core/document.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
@@ -615,4 +615,23 @@ test("job reference points follow rotated objects", () => {
   const reference = jobReferencePoints(rotated, { maxSpindleSpeed: 1000 });
   assert.deepEqual(reference.start, { xMm: 40, yMm: 20 });
   assert.deepEqual(reference.bounds, { minXMm: 30, minYMm: 20, maxXMm: 40, maxYMm: 30 });
+});
+
+test("document-space plans are identical for every origin corner and inversion", () => {
+  const base = {
+    widthMm: 100, heightMm: 80,
+    layers: [{ ...DEFAULT_LAYER, id: "l" }],
+    elements: [{ id: "a", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, rotationDeg: 20, layerId: "l" }]
+  };
+  const settings = { maxSpindleSpeed: 1000 };
+  const reference = planToDocumentSpace(base, planGrblJob(base, settings)).paths;
+  for (const origin of [{ corner: "bottom-right" }, { corner: "top-left", flipX: true }, { corner: "bottom-left", flipY: true }]) {
+    const document = { ...base, origin };
+    const converted = planToDocumentSpace(document, planGrblJob(document, settings)).paths;
+    assert.equal(converted.length, reference.length);
+    converted.forEach((path, index) => path.points.forEach((point, pointIndex) => {
+      assert.ok(Math.abs(point.xMm - reference[index].points[pointIndex].xMm) < 1e-4);
+      assert.ok(Math.abs(point.yMm - reference[index].points[pointIndex].yMm) < 1e-4);
+    }));
+  }
 });

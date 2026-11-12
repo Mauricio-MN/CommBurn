@@ -1,4 +1,4 @@
-import { createDocument, jobReferencePoints, planGrblJob, renderSvg } from "./core/document.js";
+import { createDocument, jobReferencePoints, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { parseProject, serializeProject } from "./core/project.js";
@@ -713,6 +713,9 @@ function drawJobMarkers(documentModel) {
   }
 }
 
+// The origin only decides machine coordinates; the STAGE always shows the drawing the same way up.
+const STAGE_ORIGIN = { corner: "top-left", flipX: false, flipY: false };
+
 function renderPreview() {
   try {
     currentDocument = readDocument();
@@ -724,7 +727,7 @@ function renderPreview() {
     resizeBoard(widthMm, heightMm);
     byId("canvas-size").textContent = `${widthMm} × ${heightMm} mm`;
 
-    const svgDocument = new DOMParser().parseFromString(renderSvg(currentDocument, { embedFonts: false }), "image/svg+xml");
+    const svgDocument = new DOMParser().parseFromString(renderSvg({ ...currentDocument, origin: STAGE_ORIGIN }, { embedFonts: false }), "image/svg+xml");
     if (svgDocument.querySelector("parsererror")) throw new Error("Não foi possível desenhar este documento.");
     const selection = new Set(selectedIds);
     const nodes = Array.from(svgDocument.querySelectorAll("[id]"), (node) => {
@@ -866,7 +869,8 @@ function updateMachinePreviewStats(plan) {
   byId("machine-preview-code").textContent = plan.gcode;
 }
 
-function drawMachinePreview(plan, documentModel = readDocument()) {
+function drawMachinePreview(machinePlan, documentModel = readDocument()) {
+  const plan = planToDocumentSpace(documentModel, machinePlan);
   const svg = byId("machine-path-preview");
   svg.setAttribute("viewBox", `0 0 ${documentModel.widthMm} ${documentModel.heightMm}`);
   svg.style.aspectRatio = `${documentModel.widthMm} / ${documentModel.heightMm}`;
@@ -1041,7 +1045,8 @@ function renderMachineSimulationProgress(completed, total, state) {
   });
 }
 
-function showMachineSimulation(plan, documentModel, totalLines) {
+function showMachineSimulation(machinePlan, documentModel, totalLines) {
+  const plan = planToDocumentSpace(documentModel, machinePlan);
   machineSimulationPlan = plan;
   machineSimulationDocument = documentModel;
   machineSimulationPlayback = createMachinePlayback(plan).entries;
@@ -1053,7 +1058,7 @@ function showMachineSimulation(plan, documentModel, totalLines) {
   byId("machine-simulation-panel").hidden = false;
   byId("machine-timeline").hidden = true;
   stopTimelinePlayback();
-  byId("machine-path-preview").hidden = true;
+  byId("machine-path-preview").toggleAttribute("hidden", true);
   updateMachinePreviewStats(plan);
   if (!dialog.open) dialog.showModal();
   renderMachineSimulationProgress(0, totalLines, "running");
@@ -1117,7 +1122,7 @@ function showMachinePreview() {
     byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machinePreview");
     byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machinePreviewDescription");
     byId("machine-simulation-panel").hidden = true;
-    byId("machine-path-preview").hidden = false;
+    byId("machine-path-preview").toggleAttribute("hidden", false);
     byId("machine-preview-dialog").showModal();
   } catch (error) {
     showNotice(error instanceof FieldValidationError
