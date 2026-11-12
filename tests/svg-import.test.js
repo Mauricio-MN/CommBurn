@@ -177,8 +177,8 @@ test("SVG editable import can group geometry into layers by source color", () =>
 
   assert.ok(redLayer);
   assert.ok(blueLayer);
-  assert.equal(redLayer.operation, "fill");
-  assert.equal(blueLayer.operation, "fill");
+  assert.equal(redLayer.operation, "engrave");
+  assert.equal(blueLayer.operation, "engrave");
   assert.deepEqual(imported.elements.map((element) => element.layerId), [redLayer.id, blueLayer.id]);
 });
 
@@ -199,13 +199,13 @@ test("SVG paths with different fill and stroke colors import as separate layer p
   assert.notEqual(fillPath.pathData, strokePath.pathData);
   assert.equal(strokePath.pathData.match(/M/g).length, 2);
   assert.equal(strokePath.strokeWidthMm, undefined);
-  assert.deepEqual([fillLayer.operation, fillLayer.color], ["fill", "#ff0000"]);
+  assert.deepEqual([fillLayer.operation, fillLayer.color], ["engrave", "#ff0000"]);
   assert.deepEqual([strokeLayer.operation, strokeLayer.color], ["engrave", "#0000ff"]);
   assert.deepEqual([fillPath.fillColorMode, fillPath.strokeColorMode], ["layer", "none"]);
   assert.deepEqual([strokePath.fillColorMode, strokePath.strokeColorMode], ["layer", "none"]);
-  assert.match(rendered, /fill="#ff0000" stroke="none"/);
+  assert.match(rendered, /fill="none" stroke="#ff0000" stroke-width="0.2"/);
   assert.match(rendered, /fill="none" stroke="#0000ff" stroke-width="0.2"/);
-  assert.ok(plan.paths.some(({ elementId, operation }) => elementId === fillPath.id && operation === "fill"));
+  assert.ok(plan.paths.some(({ elementId, operation }) => elementId === fillPath.id && operation === "engrave"));
   assert.ok(plan.paths.some(({ elementId, operation }) => elementId === strokePath.id && operation === "engrave"));
 });
 
@@ -243,11 +243,11 @@ test("SVG path imports safe inline fill and stroke styles", () => {
   const filledLayer = filled.layers.find(({ id }) => id === filledElement.layerId);
   const strokedLayer = stroked.layers.find(({ id }) => id === strokedElement.layerId);
 
-  assert.equal(filledLayer.operation, "fill");
+  assert.equal(filledLayer.operation, "engrave");
   assert.equal(filledLayer.color, "#ff0000");
   assert.equal(filledElement.fillColorMode, "layer");
   assert.equal(filledElement.strokeColorMode, "none");
-  assert.match(renderSvg(filled), /fill="#ff0000" stroke="none"/);
+  assert.match(renderSvg(filled), /fill="none" stroke="#ff0000"/);
   assert.equal(strokedLayer.operation, "engrave");
   assert.equal(strokedLayer.color, "#123456");
   assert.equal(strokedElement.fillColorMode, "none");

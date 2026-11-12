@@ -2,6 +2,8 @@ import { SVGPathData } from "../../node_modules/svg-pathdata/lib/SVGPathData.mod
 import { createDocument } from "./document.js";
 import { DEFAULT_LAYER } from "./layers.js";
 
+// Imported layers always start as engraving; the user can change the operation afterwards.
+const DEFAULT_IMPORT_OPERATION = "engrave";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const UNIT_TO_MM = { mm: 1, cm: 10, in: 25.4, px: 25.4 / 96, pt: 25.4 / 72, pc: 25.4 / 6 };
 const PRESENTATION_ATTRIBUTES = new Set([
@@ -527,14 +529,14 @@ function fallbackLayerIdForElement(name, attributes, inheritedStyle, inheritedLa
   }
   const color = isLine ? stroke : fill ?? stroke;
   if (!color) return inheritedLayerId;
-  const operation = isLine || !fill ? "engrave" : "fill";
+  const operation = DEFAULT_IMPORT_OPERATION;
   const key = `${operation}:${color}`;
   if (colorLayers.has(key)) return colorLayers.get(key);
   const id = importedLayerId(idPrefix, layers.length);
   const layer = {
     ...fallbackLayer,
     id,
-    name: `Importação ${operation === "fill" ? "preenchimento" : "gravação"} ${color}`,
+    name: `Importação gravação ${color}`,
     operation,
     color,
     locked: false
