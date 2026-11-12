@@ -925,7 +925,31 @@ function drawMachinePreview(machinePlan, documentModel = readDocument()) {
   svg.style.aspectRatio = `${documentModel.widthMm} / ${documentModel.heightMm}`;
   svg.replaceChildren();
   const layersById = new Map(documentModel.layers.map((layer) => [layer.id, layer]));
-  for (const plannedPath of groupMachinePreviewPaths(plan.paths)) {
+  const rasterPaths = plan.paths.filter((path) => path.segmentPowerFractions);
+  const intensityBuckets = new Map();
+  for (const rasterPath of rasterPaths) {
+    const layer = layersById.get(rasterPath.layerId);
+    rasterPath.segmentPowerFractions.forEach((fraction, index) => {
+      if (fraction <= 0) return;
+      const key = `${layer.id}|${fraction}`;
+      if (!intensityBuckets.has(key)) intensityBuckets.set(key, { layer, fraction, d: [] });
+      const [a, b] = [rasterPath.points[index], rasterPath.points[index + 1]];
+      intensityBuckets.get(key).d.push(`M${a.xMm} ${a.yMm}L${b.xMm} ${b.yMm}`);
+    });
+  }
+  for (const { layer, fraction, d } of intensityBuckets.values()) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d.join(""));
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", layer.color);
+    path.setAttribute("stroke-opacity", String(Math.max(0.05, fraction)));
+    path.setAttribute("stroke-width", String(Math.max(0.05, layer.fillSpacingMm)));
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `Intensidade do laser: ${Math.round(fraction * 100)}% · ${layer.name}`;
+    path.append(title);
+    svg.append(path);
+  }
+  for (const plannedPath of groupMachinePreviewPaths(plan.paths.filter((path) => !path.segmentPowerFractions))) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", plannedPath.pathData);
     path.setAttribute("fill", "none");
@@ -1038,25 +1062,30 @@ function drawMachineSimulationSegments(segments) {
   if (segments.length === 0) return;
   const canvas = byId("machine-simulation-playback");
   const { context, scale } = setupMachineSimulationContext(canvas, { clear: false });
-  const layerColors = new Map(machineSimulationDocument.layers.map((layer) => [layer.id, layer.color]));
+  const layersById = new Map(machineSimulationDocument.layers.map((layer) => [layer.id, layer]));
   for (const kind of ["work", "travel"]) {
     const grouped = new Map();
     for (const segment of segments) {
       if (segment.kind !== kind) continue;
-      const color = kind === "travel" ? "#626f80" : layerColors.get(segment.layerId);
-      if (!grouped.has(color)) grouped.set(color, []);
-      grouped.get(color).push(segment);
+      if (segment.fraction === 0) continue;
+      const color = kind === "travel" ? "#626f80" : layersById.get(segment.layerId).color;
+      const key = segment.fraction === undefined ? color : `${color}|${segment.fraction}|${layersById.get(segment.layerId).fillSpacingMm}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(segment);
     }
-    for (const [color, paths] of grouped) {
+    for (const [key, paths] of grouped) {
+      const [color, fraction, spacing] = key.split("|");
       context.beginPath();
       context.strokeStyle = color;
-      context.lineWidth = (kind === "work" ? 1.4 : 0.9) / scale;
+      context.globalAlpha = fraction === undefined ? 1 : Math.max(0.05, Number(fraction));
+      context.lineWidth = fraction === undefined ? (kind === "work" ? 1.4 : 0.9) / scale : Math.max(0.05, Number(spacing));
       context.setLineDash(kind === "travel" ? [3 / scale, 2 / scale] : []);
       for (const path of paths) {
         context.moveTo(path.points[0].xMm, path.points[0].yMm);
         context.lineTo(path.points.at(-1).xMm, path.points.at(-1).yMm);
       }
       context.stroke();
+      context.globalAlpha = 1;
     }
   }
   context.setLineDash([]);

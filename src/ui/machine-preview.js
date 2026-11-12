@@ -64,6 +64,7 @@ export function getMachinePlaybackSegments(entries, fromLine, toLine) {
       segments.push({
         kind: "work",
         layerId: entry.path.layerId,
+        ...(entry.path.segmentPowerFractions ? { fraction: entry.path.segmentPowerFractions[index] } : {}),
         points: [entry.path.points[index], entry.path.points[index + 1]]
       });
     }
