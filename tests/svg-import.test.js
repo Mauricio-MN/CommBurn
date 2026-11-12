@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSync, stringify } from "svgson";
 import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "../src/core/svg-import.js";
-import { planGrblJob, renderSvg } from "../src/core/document.js";
+import { jobReferencePoints, planGrblJob, renderSvg } from "../src/core/document.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
@@ -569,4 +569,21 @@ test("starting from the objects shifts the job so the chosen anchor becomes X0 Y
   assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: 23 });
   assert.match(planGrblJob(document({}), settings({ workCoordinateSystem: "G55" })).gcode, /^G21\nG55\nG90/);
   assert.throws(() => planGrblJob(document({}), settings({ startFrom: "nowhere" })), /start mode/);
+});
+
+test("job reference points follow origin, axis inversion and start mode in document coordinates", () => {
+  const base = {
+    widthMm: 100, heightMm: 80,
+    layers: [{ ...DEFAULT_LAYER, id: "l" }],
+    elements: [{ id: "r", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, layerId: "l" }]
+  };
+  const settings = { maxSpindleSpeed: 1000 };
+  const top = jobReferencePoints(base, settings);
+  assert.deepEqual([top.origin, top.xDirection, top.yDirection], [{ xMm: 0, yMm: 0 }, 1, 1]);
+  assert.deepEqual(top.start, { xMm: 30, yMm: 20 });
+  const bottomRight = jobReferencePoints({ ...base, origin: { corner: "bottom-right" } }, settings);
+  assert.deepEqual([bottomRight.origin, bottomRight.xDirection, bottomRight.yDirection], [{ xMm: 100, yMm: 80 }, -1, -1]);
+  assert.deepEqual(bottomRight.start, { xMm: 30, yMm: 20 });
+  const onObjects = jobReferencePoints(base, { ...settings, startFrom: "objects", startAnchor: "bottom-right" });
+  assert.deepEqual(onObjects.origin, { xMm: 40, yMm: 26 });
 });

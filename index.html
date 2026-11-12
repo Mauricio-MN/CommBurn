@@ -79,6 +79,7 @@
             <option value="G54">G54</option><option value="G55">G55</option><option value="G56">G56</option>
             <option value="G57">G57</option><option value="G58">G58</option><option value="G59">G59</option>
           </select></label>
+          <label class="toggle"><input id="show-job-markers" type="checkbox" checked><span class="toggle-track"></span> <span data-i18n="ui.document.showMarkers">Mostrar origem, início e fim no desenho</span></label>
           <p class="help-text" data-i18n="ui.document.coordinatesHelp">Método manual: o G-code usa coordenadas absolutas (G90) a partir da origem escolhida aqui. Antes de executar, posicione a cabeça do laser nesse canto e defina-o como zero (X0 Y0) no controlador. O CommBurn não lê sensores nem fins de curso. O desenho do texto permanece legível.</p>
         </section>
 
@@ -197,7 +198,7 @@
           <div class="board-frame" id="board-frame" data-ui-module="canvas" data-extension-slot="canvas">
             <div class="ruler ruler-top" id="ruler-x" aria-hidden="true"></div>
             <div class="ruler ruler-left" id="ruler-y" aria-hidden="true"></div>
-            <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial" data-i18n-aria-label="ui.canvas.artboard"><g id="objects"></g><rect id="selection-marquee" class="selection-marquee" visibility="hidden" pointer-events="none"/></svg>
+            <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial" data-i18n-aria-label="ui.canvas.artboard"><g id="objects"></g><g id="job-markers" pointer-events="none"></g><rect id="selection-marquee" class="selection-marquee" visibility="hidden" pointer-events="none"/></svg>
           </div>
           <div class="stage-note"><span class="status-dot"></span> <span data-i18n="ui.canvas.scale">Escala e medidas em milímetros</span></div>
         </div>

@@ -1,4 +1,4 @@
-import { createDocument, planGrblJob, renderSvg } from "./core/document.js";
+import { createDocument, jobReferencePoints, planGrblJob, renderSvg } from "./core/document.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { parseProject, serializeProject } from "./core/project.js";
@@ -634,6 +634,52 @@ async function pollMachineJob() {
   }
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+let jobMarkersTimer = null;
+
+// Planning the job is heavier than drawing, so markers are refreshed shortly after edits settle.
+function renderJobMarkers(documentModel) {
+  clearTimeout(jobMarkersTimer);
+  jobMarkersTimer = setTimeout(() => drawJobMarkers(documentModel), 120);
+}
+
+function drawJobMarkers(documentModel) {
+  const layer = byId("job-markers");
+  layer.replaceChildren();
+  if (!byId("show-job-markers").checked) return;
+  let reference;
+  try {
+    reference = jobReferencePoints(documentModel, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() });
+  } catch {
+    return;
+  }
+  if (!reference) return;
+  const size = Math.max(2, Math.max(documentModel.widthMm, documentModel.heightMm) / 60);
+  const make = (name, attributes, text) => {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+    if (text) node.textContent = text;
+    layer.append(node);
+  };
+  const label = (point, key, color, dx = 1.2, dy = -1.2) => make("text", {
+    x: point.xMm + size * dx, y: point.yMm + size * dy, "font-size": size * 0.9, fill: color, "font-family": "sans-serif"
+  }, i18n.t(key));
+  const { origin, start, end, xDirection, yDirection } = reference;
+  const arrow = (dx, dy, name) => {
+    make("line", { x1: origin.xMm, y1: origin.yMm, x2: origin.xMm + dx * size * 2, y2: origin.yMm + dy * size * 2, stroke: "#8a5a00", "stroke-width": size * 0.12 });
+    make("text", { x: origin.xMm + dx * size * 2.3, y: origin.yMm + dy * size * 2.3 + size * 0.3, "font-size": size * 0.8, fill: "#8a5a00", "font-family": "sans-serif", "text-anchor": "middle" }, name);
+  };
+  arrow(xDirection, 0, "X+");
+  arrow(0, yDirection, "Y+");
+  make("circle", { cx: origin.xMm, cy: origin.yMm, r: size * 0.35, fill: "#fff", stroke: "#8a5a00", "stroke-width": size * 0.12 });
+  label(origin, "ui.canvas.markerOrigin", "#8a5a00", 0.6, xDirection === 1 && yDirection === 1 ? -0.6 : 1.4);
+  make("circle", { cx: start.xMm, cy: start.yMm, r: size * 0.55, fill: "#1f9d55", stroke: "#fff", "stroke-width": size * 0.12 });
+  label(start, "ui.canvas.markerStart", "#1f9d55");
+  make("rect", { x: end.xMm - size * 0.5, y: end.yMm - size * 0.5, width: size, height: size, fill: "#d64545", stroke: "#fff", "stroke-width": size * 0.12 });
+  label(end, "ui.canvas.markerEnd", "#d64545", 1.0, 1.8);
+}
+
 function renderPreview() {
   try {
     currentDocument = readDocument();
@@ -659,6 +705,7 @@ function renderPreview() {
       return imported;
     });
     objects.replaceChildren(...nodes);
+    renderJobMarkers(currentDocument);
     renderSelectionStatus();
     const selected = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
     const hasLockedLayer = selected.some((element) =>
@@ -2509,6 +2556,7 @@ disconnectButton.addEventListener("click", async () => {
   }
 });
 safetyCheckbox.addEventListener("change", updateMachineControls);
+for (const id of ["show-job-markers", "start-anchor", "work-system"]) byId(id).addEventListener("change", renderPreview);
 byId("start-from").addEventListener("change", () => {
   updateMachineControls();
   renderPreview();

@@ -83,6 +83,7 @@ export default Object.freeze({
       center: "Center",
       workSystem: "Controller coordinate system",
       workSystemDefault: "Controller current (do not send)",
+      showMarkers: "Show origin, start and end on the drawing",
       coordinatesHelp: "Manual method: the G-code uses absolute coordinates (G90) from the origin chosen here. Before running, move the laser head to that corner and set it as zero (X0 Y0) in the controller. CommBurn reads no sensors or limit switches. Text drawing stays readable."
     },
     layers: {
@@ -326,6 +327,9 @@ export default Object.freeze({
       area: "Area",
       artboard: "Vector work area",
       scale: "Scale and dimensions in millimetres",
+      markerOrigin: "Origin X0 Y0",
+      markerStart: "Start",
+      markerEnd: "End",
       noSelection: "No object selected",
       draft: "CommBurn",
       unsavedBadge: "Unsaved",

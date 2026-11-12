@@ -801,6 +801,28 @@ export function planGrblJob(input, settings) {
   return buildGrblJob(input, settings, offset);
 }
 
+// Where the job starts, ends and where machine X0 Y0 sits, in document (STAGE) millimetres,
+// plus the document direction of +X and +Y, so the editor can draw the same reference the G-code uses.
+export function jobReferencePoints(input, settings) {
+  const plan = planGrblJob(input, settings);
+  const work = plan.paths.filter(({ kind }) => kind === "work");
+  if (work.length === 0) return null;
+  const document = createDocument(input);
+  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm;
+  const toDocument = ({ xMm, yMm }) => ({
+    xMm: flipX ? document.widthMm - (xMm + offsetX) : xMm + offsetX,
+    yMm: flipY ? document.heightMm - (yMm + offsetY) : yMm + offsetY
+  });
+  return {
+    origin: toDocument({ xMm: 0, yMm: 0 }),
+    start: toDocument(work[0].points[0]),
+    end: toDocument(work.at(-1).points.at(-1)),
+    xDirection: flipX ? -1 : 1,
+    yDirection: flipY ? -1 : 1
+  };
+}
+
 function buildGrblJob(input, settings, offset) {
   const document = createDocument(input);
   const shiftNumber = (value, by) => by === 0 ? value : Number((value - by).toFixed(6));
