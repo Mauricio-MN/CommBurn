@@ -1,5 +1,5 @@
 import { app, BrowserWindow, shell } from "electron";
-import { cp, mkdir, readdir, access } from "node:fs/promises";
+import { cp, mkdir, readdir, access, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { startServer } from "./server.mjs";
 
@@ -9,6 +9,13 @@ let isClosing = false;
 
 async function installBundledPlugins(pluginDirectory) {
   if (!app.isPackaged) return;
+  const markerPath = join(app.getPath("userData"), "bundled-plugins-seeded");
+  try {
+    await access(markerPath);
+    return;
+  } catch {
+    // First run: seed bundled plugins below.
+  }
   const bundledDirectory = join(process.resourcesPath, "bundled-plugins");
   let entries;
   try {
@@ -27,6 +34,7 @@ async function installBundledPlugins(pluginDirectory) {
       await cp(join(bundledDirectory, entry.name), target, { recursive: true });
     }
   }
+  await writeFile(markerPath, "");
 }
 
 function createWindow() {
