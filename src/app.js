@@ -655,7 +655,7 @@ function drawJobMarkers(documentModel) {
     return;
   }
   if (!reference) return;
-  const size = Math.max(0.8, Math.max(documentModel.widthMm, documentModel.heightMm) / 200);
+  const size = Math.max(1.4, Math.max(documentModel.widthMm, documentModel.heightMm) / 90);
   const make = (name, attributes, text) => {
     const node = document.createElementNS(SVG_NS, name);
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);

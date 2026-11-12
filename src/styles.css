@@ -143,7 +143,7 @@ button, summary, select { cursor: pointer; }
 .board-frame { display: grid; grid-template-areas: ". x" "y board"; grid-template-columns: 42px minmax(0, 1fr); grid-template-rows: 27px auto; align-items: stretch; min-width: 0; max-width: 100%; }
 .artboard { grid-area: board; display: block; width: 100%; height: auto; aspect-ratio: var(--doc-ratio, 3 / 2); overflow: hidden; background: #fff; border: 1px solid #dce3ed; box-shadow: 0 9px 28px rgb(47 64 96 / 12%); touch-action: none; }
 .artboard [data-id] { cursor: pointer; pointer-events: all; }
-.artboard [data-id].selected { filter: drop-shadow(0 0 2px #3978eb); }
+.artboard [data-id].selected { filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 2px #ff7a00) drop-shadow(0 0 5px #ff7a00); }
 .selection-marquee { fill: #3978eb20; stroke: #3978eb; stroke-dasharray: 4 2; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .ruler { position: relative; color: #778398; font-size: 9px; user-select: none; }
 .ruler-top { grid-area: x; display: flex; align-items: end; border-bottom: 1px solid #cfd7e3; }
