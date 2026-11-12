@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, renderGrblJob, renderSvg } from "../src/core/document.js";
+import { createDocument, planGrblJob, renderGrblJob, renderSvg } from "../src/core/document.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
 const embeddedSvg = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><circle cx="5" cy="5" r="4"/></svg>').toString("base64")}`;
@@ -13,7 +13,7 @@ test("document dimensions, positions, and SVG output use millimetres", () => {
   assert.equal(document.widthMm, 180);
   assert.equal(document.elements[0].xMm, 10.5);
   assert.match(renderSvg(document), /width="180mm" height="120mm"/);
-  assert.match(renderSvg(document), /x="10.5" y="20"/);
+  assert.match(renderSvg(document), /<text id="label" font-family="CommBurn Sans"/);
 });
 
 test("origin corner maps rectangle coordinates without sensor input", () => {
@@ -25,18 +25,46 @@ test("origin corner maps rectangle coordinates without sensor input", () => {
   assert.match(svg, /<rect id="box" x="70" y="60" width="20" height="15"/);
 });
 
-test("SVG text and identifiers are escaped", () => {
+test("SVG text uses native font text and identifiers are escaped", () => {
   const svg = renderSvg({
-    elements: [{ id: 'label"&', type: "text", xMm: 1, yMm: 2, text: "<&>", fontSizeMm: 4, fontFamily: 'A "font"' }]
+    elements: [{ id: 'label"&', type: "text", xMm: 1, yMm: 12, text: "<&>", fontSizeMm: 4, fontFamily: "sans-serif" }]
   });
   assert.match(svg, /id="label&quot;&amp;"/);
-  assert.match(svg, /&lt;&amp;&gt;/);
-  assert.match(svg, /font-family="A &quot;font&quot;"/);
+  assert.match(svg, /font-family="CommBurn Sans"/);
+  assert.match(svg, /<tspan x="1" y="12">&lt;&amp;&gt;<\/tspan>/);
+});
+
+test("SVG text preserves external font names while GRBL rejects missing outlines", () => {
+  const documentModel = {
+    elements: [{ id: "label", type: "text", xMm: 1, yMm: 8, text: "Text", fontSizeMm: 4, fontFamily: "Liberation Serif" }]
+  };
+
+  assert.match(renderSvg(documentModel), /font-family="Liberation Serif"/);
+  assert.throws(
+    () => planGrblJob(documentModel, { maxSpindleSpeed: 1000 }),
+    (error) => error.code === "grbl.unsupportedTextFont"
+  );
+});
+
+test("text SVG keeps native text and embeds the selected font with inverted coordinates", () => {
+  const documentModel = {
+    widthMm: 100,
+    heightMm: 80,
+    origin: { corner: "top-right", flipY: true },
+    layers: [{ id: "engrave", operation: "engrave", color: "#267b62" }],
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "AB", fontSizeMm: 8, layerId: "engrave" }]
+  };
+  const svg = renderSvg(documentModel);
+
+  assert.match(svg, /<text id="label" font-family="CommBurn Sans" font-size="8" font-kerning="none"/);
+  assert.match(svg, /<tspan x="90" y="55">AB<\/tspan>/);
+  assert.match(svg, /@font-face\{font-family:"CommBurn Sans"/);
+  assert.equal(documentModel.elements[0].type, "text");
 });
 
 test("invalid metric dimensions, positions, and axis settings are rejected", () => {
-  assert.throws(() => createDocument({ widthMm: 0 }), /greater than zero/);
-  assert.throws(() => createDocument({ widthMm: Infinity }), /finite number/);
+  assert.throws(() => createDocument({ widthMm: 0 }), { code: "document.positiveNumber" });
+  assert.throws(() => createDocument({ widthMm: Infinity }), { code: "document.invalidNumber" });
   assert.throws(() => createDocument({ elements: [{ type: "text", xMm: NaN, yMm: 0, text: "x", fontSizeMm: 1 }] }), /finite number/);
   assert.throws(() => createDocument({ origin: { flipX: "yes" } }), /must be boolean/);
   assert.throws(() => createDocument({
@@ -44,7 +72,7 @@ test("invalid metric dimensions, positions, and axis settings are rejected", () 
       { id: "same", type: "rect", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1 },
       { id: "same", type: "ellipse", xMm: 2, yMm: 2, widthMm: 1, heightMm: 1 }
     ]
-  }), /Duplicate object id/);
+  }), { code: "document.duplicateId" });
   assert.throws(() => createDocument({
     elements: [{ id: "warp", type: "rect", xMm: 0, yMm: 0, widthMm: 1, heightMm: 1, skewXDeg: 80 }]
   }), /between -80 and 80/);
@@ -59,19 +87,24 @@ test("GRBL job output uses explicit millimetres, user coordinates, and laser-off
   }, { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 });
 
   assert.match(gcode, /^G21\nG90\nG94\nM5/m);
-  assert.match(gcode, /G0 X90 Y75\nM4 S100\nG1 F300/);
-  assert.match(gcode, /G1 X70 Y75\nG1 X70 Y60\nG1 X90 Y60\nG1 X90 Y75\nM5\nM5\n$/);
+  // The closed contour begins at the vertex nearest the machine zero, here the bottom-right corner of the table.
+  assert.match(gcode, /G0 X70 Y60\nM4 S100\nG1 F300/);
+  assert.match(gcode, /G1 X90 Y60\nG1 X90 Y75\nG1 X70 Y75\nG1 X70 Y60\nM5\nM5\n$/);
 });
 
-test("GRBL jobs reject text, out-of-area geometry, and invalid machine settings", () => {
+test("GRBL exports text and rejects out-of-area geometry and invalid machine settings", () => {
   const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 };
-  assert.throws(() => renderGrblJob({
-    elements: [{ type: "text", xMm: 1, yMm: 1, text: "No path", fontSizeMm: 2 }]
-  }, settings), /editable vector paths/);
+  const textJob = renderGrblJob({
+    widthMm: 100, heightMm: 80,
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "Ação", fontSizeMm: 8 }]
+  }, settings);
+  assert.match(textJob, /M4 S100/);
+  assert.match(textJob, /G1 X/);
+  assert.ok(textJob.split("\n").filter((line) => line.startsWith("G0 ")).length > 5);
   assert.throws(() => renderGrblJob({
     widthMm: 10, heightMm: 10,
     elements: [{ type: "rect", xMm: 8, yMm: 1, widthMm: 4, heightMm: 2 }]
-  }, settings), /outside the document work area/);
+  }, settings), { code: "grbl.outsideWorkArea" });
   assert.throws(() => renderGrblJob({
     elements: [{ type: "rect", xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }]
   }, { ...settings, powerPercent: 101 }), /at most 100/);
@@ -85,8 +118,63 @@ test("GRBL paths honor explicit axis inversions", () => {
     elements: [{ type: "rect", xMm: 5, yMm: 6, widthMm: 10, heightMm: 12 }]
   }, { feedMmPerMinute: 200, maxSpindleSpeed: 500, powerPercent: 5 });
 
-  assert.match(gcode, /G0 X45 Y34/);
-  assert.match(gcode, /G1 X35 Y34\nG1 X35 Y22\nG1 X45 Y22/);
+  assert.match(gcode, /G0 X35 Y22/);
+  assert.match(gcode, /G1 X45 Y22\nG1 X45 Y34\nG1 X35 Y34\nG1 X35 Y22/);
+});
+
+test("GRBL text stays upright when the selected origin inverts an axis", () => {
+  const documentModel = {
+    widthMm: 100,
+    heightMm: 80,
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "AB", fontSizeMm: 8 }]
+  };
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000 };
+  const normalPaths = planGrblJob(documentModel, settings).paths
+    .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
+  const flippedPaths = planGrblJob({ ...documentModel, origin: { corner: "top-right" } }, settings).paths
+    .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
+  const byPosition = (a, b) => a.yMm - b.yMm || a.xMm - b.xMm;
+  const unique = (points) => points.sort(byPosition)
+    .filter((point, index, all) => index === 0 || byPosition(point, all[index - 1]) !== 0);
+  const normalPoints = unique(normalPaths.flatMap(({ points }) => points));
+  const flippedPoints = unique(flippedPaths.flatMap(({ points }) => points));
+
+  assert.equal(flippedPoints.length, normalPoints.length);
+  assert.equal(new Set(normalPoints.map((point, index) => (flippedPoints[index].xMm - point.xMm).toFixed(6))).size, 1);
+  assert.ok(flippedPoints[0].xMm > normalPoints[0].xMm);
+});
+
+test("GRBL text contours follow fill, engrave, and cut layer operations", () => {
+  const plan = planGrblJob({
+    layers: [
+      { id: "fill", operation: "fill", fillAlgorithm: "vertical-serpentine", fillSpacingMm: 0.5 },
+      { id: "engrave", operation: "engrave" },
+      { id: "cut", operation: "cut" }
+    ],
+    elements: [
+      { type: "text", xMm: 1, yMm: 8, text: "Open strokes", fontSizeMm: 4, layerId: "fill" },
+      { id: "closed", type: "rect", xMm: 20, yMm: 20, widthMm: 2, heightMm: 2, layerId: "fill" },
+      { id: "engraved-text", type: "text", xMm: 30, yMm: 20, text: "AB", fontSizeMm: 4, layerId: "engrave" },
+      { id: "cut-text", type: "text", xMm: 40, yMm: 20, text: "AB", fontSizeMm: 4, layerId: "cut" }
+    ]
+  }, { maxSpindleSpeed: 1000 });
+  const textPaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "element-1");
+  const closedShapePaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "closed");
+  const engravedTextPaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "engraved-text");
+  const cutTextPaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "cut-text");
+
+  assert.ok(textPaths.length > 10);
+  assert.ok(textPaths.every(({ operation, algorithm }) => operation === "fill" && algorithm === "vertical-serpentine"));
+  assert.ok(closedShapePaths.length > 0);
+  assert.ok(closedShapePaths.every(({ operation, algorithm }) => operation === "fill" && algorithm === "vertical-serpentine"));
+  assert.ok(engravedTextPaths.length > 0);
+  assert.ok(engravedTextPaths.every(({ operation, algorithm }) => operation === "engrave" && algorithm === "outline"));
+  assert.ok(cutTextPaths.length > 0);
+  assert.ok(cutTextPaths.every(({ operation, algorithm }) => operation === "cut" && algorithm === "outline"));
+  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.fill > 0);
+  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.engrave > 0);
+  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.cut > 0);
+  assert.match(plan.gcode, /M4 S/);
 });
 
 test("SVG renders configurable ellipses, lines, and object transforms", () => {
@@ -167,11 +255,19 @@ test("embedded SVG visual objects are preserved by SVG export and rejected by GR
   assert.throws(() => renderGrblJob(document, { maxSpindleSpeed: 1000 }), /editable vector paths/);
 });
 
-test("GRBL rejects rotated, warped, and non-rectangular objects", () => {
+test("GRBL follows rotation and skew, and rejects non-rectangular primitives", () => {
   const settings = { feedMmPerMinute: 100, maxSpindleSpeed: 1000, powerPercent: 5 };
-  assert.throws(() => renderGrblJob({
-    elements: [{ type: "rect", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10, rotationDeg: 2 }]
-  }, settings), /untransformed rectangles/);
+  const rotated = planGrblJob({
+    widthMm: 100, heightMm: 100,
+    elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, rotationDeg: 90 }]
+  }, settings);
+  // A square rotated 90 degrees around its centre (15, 15) keeps the same corners, starting from the next one.
+  assert.deepEqual(rotated.paths[0].points.slice(0, 2).map(({ xMm, yMm }) => ({ xMm, yMm })), [{ xMm: 10, yMm: 10 }, { xMm: 20, yMm: 10 }]);
+  const skewed = planGrblJob({
+    widthMm: 100, heightMm: 100,
+    elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, skewXDeg: 45 }]
+  }, settings);
+  assert.deepEqual([skewed.paths[0].points[0].xMm, skewed.paths[0].points[0].yMm], [5, 10]);
   assert.throws(() => renderGrblJob({
     elements: [{ type: "ellipse", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10 }]
   }, settings), /editable vector paths/);
@@ -215,4 +311,25 @@ test("GRBL flattens cubic SVG path curves into metric line segments", () => {
 
   assert.ok((gcode.match(/G1 X/g) ?? []).length > 8);
   assert.match(gcode, /G0 X2 Y3/);
+});
+
+test("raster images engrave as scan lines with per-segment power", () => {
+  const image = {
+    widthMm: 100, heightMm: 100, origin: "top-left",
+    layers: [{ id: "L1", name: "Img", operation: "engrave", color: "#000000", feedMmPerMinute: 1000, powerPercent: 50, passes: 1, fillSpacingMm: 1, fillAlgorithm: "horizontal-serpentine", objectOrder: "document", enabled: true, visible: true, locked: false }],
+    elements: [{ id: "photo", type: "image", xMm: 10, yMm: 10, widthMm: 4, heightMm: 2, layerId: "L1",
+      imageDataUri: "data:image/png;base64,iVBORw0KGgo=" }]
+  };
+  const gray = Buffer.from([0, 128, 255, 0, 255, 255, 255, 255]).toString("base64");
+  const rasters = { photo: { widthPx: 4, heightPx: 2, gray } };
+  const plan = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, imageMode: "grayscale" });
+  const rows = plan.paths.filter(({ kind }) => kind === "work");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].points.map(({ xMm }) => xMm), [10, 11, 12, 13, 14]);
+  assert.match(plan.gcode, /G1 X11 Y10\.5 S500/);
+  assert.match(plan.gcode, /G1 X12 Y10\.5 S\d{3}/);
+  const dither = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, imageMode: "threshold" });
+  assert.doesNotMatch(dither.gcode, /S2\d\d/);
+  assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000, rasters: { photo: { widthPx: 4, heightPx: 2, gray: "AA==" } } }), /does not match/);
+  assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000 }), /GRBL supports/);
 });

@@ -30,6 +30,7 @@ export class GrblConnection {
       const status = /^<(Idle|Run|Jog|Hold(?::\d+)?|Alarm(?::\d+)?|Door(?::\d+)?|Check|Home|Sleep|Tool)(?:\||>)/i.exec(response);
       if (status) {
         this.status = status[1];
+        this.updatePosition(response);
         this.statusWaiter?.resolve(this.status);
       } else if (/^ALARM:/i.test(response)) {
         this.rejectPending(new Error(`Controller alarm: ${response}`));
@@ -45,6 +46,54 @@ export class GrblConnection {
         }
       }
     }
+  }
+
+  updatePosition(report) {
+    const read = (name) => {
+      const match = new RegExp(`[|<]${name}:([+-]?\\d+(?:\\.\\d+)?),([+-]?\\d+(?:\\.\\d+)?)`).exec(report);
+      return match ? { xMm: Number(match[1]), yMm: Number(match[2]) } : null;
+    };
+    const offset = read("WCO");
+    if (offset) this.workOffset = offset;
+    const machine = read("MPos");
+    const work = read("WPos");
+    if (machine) {
+      this.position = {
+        machine,
+        work: this.workOffset
+          ? { xMm: machine.xMm - this.workOffset.xMm, yMm: machine.yMm - this.workOffset.yMm }
+          : null
+      };
+    } else if (work) {
+      this.position = {
+        work,
+        machine: this.workOffset
+          ? { xMm: work.xMm + this.workOffset.xMm, yMm: work.yMm + this.workOffset.yMm }
+          : null
+      };
+    }
+  }
+
+  // Reads the head position without moving the machine; null when the controller does not answer.
+  async readPosition() {
+    if (this.busy) throw new Error("Cannot read the position while a machine job is running");
+    this.position = null;
+    const status = await this.queryStatus({ timeoutMs: 1000 });
+    if (!status) throw new Error("The controller did not report a position");
+    return { status, position: this.position };
+  }
+
+  // Makes the current head position X0 Y0 of a work coordinate system (G54-G59 -> P1-P6).
+  async setZeroHere(slot = 1) {
+    if (this.busy) throw new Error("Cannot change the zero while a machine job is running");
+    if (!Number.isInteger(slot) || slot < 1 || slot > 6) throw new RangeError("The work coordinate slot must be 1 to 6");
+    await this.sendLine(`G10 L20 P${slot} X0 Y0`);
+  }
+
+  // Runs the homing cycle ($H). The machine moves to its limit switches, so callers must confirm first.
+  async home({ timeoutMs = 120000 } = {}) {
+    if (this.busy) throw new Error("Cannot home while a machine job is running");
+    await this.sendLine("$H", { timeoutMs });
   }
 
   get settings() {
@@ -113,7 +162,7 @@ export class GrblConnection {
     this.pending.reject(error);
   }
 
-  async sendLine(line) {
+  async sendLine(line, { timeoutMs = this.acknowledgementTimeoutMs } = {}) {
     if (this.serialError) throw this.serialError;
     if (this.pending) throw new Error("A GRBL command is already awaiting acknowledgement");
     const result = new Promise((resolve, reject) => {
@@ -122,7 +171,7 @@ export class GrblConnection {
           this.pending = null;
           reject(new Error(`Timed out waiting for controller acknowledgement: ${line}`));
         }
-      }, this.acknowledgementTimeoutMs);
+      }, timeoutMs);
       this.pending = {
         resolve: () => {
           clearTimeout(timer);

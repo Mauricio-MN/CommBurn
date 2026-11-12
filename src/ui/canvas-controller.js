@@ -63,14 +63,14 @@ export class CanvasController {
     const node = event.target.closest("[data-id]");
     const tool = this.callbacks.getTool();
     if (!node) {
-      if (["select", "multi-select", "edit"].includes(tool)) {
+      if (["select", "edit"].includes(tool)) {
         this.interaction = {
           type: "marquee",
           pointerId: event.pointerId,
           startPoint: toCanvasPoint(this.svg, event),
           startClientX: event.clientX,
           startClientY: event.clientY,
-          additive: event.shiftKey || tool === "multi-select",
+          additive: event.shiftKey,
           moved: false
         };
         this.svg.setPointerCapture(event.pointerId);
@@ -86,11 +86,11 @@ export class CanvasController {
     if (!element) return;
     const currentIds = this.callbacks.getSelectedIds();
     this.callbacks.select(id, {
-      additive: event.shiftKey || tool === "multi-select",
+      additive: event.shiftKey,
       toggle: event.shiftKey,
       keepExisting: currentIds.includes(id) && !event.shiftKey
     });
-    if (["select", "multi-select", "edit"].includes(tool)) return;
+    if (["select", "edit"].includes(tool)) return;
     const selectedIds = this.callbacks.getSelectedIds();
     if (!selectedIds.includes(id)) return;
     const selected = document.elements.filter((candidate) => selectedIds.includes(candidate.id));

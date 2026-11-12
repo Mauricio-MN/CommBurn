@@ -1,28 +1,36 @@
 import { DEFAULT_LAYER, normalizeLayers } from "./layers.js";
+import { CommBurnRangeError, CommBurnTypeError } from "./i18n.js";
+import { createTextOutlinePathData, getTextFontAsset, getTextSvgFamily } from "./text-to-path.js";
+import { decodeRaster, rasterLevels, rasterRowRuns } from "./raster-engrave.js";
 import { SVGPathData } from "../../node_modules/svg-pathdata/lib/SVGPathData.module.js";
 
 const ORIGIN_CORNERS = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
 
 function finiteNumber(value, label) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number of millimetres`);
+    throw new CommBurnTypeError("document.invalidNumber", { label }, { message: `${label} must be a finite number of millimetres` });
   }
   return value;
 }
 
 function positiveNumber(value, label) {
+
   const number = finiteNumber(value, label);
-  if (number <= 0) throw new RangeError(`${label} must be greater than zero`);
+
+  if (number <= 0) throw new CommBurnRangeError("document.positiveNumber", { label }, { message: `${label} must be greater than zero` });
   return number;
+
 }
 
 function normalizeTransforms(element, id) {
   const rotationDeg = finiteNumber(element.rotationDeg ?? 0, `Element ${id} rotationDeg`);
   const skewXDeg = finiteNumber(element.skewXDeg ?? 0, `Element ${id} skewXDeg`);
   const skewYDeg = finiteNumber(element.skewYDeg ?? 0, `Element ${id} skewYDeg`);
+
   if (Math.abs(skewXDeg) >= 80 || Math.abs(skewYDeg) >= 80) {
     throw new RangeError(`Element ${id} warp angles must be between -80 and 80 degrees`);
   }
+
   return { rotationDeg, skewXDeg, skewYDeg };
 }
 
@@ -91,11 +99,11 @@ function normalizeImageAspect(value, id) {
 
 function normalizeOrigin(origin = {}) {
   const corner = origin.corner ?? "top-left";
-  if (!ORIGIN_CORNERS.has(corner)) throw new RangeError(`Unsupported origin corner: ${corner}`);
+  if (!ORIGIN_CORNERS.has(corner)) throw new CommBurnRangeError("document.invalidOrigin", { corner }, { message: `Unsupported origin corner: ${corner}` });
   const flipX = origin.flipX ?? false;
   const flipY = origin.flipY ?? false;
   if (typeof flipX !== "boolean" || typeof flipY !== "boolean") {
-    throw new TypeError("Axis inversion settings must be boolean");
+    throw new CommBurnTypeError("document.invalidAxes", {}, { message: "Axis inversion settings must be boolean" });
   }
   return { corner, flipX, flipY };
 }
@@ -230,14 +238,14 @@ export function createDocument(input = {}) {
   const widthMm = positiveNumber(input.widthMm ?? 100, "widthMm");
   const heightMm = positiveNumber(input.heightMm ?? 100, "heightMm");
   const elements = input.elements ?? [];
-  if (!Array.isArray(elements)) throw new TypeError("elements must be an array");
+  if (!Array.isArray(elements)) throw new CommBurnTypeError("document.invalidElements", {}, { message: "elements must be an array" });
   const layers = normalizeLayers(input.layers ?? [DEFAULT_LAYER]);
   const layerIds = new Set(layers.map((layer) => layer.id));
   const normalizedElements = elements.map((element, index) => normalizeElement(element, index, layers[0].id));
   const ids = new Set();
   for (const element of normalizedElements) {
-    if (!element.id.trim()) throw new RangeError("Object ids must not be empty");
-    if (ids.has(element.id)) throw new RangeError(`Duplicate object id: ${element.id}`);
+    if (!element.id.trim()) throw new CommBurnRangeError("document.emptyId", {}, { message: "Object ids must not be empty" });
+    if (ids.has(element.id)) throw new CommBurnRangeError("document.duplicateId", { id: element.id }, { message: `Duplicate object id: ${element.id}` });
     if (!layerIds.has(element.layerId)) {
       throw new RangeError(`Element ${element.id} references unknown layer: ${element.layerId}`);
     }
@@ -265,17 +273,43 @@ function transformAttribute(element, centerX, centerY) {
   return ` transform="translate(${centerX} ${centerY}) rotate(${rotationDeg}) skewX(${skewXDeg}) skewY(${skewYDeg}) translate(${-centerX} ${-centerY})"`;
 }
 
-export function renderSvg(input) {
+// One visual language for every vector object, driven only by the layer operation:
+// fill = solid, engrave = solid outline, cut = dashed outline. The object itself never changes.
+function operationLook(layer, widthMm = 0.2) {
+  if (layer.operation === "fill") return `fill="${layer.color}" stroke="none"`;
+  const dash = layer.operation === "cut"
+    ? ` stroke-dasharray="${Math.max(2, widthMm * 3)} ${Math.max(1, widthMm * 1.5)}"`
+    : "";
+  return `fill="none" stroke="${layer.color}" stroke-width="${widthMm}"${dash}`;
+}
+
+export function renderSvg(input, { embedFonts = true } = {}) {
   const document = createDocument(input);
   const nodesByLayer = new Map(document.layers.map((layer) => [layer.id, []]));
+  const textFamilies = new Set(document.elements
+    .filter((element) => element.type === "text")
+    .map((element) => element.fontFamily ?? "sans-serif"));
+  const fontStyle = embedFonts && textFamilies.size > 0
+    ? `<style>${[...textFamilies].map((family) => {
+      const asset = getTextFontAsset(family);
+      if (!asset) return "";
+      const { family: svgFamily, bytes } = asset;
+      const base64 = btoa(Array.from(new Uint8Array(bytes), (byte) => String.fromCharCode(byte)).join(""));
+      return `@font-face{font-family:"${svgFamily}";src:url(data:font/woff;base64,${base64}) format("woff");font-style:normal;font-weight:400}`;
+    }).join("")}</style>`
+    : "";
   for (const element of document.elements) {
     const layer = document.layers.find((candidate) => candidate.id === element.layerId);
     if (!layer.visible) continue;
     const point = mapDocumentPoint(document, element.xMm, element.yMm);
     const fill = layer.operation === "fill" ? layer.color : "none";
     if (element.type === "text") {
+      const svgFamily = getTextSvgFamily(element.fontFamily);
       const transform = transformAttribute(element, point.xMm, point.yMm);
-      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" x="${point.xMm}" y="${point.yMm}" fill="${layer.color}" font-family="${escapeXml(element.fontFamily)}" font-size="${element.fontSizeMm}"${transform}>${escapeXml(element.text)}</text>`);
+      const lines = element.text.normalize("NFC").replace(/\r\n?/g, "\n").replaceAll("\t", "    ").split("\n");
+      const lineHeight = element.fontSizeMm * 1.2;
+      const spans = lines.map((line, index) => `<tspan x="${point.xMm}" y="${point.yMm + index * lineHeight}">${escapeXml(line)}</tspan>`).join("");
+      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" font-family="${escapeXml(svgFamily)}" font-size="${element.fontSizeMm}" font-kerning="none" font-variant-ligatures="none" xml:space="preserve" ${operationLook(layer)}${transform}>${spans}</text>`);
       continue;
     }
     const xMm = point.flipX ? point.xMm - element.widthMm : point.xMm;
@@ -283,14 +317,14 @@ export function renderSvg(input) {
     if (element.type === "line") {
       const endPoint = mapDocumentPoint(document, element.xMm + element.widthMm, element.yMm + element.heightMm);
       const transform = transformAttribute(element, (point.xMm + endPoint.xMm) / 2, (point.yMm + endPoint.yMm) / 2);
-      nodesByLayer.get(layer.id).push(`<line id="${escapeXml(element.id)}" x1="${point.xMm}" y1="${point.yMm}" x2="${endPoint.xMm}" y2="${endPoint.yMm}" fill="none" stroke="${layer.color}"${transform}/>`);
+      nodesByLayer.get(layer.id).push(`<line id="${escapeXml(element.id)}" x1="${point.xMm}" y1="${point.yMm}" x2="${endPoint.xMm}" y2="${endPoint.yMm}" ${operationLook({ ...layer, operation: layer.operation === "fill" ? "engrave" : layer.operation })}${transform}/>`);
       continue;
     }
     const centerX = xMm + element.widthMm / 2;
     const centerY = yMm + element.heightMm / 2;
     const transform = transformAttribute(element, centerX, centerY);
     if (element.type === "ellipse") {
-      nodesByLayer.get(layer.id).push(`<ellipse id="${escapeXml(element.id)}" cx="${centerX}" cy="${centerY}" rx="${element.widthMm / 2}" ry="${element.heightMm / 2}" fill="${fill}" stroke="${layer.color}"${transform}/>`);
+      nodesByLayer.get(layer.id).push(`<ellipse id="${escapeXml(element.id)}" cx="${centerX}" cy="${centerY}" rx="${element.widthMm / 2}" ry="${element.heightMm / 2}" ${operationLook(layer)}${transform}/>`);
       continue;
     }
     if (element.type === "path") {
@@ -307,10 +341,28 @@ export function renderSvg(input) {
       const pathTransform = transformAttribute(element, point.xMm - (point.flipX ? element.widthMm / 2 : -element.widthMm / 2),
         point.yMm - (point.flipY ? element.heightMm / 2 : -element.heightMm / 2));
       const power = element.powerPercent === undefined ? "" : ` data-power-percent="${element.powerPercent}"`;
+      const layerColored = element.fillColorMode === "layer" || element.strokeColorMode === "layer";
+      const machineFaithful = element.fillColorMode !== "image" && element.strokeColorMode !== "image"
+        && (layerColored || element.color === undefined);
+      if (machineFaithful) {
+        const noModes = element.fillColorMode === undefined && element.strokeColorMode === undefined;
+        const fillIntent = noModes || element.fillColorMode === "layer";
+        const strokeIntent = !noModes && element.strokeColorMode === "layer";
+        const isFill = layer.operation === "fill";
+        const fillOn = fillIntent && isFill;
+        const strokeOn = noModes ? !isFill : strokeIntent ? !(fillIntent && isFill) : fillIntent && !isFill;
+        const width = 0.2;
+        const look = strokeOn
+          ? operationLook({ ...layer, operation: isFill ? "engrave" : layer.operation }, width)
+          : `fill="${fillOn ? layer.color : "none"}" stroke="none"`;
+        const paint = strokeOn && fillOn ? look.replace('fill="none"', `fill="${layer.color}"`) : look;
+        nodesByLayer.get(layer.id).push(`<path id="${escapeXml(element.id)}" d="${escapeXml(path.encode())}" ${paint}${power}${pathTransform}/>`);
+        continue;
+      }
       const pathFill = element.fillColorMode === "none"
         ? "none"
         : element.fillColorMode === "layer"
-          ? layer.color
+          ? fill
           : element.color ?? fill;
       const pathStroke = element.strokeColorMode === "none"
         ? "none"
@@ -331,7 +383,7 @@ export function renderSvg(input) {
       nodesByLayer.get(layer.id).push(`<image id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" href="${escapeXml(element.svgDataUri)}" preserveAspectRatio="xMidYMid meet"${transform}/>`);
       continue;
     }
-    nodesByLayer.get(layer.id).push(`<rect id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" fill="${fill}" stroke="${layer.color}"${transform}/>`);
+    nodesByLayer.get(layer.id).push(`<rect id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" ${operationLook(layer)}${transform}/>`);
   }
   const layerGroups = document.layers.map((layer) =>
     `<g data-layer-id="${escapeXml(layer.id)}" data-layer-name="${escapeXml(layer.name)}" data-operation="${layer.operation}" data-color="${layer.color}" data-feed-mm-per-minute="${layer.feedMmPerMinute}" data-power-percent="${layer.powerPercent}" data-passes="${layer.passes}" data-fill-spacing-mm="${layer.fillSpacingMm}" data-fill-algorithm="${layer.fillAlgorithm}" data-object-order="${layer.objectOrder}" data-enabled="${layer.enabled}" data-visible="${layer.visible}" data-locked="${layer.locked}">${nodesByLayer.get(layer.id).join("\n")}</g>`
@@ -340,6 +392,7 @@ export function renderSvg(input) {
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="http://www.w3.org/2000/svg" data-commburn-version="1" width="${document.widthMm}mm" height="${document.heightMm}mm" viewBox="0 0 ${document.widthMm} ${document.heightMm}">`,
+    fontStyle,
     `<g fill="#172033" stroke-linecap="round" stroke-linejoin="round">`,
     ...layerGroups,
     `</g>`,
@@ -354,6 +407,18 @@ function distanceBetween(start, end) {
 
 function mapPoints(document, points) {
   return points.map(([xMm, yMm]) => mapDocumentPoint(document, xMm, yMm));
+}
+
+function mapTextOutlines(document, paths, bounds) {
+  const minX = bounds.xMm;
+  const maxX = bounds.xMm + bounds.widthMm;
+  const minY = bounds.yMm;
+  const maxY = bounds.yMm + bounds.heightMm;
+  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  return paths.map((path) => mapPoints(document, path.map(([x, y]) => [
+    flipX ? minX + maxX - x : x,
+    flipY ? minY + maxY - y : y
+  ])));
 }
 
 function flattenVectorPath(element) {
@@ -433,7 +498,7 @@ function fillPaths(element, algorithm, spacingMm) {
   const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
   const columnCount = Math.floor(element.widthMm / spacingMm) + 1;
   const usesHorizontal = ["horizontal-serpentine", "horizontal-unidirectional", "crosshatch"].includes(algorithm);
-  const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
+  const usesVertical = ["vertical-serpentine", "vertical-unidirectional", "crosshatch"].includes(algorithm);
   if ((usesHorizontal && rowCount > 50000) || (usesVertical && columnCount > 50000)
     || ((usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0)) > 50000) {
     throw new RangeError(`O preenchimento de ${element.id} excede 50.000 linhas de varredura; aumente o espaçamento.`);
@@ -450,7 +515,7 @@ function fillPaths(element, algorithm, spacingMm) {
   if (usesVertical) {
     for (let column = 0; column < columnCount; column += 1) {
       const xMm = Math.min(element.xMm + column * spacingMm, element.xMm + element.widthMm);
-      const reverse = column % 2 === 1;
+      const reverse = algorithm !== "vertical-unidirectional" && column % 2 === 1;
       vertical.push(reverse
         ? [[xMm, element.yMm + element.heightMm], [xMm, element.yMm]]
         : [[xMm, element.yMm], [xMm, element.yMm + element.heightMm]]);
@@ -459,16 +524,42 @@ function fillPaths(element, algorithm, spacingMm) {
   return [...horizontal, ...vertical];
 }
 
-function fillVectorPaths(element, algorithm, spacingMm) {
-  const polygons = flattenVectorPath(element);
+const DIAGONAL_FILL_ANGLES = Object.freeze({ "diagonal-serpentine": [45], "diagonal-crosshatch": [45, -45] });
+
+// Diagonal fills rotate the shape, scan it horizontally, then rotate the routes back.
+function diagonalFillPaths(element, polygons, algorithm, spacingMm) {
+  const routes = [];
+  for (const degrees of DIAGONAL_FILL_ANGLES[algorithm]) {
+    const radians = degrees * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const rotated = polygons.map((points) => points.map(([x, y]) => [x * cos + y * sin, -x * sin + y * cos]));
+    const flat = rotated.flat();
+    const minX = Math.min(...flat.map((point) => point[0]));
+    const minY = Math.min(...flat.map((point) => point[1]));
+    const scanned = fillVectorPaths({
+      id: element.id,
+      xMm: minX,
+      yMm: minY,
+      widthMm: Math.max(...flat.map((point) => point[0])) - minX,
+      heightMm: Math.max(...flat.map((point) => point[1])) - minY
+    }, "horizontal-serpentine", spacingMm, rotated);
+    for (const route of scanned) routes.push(route.map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]));
+  }
+  return routes;
+}
+
+function fillVectorPaths(element, algorithm, spacingMm, polygonsOverride) {
+  const polygons = polygonsOverride ?? flattenVectorPath(element);
   if (!polygons.length || polygons.some((points) => points.length < 4
     || points[0][0] !== points.at(-1)[0] || points[0][1] !== points.at(-1)[1])) {
     throw new RangeError(`GRBL fill requires closed vector paths; path ${element.id} is open or degenerate`);
   }
+  if (DIAGONAL_FILL_ANGLES[algorithm]) return diagonalFillPaths(element, polygons, algorithm, spacingMm);
   const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
   const columnCount = Math.floor(element.widthMm / spacingMm) + 1;
   const usesHorizontal = ["horizontal-serpentine", "horizontal-unidirectional", "crosshatch"].includes(algorithm);
-  const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
+  const usesVertical = ["vertical-serpentine", "vertical-unidirectional", "crosshatch"].includes(algorithm);
   if ((usesHorizontal && rowCount > 50000) || (usesVertical && columnCount > 50000)
     || ((usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0)) > 50000) {
     throw new RangeError(`O preenchimento de ${element.id} excede 50.000 linhas de varredura; aumente o espaçamento.`);
@@ -553,34 +644,103 @@ function fillVectorPaths(element, algorithm, spacingMm) {
   }
   if (usesVertical) {
     visitScanlines(0, element.xMm, element.widthMm, columnCount, (column, xMm, spans) => {
-      const reverse = column % 2 === 1;
+      const reverse = algorithm !== "vertical-unidirectional" && column % 2 === 1;
       appendSpans(0, xMm, spans, reverse);
     });
   }
   return paths;
 }
 
-function createElementWorkPaths(document, layer, element) {
-  const outline = [
-    [element.xMm, element.yMm],
-    [element.xMm + element.widthMm, element.yMm],
-    [element.xMm + element.widthMm, element.yMm + element.heightMm],
-    [element.xMm, element.yMm + element.heightMm],
-    [element.xMm, element.yMm]
-  ];
-  const sourcePaths = layer.operation === "fill"
-    ? element.type === "rect"
-      ? fillPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
-      : fillVectorPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
-    : element.type === "path"
-      ? flattenVectorPath(element)
-      : [outline];
-  if (sourcePaths.length * layer.passes > 100000) {
-    throw new RangeError(`A camada ${layer.name} excede 100.000 trajetórias; aumente o espaçamento ou reduza o número de passagens.`);
+// Mirrors the SVG transform (rotate, skewX, skewY around the object centre) in document space,
+// before mapping to machine coordinates, so rotation never reverses with the origin or axis inversions.
+function transformDocumentPoints(element, points) {
+  const { rotationDeg, skewXDeg, skewYDeg } = element;
+  if (rotationDeg === 0 && skewXDeg === 0 && skewYDeg === 0) return points;
+  const centerX = element.type === "text" ? element.xMm : element.xMm + element.widthMm / 2;
+  const centerY = element.type === "text" ? element.yMm : element.yMm + element.heightMm / 2;
+  const radians = rotationDeg * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const tanX = Math.tan(skewXDeg * Math.PI / 180);
+  const tanY = Math.tan(skewYDeg * Math.PI / 180);
+  return points.map(([x, y]) => {
+    const x0 = x - centerX;
+    const y0 = y - centerY;
+    // skewX(a) skewY(b): x' = x + tan(a) y ; y' = tan(b) x' + y
+    const sx = x0 + tanX * y0;
+    const sy = tanY * sx + y0;
+    return [Number((centerX + cos * sx - sin * sy).toFixed(6)), Number((centerY + sin * sx + cos * sy).toFixed(6))];
+  });
+}
+
+function createImageWorkPaths(document, layer, element, raster, mode) {
+  if (element.rotationDeg || element.skewXDeg || element.skewYDeg || element.flipX || element.flipY) {
+    throw new CommBurnRangeError("grbl.unsupportedGeometry", {}, { message: "Image engraving supports only untransformed images" });
   }
+  const decoded = decodeRaster(element.id, raster);
+  const { levels, maxLevel } = rasterLevels(decoded, mode);
+  const pixelWidth = element.widthMm / decoded.widthPx;
+  const pixelHeight = element.heightMm / decoded.heightPx;
   const workPaths = [];
   for (let pass = 1; pass <= layer.passes; pass += 1) {
-    for (const points of sourcePaths) {
+    for (let row = 0; row < decoded.heightPx; row += 1) {
+      const runs = rasterRowRuns(levels, decoded.widthPx, row);
+      if (runs.length === 0) continue;
+      const yMm = element.yMm + (row + 0.5) * pixelHeight;
+      const ordered = row % 2 === 0 ? runs : runs.map(({ fromPx, toPx, level }) => ({ fromPx: toPx, toPx: fromPx, level })).reverse();
+      const xs = [ordered[0].fromPx, ...ordered.map(({ toPx }) => toPx)].map((px) => element.xMm + px * pixelWidth);
+      workPaths.push({
+        kind: "work",
+        elementId: element.id,
+        layerId: layer.id,
+        operation: "fill",
+        algorithm: "raster",
+        pass,
+        powerPercent: 0,
+        segmentPowerFractions: ordered.map(({ level }) => level / maxLevel),
+        points: mapPoints(document, xs.map((xMm) => [xMm, yMm]))
+      });
+    }
+  }
+  return workPaths;
+}
+
+function createElementWorkPaths(document, layer, element) {
+  let geometryElement = element;
+  if (element.type === "text") {
+    const pathData = createTextOutlinePathData(element);
+    if (!pathData) return [];
+    const bounds = new SVGPathData(pathData).getBounds();
+    geometryElement = {
+      ...element,
+      type: "path",
+      pathData,
+      xMm: bounds.minX,
+      yMm: bounds.minY,
+      widthMm: bounds.maxX - bounds.minX,
+      heightMm: bounds.maxY - bounds.minY
+    };
+  }
+  const outline = [
+    [geometryElement.xMm, geometryElement.yMm],
+    [geometryElement.xMm + geometryElement.widthMm, geometryElement.yMm],
+    [geometryElement.xMm + geometryElement.widthMm, geometryElement.yMm + geometryElement.heightMm],
+    [geometryElement.xMm, geometryElement.yMm + geometryElement.heightMm],
+    [geometryElement.xMm, geometryElement.yMm]
+  ];
+  const sourcePaths = layer.operation === "fill"
+    ? geometryElement.type === "rect" && DIAGONAL_FILL_ANGLES[layer.fillAlgorithm]
+      ? fillVectorPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm, [outline])
+    : geometryElement.type === "rect"
+      ? fillPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm)
+      : fillVectorPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm)
+    : geometryElement.type === "path"
+      ? flattenVectorPath(geometryElement)
+      : [outline];
+  const workPaths = [];
+  const mappedTextPaths = element.type === "text" ? mapTextOutlines(document, sourcePaths, geometryElement) : null;
+  for (let pass = 1; pass <= layer.passes; pass += 1) {
+    for (const [sourceIndex, points] of sourcePaths.entries()) {
       workPaths.push({
         kind: "work",
         elementId: element.id,
@@ -589,18 +749,47 @@ function createElementWorkPaths(document, layer, element) {
         algorithm: layer.operation === "fill" ? layer.fillAlgorithm : "outline",
         pass,
         ...(element.powerPercent === undefined ? {} : { powerPercent: element.powerPercent }),
-        points: mapPoints(document, points)
+        points: mappedTextPaths?.[sourceIndex] ?? mapPoints(document, transformDocumentPoints(element, points))
       });
     }
   }
   return workPaths;
 }
 
+// A closed contour can begin at any vertex; begin at the one nearest the head so the job starts at the chosen origin.
+function startClosedPathNear(points, head) {
+  const last = points.length - 1;
+  if (last < 3 || distanceBetween(points[0], points[last]) > 1e-9) return points;
+  let best = 0;
+  for (let index = 1; index < last; index += 1) {
+    if (distanceBetween(points[index], head) < distanceBetween(points[best], head) - 1e-9) best = index;
+  }
+  if (best === 0) return points;
+  const loop = points.slice(0, last);
+  return [...loop.slice(best), ...loop.slice(0, best), loop[best]];
+}
+
 function orderLayerElements(document, layer, elements, workByElement, startPoint) {
   if (layer.objectOrder === "document") return elements;
   const distanceFromCenter = (element) => {
-    const centerX = element.xMm + element.widthMm / 2;
-    const centerY = element.yMm + element.heightMm / 2;
+    let centerX = element.xMm + element.widthMm / 2;
+    let centerY = element.yMm + element.heightMm / 2;
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerY)) {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (const { points } of workByElement.get(element.id)) {
+        for (const point of points) {
+          minX = Math.min(minX, point.xMm);
+          maxX = Math.max(maxX, point.xMm);
+          minY = Math.min(minY, point.yMm);
+          maxY = Math.max(maxY, point.yMm);
+        }
+      }
+      centerX = (minX + maxX) / 2;
+      centerY = (minY + maxY) / 2;
+    }
     return Math.hypot(centerX - document.widthMm / 2, centerY - document.heightMm / 2);
   };
   if (layer.objectOrder === "center-out") {
@@ -612,7 +801,7 @@ function orderLayerElements(document, layer, elements, workByElement, startPoint
 
   const remaining = [...elements];
   const ordered = [];
-  let current = startPoint ?? mapDocumentPoint(document, 0, 0);
+  let current = startPoint ?? { xMm: 0, yMm: 0 };
   while (remaining.length > 0) {
     let nearestIndex = 0;
     let nearestDistance = Infinity;
@@ -631,8 +820,108 @@ function orderLayerElements(document, layer, elements, workByElement, startPoint
   return ordered;
 }
 
+function paintPartKey(element) {
+  return [element.pathData, element.xMm, element.yMm, element.widthMm, element.heightMm].join("|");
+}
+
+// A fill part and a stroke part imported from one SVG path share geometry; the layer operation
+// decides which one is machined so the same contour is never burned twice.
+function withoutShadowedPaintParts(layerElements, layer) {
+  const isPart = (element, fillMode, strokeMode) => element.type === "path"
+    && element.fillColorMode === fillMode && element.strokeColorMode === strokeMode;
+  const keep = (element) => {
+    const loser = layer.operation === "fill" ? isPart(element, "none", "layer") : isPart(element, "layer", "none");
+    const winner = layer.operation === "fill" ? ["layer", "none"] : ["none", "layer"];
+    return !loser || !layerElements.some((other) => other !== element && isPart(other, ...winner)
+      && paintPartKey(other) === paintPartKey(element));
+  };
+  return layerElements.filter(keep);
+}
+
+export const START_FROM_MODES = Object.freeze(["absolute", "objects"]);
+export const START_ANCHORS = Object.freeze(["top-left", "top-right", "bottom-left", "bottom-right", "center"]);
+export const WORK_COORDINATE_SYSTEMS = Object.freeze(["G54", "G55", "G56", "G57", "G58", "G59"]);
+
+// "absolute" keeps machine coordinates from the chosen origin; "objects" makes the job start at the
+// chosen anchor of the objects' bounding box, so the head position set by the user becomes X0 Y0.
 export function planGrblJob(input, settings) {
+  const startFrom = settings.startFrom ?? "absolute";
+  if (!START_FROM_MODES.includes(startFrom)) {
+    throw new CommBurnRangeError("grbl.invalidStartFrom", { startFrom }, { message: `Unsupported start mode: ${startFrom}` });
+  }
+  const anchor = settings.startAnchor ?? "top-left";
+  if (!START_ANCHORS.includes(anchor)) {
+    throw new CommBurnRangeError("grbl.invalidStartAnchor", { anchor }, { message: `Unsupported start anchor: ${anchor}` });
+  }
+  const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 });
+  if (startFrom === "absolute") return absolute;
+  const points = absolute.paths.filter(({ kind }) => kind === "work").flatMap((path) => path.points);
+  const xs = points.map((point) => point.xMm);
+  const ys = points.map((point) => point.yMm);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const { flipX, flipY } = mapDocumentPoint(createDocument(input), 0, 0);
+  const horizontal = anchor.endsWith("left") ? "left" : anchor.endsWith("right") ? "right" : "center";
+  const vertical = anchor.startsWith("top") ? "top" : anchor.startsWith("bottom") ? "bottom" : "center";
+  const offset = {
+    xMm: horizontal === "center" ? (minX + maxX) / 2 : (horizontal === "left") !== flipX ? minX : maxX,
+    yMm: vertical === "center" ? (minY + maxY) / 2 : (vertical === "top") !== flipY ? minY : maxY
+  };
+  return buildGrblJob(input, settings, offset);
+}
+
+// Where the job starts, ends and where machine X0 Y0 sits, in document (STAGE) millimetres,
+// plus the document direction of +X and +Y, so the editor can draw the same reference the G-code uses.
+// Machine-space plan points back in document (STAGE) millimetres, so previews match what the editor shows
+// whatever the origin corner, axis inversions or start offset are. G-code itself stays in machine space.
+export function planToDocumentSpace(input, plan) {
   const document = createDocument(input);
+  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm ?? { xMm: 0, yMm: 0 };
+  const toDocument = (point) => ({
+    xMm: flipX ? document.widthMm - (point.xMm + offsetX) : point.xMm + offsetX,
+    yMm: flipY ? document.heightMm - (point.yMm + offsetY) : point.yMm + offsetY
+  });
+  return { ...plan, paths: plan.paths.map((path) => ({ ...path, points: path.points.map(toDocument) })) };
+}
+
+// Where the job starts, ends and where machine X0 Y0 sits, in document (STAGE) millimetres,
+// plus the document direction of +X and +Y, so the editor can draw the same reference the G-code uses.
+export function jobReferencePoints(input, settings) {
+  const plan = planGrblJob(input, settings);
+  const work = planToDocumentSpace(input, plan).paths.filter(({ kind }) => kind === "work");
+  if (work.length === 0) return null;
+  const document = createDocument(input);
+  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm;
+  const corners = work.flatMap(({ points }) => points);
+  const xs = corners.map(({ xMm }) => xMm);
+  const ys = corners.map(({ yMm }) => yMm);
+  return {
+    bounds: { minXMm: Math.min(...xs), minYMm: Math.min(...ys), maxXMm: Math.max(...xs), maxYMm: Math.max(...ys) },
+    origin: {
+      xMm: flipX ? document.widthMm - offsetX : offsetX,
+      yMm: flipY ? document.heightMm - offsetY : offsetY
+    },
+    start: work[0].points[0],
+    end: work.at(-1).points.at(-1),
+    xDirection: flipX ? -1 : 1,
+    yDirection: flipY ? -1 : 1
+  };
+}
+
+function buildGrblJob(input, settings, offset) {
+  const document = createDocument(input);
+  const rasters = settings.rasters ?? {};
+  const rasterMode = settings.imageMode ?? "grayscale";
+  const isRaster = (element) => element.type === "image" && rasters[element.id] !== undefined;
+  const shiftNumber = (value, by) => by === 0 ? value : Number((value - by).toFixed(6));
+  const shift = (point) => offset.xMm === 0 && offset.yMm === 0
+    ? point
+    : { ...point, xMm: shiftNumber(point.xMm, offset.xMm), yMm: shiftNumber(point.yMm, offset.yMm) };
+  const coordinateSystem = settings.workCoordinateSystem;
+  if (coordinateSystem !== undefined && !WORK_COORDINATE_SYSTEMS.includes(coordinateSystem)) {
+    throw new CommBurnRangeError("grbl.invalidWorkCoordinateSystem", { coordinateSystem }, { message: `Unsupported work coordinate system: ${coordinateSystem}` });
+  }
   const feedOverride = settings.feedMmPerMinute === undefined
     ? null
     : positiveNumber(settings.feedMmPerMinute, "feedMmPerMinute");
@@ -643,54 +932,55 @@ export function planGrblJob(input, settings) {
   }
   const activeLayers = document.layers.filter((layer) => layer.enabled);
   const activeLayerIds = new Set(activeLayers.map((layer) => layer.id));
-  const elements = document.elements.filter((element) => activeLayerIds.has(element.layerId));
-  if (elements.length === 0) throw new RangeError("The job has no objects in enabled layers");
-  if (elements.some((element) => !["rect", "path"].includes(element.type))) {
-    throw new RangeError("GRBL supports rectangles and editable vector paths only; convert images to paths and outline text before export");
-  }
-  if (elements.some((element) => element.rotationDeg !== 0 || element.skewXDeg !== 0 || element.skewYDeg !== 0)) {
-    throw new RangeError("GRBL output currently supports untransformed rectangles only");
+  const elements = document.elements.filter((element) => activeLayerIds.has(element.layerId)
+    && (element.type !== "text" || element.text.trim().length > 0));
+  if (elements.length === 0) throw new CommBurnRangeError("grbl.noObjects", {}, { message: "The job has no objects in enabled layers" });
+  if (elements.some((element) => !["rect", "path", "text"].includes(element.type) && !isRaster(element))) {
+    throw new CommBurnRangeError("grbl.unsupportedGeometry", {}, { message: "GRBL supports rectangles, editable vector paths, and editable text in the built-in engraving fonts" });
   }
 
   const gcode = ["G21", "G90", "G94", "M5"];
+  if (coordinateSystem) gcode.splice(1, 0, coordinateSystem);
   const paths = [];
   let previousPoint = null;
   let travelDistanceMm = 0;
   let workDistanceMm = 0;
   const estimatedWorkTimeSecondsByOperation = { engrave: 0, cut: 0, fill: 0 };
   for (const layer of activeLayers) {
-    const layerElements = elements.filter((element) => element.layerId === layer.id);
+    const layerElements = withoutShadowedPaintParts(elements.filter((element) => element.layerId === layer.id), layer);
     if (layerElements.length === 0) continue;
     const feedMmPerMinute = feedOverride ?? layer.feedMmPerMinute;
     const powerPercent = powerOverride ?? layer.powerPercent;
     const power = Math.round(maxSpindleSpeed * powerPercent / 100);
+    const workByElement = new Map(layerElements.map((element) => [
+      element.id,
+      isRaster(element)
+        ? createImageWorkPaths(document, layer, element, rasters[element.id], rasterMode)
+        : createElementWorkPaths(document, layer, element)
+    ]));
     for (const element of layerElements) {
-      const corners = mapPoints(document, [
-        [element.xMm, element.yMm],
-        [element.xMm + element.widthMm, element.yMm],
-        [element.xMm + element.widthMm, element.yMm + element.heightMm],
-        [element.xMm, element.yMm + element.heightMm]
-      ]);
-      for (const point of corners) {
+      const points = workByElement.get(element.id).flatMap(({ points: pathPoints }) => pathPoints);
+      for (const point of points) {
         if (point.xMm < 0 || point.xMm > document.widthMm || point.yMm < 0 || point.yMm > document.heightMm) {
-          throw new RangeError(`Element ${element.id} extends outside the document work area`);
+          throw new CommBurnRangeError("grbl.outsideWorkArea", { id: element.id }, { message: `Element ${element.id} extends outside the document work area` });
         }
       }
     }
-    const workByElement = new Map(layerElements.map((element) => [
-      element.id,
-      createElementWorkPaths(document, layer, element)
-    ]));
     if ([...workByElement.values()].every((workPaths) => workPaths.length === 0)) {
       throw new RangeError(`Layer ${layer.name} has no fillable paths at the selected spacing`);
     }
-    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint);
+    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint ?? { xMm: offset.xMm, yMm: offset.yMm });
     for (const element of orderedElements) {
-      for (const workPath of workByElement.get(element.id)) {
+      for (const sourceWorkPath of workByElement.get(element.id)) {
+        const head = previousPoint ?? { xMm: offset.xMm, yMm: offset.yMm };
+        const workPath = sourceWorkPath.operation === "fill"
+          ? sourceWorkPath
+          : { ...sourceWorkPath, points: startClosedPathNear(sourceWorkPath.points, head) };
         if (paths.length >= 100000) {
           throw new RangeError("O trabalho excede o limite seguro de 100.000 trajetórias GRBL; reduza objetos/passagens ou aumente o espaçamento do preenchimento.");
         }
         const start = workPath.points[0];
+        const shiftedPath = { ...workPath, points: workPath.points.map(shift) };
         if (previousPoint) {
           const travelMm = distanceBetween(previousPoint, start);
           if (travelMm > 0) {
@@ -701,29 +991,31 @@ export function planGrblJob(input, settings) {
               kind: "travel",
               elementId: element.id,
               layerId: layer.id,
-              points: [previousPoint, start]
+              points: [shift(previousPoint), shift(start)]
             });
             travelDistanceMm += travelMm;
           }
         }
         gcode.push("M5");
-        gcode.push(`G0 X${start.xMm} Y${start.yMm}`);
+        gcode.push(`G0 X${shiftedPath.points[0].xMm} Y${shiftedPath.points[0].yMm}`);
         const pathPower = workPath.powerPercent ?? powerPercent;
         gcode.push(`M4 S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
         gcode.push(`G1 F${feedMmPerMinute}`);
-        for (const point of workPath.points.slice(1)) {
-          gcode.push(`G1 X${point.xMm} Y${point.yMm}`);
+        for (const [pointIndex, point] of shiftedPath.points.slice(1).entries()) {
+          const fraction = workPath.segmentPowerFractions?.[pointIndex];
+          const spindle = fraction === undefined ? "" : ` S${Math.round(maxSpindleSpeed * powerPercent / 100 * fraction)}`;
+          gcode.push(`G1 X${point.xMm} Y${point.yMm}${spindle}`);
         }
-        paths.push(workPath);
+        paths.push(shiftedPath);
         let pathDistanceMm = 0;
         for (let index = 1; index < workPath.points.length; index += 1) {
           const distanceMm = distanceBetween(workPath.points[index - 1], workPath.points[index]);
           workDistanceMm += distanceMm;
           pathDistanceMm += distanceMm;
         }
-        estimatedWorkTimeSecondsByOperation[layer.operation] += pathDistanceMm / feedMmPerMinute * 60;
+        estimatedWorkTimeSecondsByOperation[workPath.operation] += pathDistanceMm / feedMmPerMinute * 60;
         previousPoint = workPath.points.at(-1);
-        if (layer.operation !== "fill") gcode.push("M5");
+        if (workPath.operation !== "fill") gcode.push("M5");
       }
     }
   }
@@ -736,6 +1028,7 @@ export function planGrblJob(input, settings) {
       rapidMoveCount: paths.filter((path) => path.kind === "travel").length,
       workDistanceMm,
       travelDistanceMm,
+      startOffsetMm: { xMm: offset.xMm, yMm: offset.yMm },
       estimatedWorkTimeSecondsByOperation
     }
   };

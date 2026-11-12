@@ -1,15 +1,26 @@
-import { createDocument, planGrblJob, renderSvg } from "./core/document.js";
+import { createDocument, jobReferencePoints, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
+import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { parseProject, serializeProject } from "./core/project.js";
 import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
 import { CanvasController } from "./ui/canvas-controller.js";
 import { DocumentHistory } from "./ui/history.js";
 import { installShortcuts, SHORTCUTS } from "./ui/shortcuts.js";
-import { connectToolbar } from "./ui/toolbar.js";
+import { connectToolbar, TOOLS } from "./ui/toolbar.js";
 import { installTooltips } from "./ui/tooltips.js";
 import { LayersPanel } from "./ui/layers-panel.js";
 import { PathEditor } from "./ui/path-editor.js";
-import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "./core/svg-import.js";
+import { getInspectorSections } from "./ui/inspector-state.js";
+import { loadDesktopPlugins } from "./ui/plugins.js";
+import { translateDom } from "./ui/dom-i18n.js";
+import {
+  clearNumberFieldError,
+  showNumberFieldError,
+  validateNumberField
+} from "./ui/field-validation.js";
+import enCatalog from "./locales/en.js";
+import ptBrCatalog from "./locales/pt-BR.js";
+import { fitImportedToTable, importSvgTree, validateSvgSource } from "./core/svg-import.js";
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 import {
   createMachinePlayback,
@@ -19,10 +30,26 @@ import {
 } from "./ui/machine-preview.js";
 import {
   createPresentationDocument,
-  createPresentationSimulationDocument
+  createPresentationSimulationDocument,
+  PRESENTATION_STEPS
 } from "./ui/presentation.js";
 
 const byId = (id) => document.getElementById(id);
+const savedLocale = (() => {
+  try { return localStorage.getItem("commburn.locale"); } catch { return null; }
+})();
+const i18n = createI18n({
+  locale: savedLocale || navigator.languages,
+  catalogs: { en: enCatalog, "pt-BR": ptBrCatalog },
+  fallbackLocale: "en",
+  onMissing: ({ key, locale }) => console.debug(`Missing translation: ${locale}:${key}`)
+});
+window.history.scrollRestoration = "manual";
+window.addEventListener("pageshow", () => {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}, { once: true });
 const SIMULATOR_MAX_SPINDLE_SPEED = 1000;
 const IMAGE_EDITOR_PT_BR = {
   id: "pt-BR",
@@ -96,6 +123,9 @@ const objects = byId("objects");
 const removeButton = byId("remove-selection");
 const selectionStatus = byId("selection-status");
 const notice = byId("notice");
+const projectNameInput = byId("project-name");
+const languageSelect = byId("language-select");
+let projectNameIsUserValue = false;
 const serialPathInput = byId("serial-path");
 const connectButton = byId("connect-machine");
 const disconnectButton = byId("disconnect-machine");
@@ -103,9 +133,11 @@ const simulateMachineButton = byId("simulate-machine");
 const startMachineButton = byId("start-machine-job");
 const holdMachineButton = byId("hold-machine-job");
 const machineState = byId("machine-state");
+let machineStateParts = [() => i18n.t("ui.machine.disconnected")];
 const safetyCheckbox = byId("safety-confirmed");
 
 let currentDocument = createDocument({ widthMm: 180, heightMm: 120 });
+const generatedLayerNames = new Map([[currentDocument.layers[0].id, { kind: "engraving" }]]);
 let selectedId = null;
 let selectedIds = [];
 let activeLayerId = currentDocument.layers[0].id;
@@ -131,10 +163,26 @@ let machineSimulationCompletedLines = 0;
 let machineSimulationCanvasSize = null;
 let statusPollTimer;
 let presentationActive = false;
+let presentationSnapshot = null;
 let presentationPaused = false;
 let presentationRun = 0;
-let presentationSnapshot = null;
 let presentationTarget = null;
+
+function applyInterfaceLocale() {
+  document.documentElement.lang = i18n.locale;
+  document.title = i18n.t("app.title");
+  translateDom(document, i18n);
+  languageSelect.value = i18n.locale;
+  if (!projectNameIsUserValue) projectNameInput.value = i18n.t("app.unsavedProject");
+  toolbar.setTranslator(i18n.t);
+  layersPanel?.setTranslator(i18n.t);
+  renderActiveToolStatus();
+  renderSelectionStatus();
+  renderInspectorLocale();
+  renderLayersForLocale();
+  updateMachineControls();
+  renderMachineState();
+}
 let presentationInternalClose = false;
 const history = new DocumentHistory(currentDocument);
 const pathEditor = new PathEditor(byId("path-editor-dialog"));
@@ -149,12 +197,32 @@ function readDocument() {
   });
 }
 
-function numberFrom(input, label, min = -Infinity) {
-  const value = Number(input.value);
-  if (!Number.isFinite(value) || value < min) {
-    throw new RangeError(`${label} deve ser ${min > 0 ? "maior que zero" : "um número válido"}.`);
+class FieldValidationError extends RangeError {
+  constructor(input, result, label) {
+    super(`${label} is invalid.`);
+    this.code = `ui.validation.${result.code}`;
+    this.input = input;
+    this.result = result;
   }
-  return value;
+}
+
+function numberFrom(input, label, min = -Infinity) {
+  const result = validateNumberField(input, { minimum: min });
+  if (!result.valid) {
+    showNumberFieldError(input, result, i18n.t, label);
+    input.focus({ preventScroll: true });
+    throw new FieldValidationError(input, result, label);
+  }
+  clearNumberFieldError(input);
+  return result.value;
+}
+
+for (const input of document.querySelectorAll('input[type="number"]:not([data-layer-property])')) {
+  input.addEventListener("input", () => {
+    const result = validateNumberField(input);
+    if (result.valid) clearNumberFieldError(input);
+    else if (input.getAttribute("aria-invalid") === "true") showNumberFieldError(input, result, i18n.t);
+  });
 }
 
 function commitHistory() {
@@ -196,18 +264,17 @@ function syncInspector() {
   const selected = currentDocument.elements.find((element) => element.id === selectedId);
   const isMultiple = selectedElements.length > 1;
   inspector.hidden = selectedElements.length === 0;
-  const isText = selected?.type === "text";
-  const isPath = selected?.type === "path";
-  const isImage = selected?.type === "image";
+  const { isText, isPath, isImage, isSvgImage } = getInspectorSections(selected);
   byId("text-inspector-fields").hidden = !isText;
   byId("path-inspector-fields").hidden = !isPath;
   byId("image-inspector-fields").hidden = !isImage;
+  byId("svg-inspector-fields").hidden = !isSvgImage;
   byId("single-selection-fields").hidden = isMultiple;
   byId("multi-selection-message").hidden = !isMultiple;
   renderLayers();
   if (!selected) return;
   if (isMultiple) {
-    byId("inspector-kind").textContent = `${selectedElements.length} objetos selecionados`;
+    byId("inspector-kind").textContent = i18n.t("ui.inspector.selectedCount", { count: selectedElements.length });
     const hasLockedLayer = selectedElements.some((element) =>
       currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked
     );
@@ -216,14 +283,18 @@ function syncInspector() {
     return;
   }
 
-  byId("inspector-kind").textContent = `${selected.type} · ${selected.id}`;
+  byId("inspector-kind").textContent = `${i18n.t(`ui.inspector.type.${selected.type}`)} · ${selected.id}`;
   byId("shape-properties").hidden = isText;
+  byId("object-lock-ratio-field").hidden = isText;
   byId("object-text").value = isText ? selected.text : "";
   byId("object-font").value = selected.fontFamily ?? "sans-serif";
   byId("object-x").value = selected.xMm;
   byId("object-y").value = selected.yMm;
   byId("object-width").value = selected.widthMm ?? "";
   byId("object-height").value = selected.heightMm ?? "";
+  const positiveDimensions = ["rect", "ellipse"].includes(selected.type);
+  byId("object-width").min = positiveDimensions ? "0.1" : "0";
+  byId("object-height").min = positiveDimensions ? "0.1" : "0";
   byId("object-rotation").value = selected.rotationDeg;
   byId("object-skew-x").value = selected.skewXDeg;
   byId("object-skew-y").value = selected.skewYDeg;
@@ -231,20 +302,76 @@ function syncInspector() {
   for (const input of inspector.querySelectorAll("input, textarea, select, button")) {
     input.disabled = layerLocked && input.id !== "object-layer";
   }
-  byId("object-layer").replaceChildren(...currentDocument.layers.map((layer) => new Option(layer.name, layer.id)));
+  byId("object-layer").replaceChildren(...currentDocument.layers.map((layer, index) => new Option(getLayerDisplayName(layer, index), layer.id)));
   byId("object-layer").value = selected.layerId;
   const imageLayer = currentDocument.layers.find((layer) => layer.id === selected.layerId);
-  byId("open-image-vectorizer").disabled = !isImage || layerLocked || imageLayer?.operation !== "engrave";
-  byId("open-image-vectorizer").title = imageLayer?.operation === "engrave"
-    ? "Converter esta imagem em trajetórias vetoriais com potência variável."
-    : "A conversão tonal exige uma camada configurada como Gravação.";
+  byId("open-image-vectorizer").disabled = !isImage || layerLocked;
   removeButton.disabled = layerLocked;
   byId("duplicate-selection").disabled = layerLocked;
 }
 
 function renderLayers() {
-  layersPanel?.render(currentDocument.layers, currentDocument.elements, activeLayerId);
+  const displayLayers = currentDocument.layers.map((layer, index) => ({
+    ...layer,
+    name: getLayerDisplayName(layer, index)
+  }));
+  layersPanel?.render(displayLayers, currentDocument.elements, activeLayerId);
   updateMachineControls();
+}
+
+function renderLayersForLocale() {
+  const active = document.activeElement?.closest("#layers-list [data-layer-property]");
+  const focusState = active ? {
+    layerId: active.closest("[data-layer-id]")?.dataset.layerId,
+    property: active.dataset.layerProperty,
+    value: active.type === "checkbox" ? active.checked : active.value,
+    selectionStart: active.type === "text" ? active.selectionStart : null,
+    selectionEnd: active.type === "text" ? active.selectionEnd : null
+  } : null;
+  renderLayers();
+  if (!focusState?.layerId) return;
+  const replacement = [...layersPanel.root.querySelectorAll("[data-layer-property]")].find((control) =>
+    control.dataset.layerProperty === focusState.property
+      && control.closest("[data-layer-id]")?.dataset.layerId === focusState.layerId
+  );
+  if (!replacement) return;
+  if (replacement.type === "checkbox") replacement.checked = focusState.value;
+  else replacement.value = focusState.value;
+  replacement.focus({ preventScroll: true });
+  if (focusState.selectionStart !== null && replacement.type === "text") {
+    replacement.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
+  }
+}
+
+function renderInspectorLocale() {
+  const selectedElements = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
+  const selected = selectedElements.at(-1);
+  const kind = byId("inspector-kind");
+  if (selectedElements.length > 1) {
+    kind.textContent = i18n.t("ui.inspector.selectedCount", { count: selectedElements.length });
+  } else if (selected) {
+    kind.textContent = `${i18n.t(`ui.inspector.type.${selected.type}`)} · ${selected.id}`;
+  } else {
+    kind.textContent = i18n.t("ui.inspector.selected");
+  }
+  const layerSelect = byId("object-layer");
+  const selectedLayerId = layerSelect.value;
+  layerSelect.replaceChildren(...currentDocument.layers.map((layer, index) => new Option(getLayerDisplayName(layer, index), layer.id)));
+  layerSelect.value = selectedLayerId;
+}
+
+function getLayerDisplayName(layer, index) {
+  const generated = generatedLayerNames.get(layer.id);
+  if (generated?.kind === "engraving") return i18n.t("ui.layers.defaultEngravingName");
+  if (generated?.kind === "numbered") return i18n.t("ui.layers.defaultName", { index: index + 1 });
+  if (generated?.kind === "copy") {
+    const sourceIndex = currentDocument.layers.findIndex((candidate) => candidate.id === generated.sourceId);
+    const source = currentDocument.layers[sourceIndex];
+    const sourceMarker = source && generatedLayerNames.get(source.id);
+    const sourceName = source && sourceMarker ? getLayerDisplayName(source, sourceIndex) : generated.sourceName;
+    return `${i18n.t("ui.layers.copyName", { name: sourceName })}${generated.suffix ?? ""}`;
+  }
+  return layer.name;
 }
 
 function selectObject(id) {
@@ -287,7 +414,7 @@ function updateSelected(patch, saveHistory = true, refreshInspector = true) {
     renderPreview();
     if (saveHistory) commitHistory();
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
@@ -309,12 +436,41 @@ function updateMany(updates, saveHistory = true) {
     renderPreview();
     if (saveHistory) commitHistory();
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
+function formatError(error) {
+  if (error?.message === "Request body is too large") return i18n.t("ui.machine.requestTooLarge");
+  return error?.code ? i18n.formatError(error) : error?.message ?? String(error);
+}
+
+function renderMachineState() {
+  machineState.textContent = machineStateParts.map((renderPart) => renderPart()).join("");
+}
+
+function setMachineState(key, values = {}) {
+  machineStateParts = [() => i18n.t(key, typeof values === "function" ? values() : values)];
+  renderMachineState();
+}
+
+function setMachineStateText(text) {
+  machineStateParts = [() => text];
+  renderMachineState();
+}
+
+function appendMachineState(key, values = {}) {
+  machineStateParts.push(() => ` ${i18n.t(key, typeof values === "function" ? values() : values)}`);
+  renderMachineState();
+}
+
 function showNotice(message) {
-  notice.textContent = message;
+  if (message instanceof FieldValidationError) {
+    showNumberFieldError(message.input, message.result, i18n.t, message.message);
+    message.input.focus({ preventScroll: true });
+    return;
+  }
+  notice.textContent = message instanceof Error ? formatError(message) : message;
   notice.classList.add("visible");
   clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => notice.classList.remove("visible"), 3000);
@@ -326,8 +482,15 @@ async function machineApi(path, method = "GET", body) {
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined
   });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? `Machine request failed (${response.status})`);
+  const text = await response.text();
+  let result = null;
+  try {
+    result = text ? JSON.parse(text) : null;
+  } catch {
+    result = null;
+  }
+  if (!response.ok) throw new Error(result?.error ?? `Machine request failed (${response.status})`);
+  if (result === null) throw new Error(`Machine request returned no JSON (${response.status})`);
   return result;
 }
 
@@ -344,8 +507,26 @@ function updateMachineControls() {
   byId("read-machine-settings").disabled = !machineConnected || machineSimulation || machineBusy;
   byId("machine-safety-check").hidden = machineSimulation;
   startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy;
-  startMachineButton.textContent = machineSimulation ? "Simular envio de contornos" : "Enviar contornos à máquina";
+  startMachineButton.textContent = i18n.t(machineSimulation ? "ui.machine.simulateJob" : "ui.machine.sendJob");
   holdMachineButton.disabled = !machineConnected || !machineBusy;
+  for (const id of ["read-position", "set-zero", "home-machine"]) byId(id).disabled = !machineConnected || machineBusy;
+  byId("start-anchor-field").hidden = byId("start-from").value !== "objects";
+}
+
+function renderSelectionStatus() {
+  selectionStatus.textContent = selectedIds.length === 0
+    ? i18n.t("ui.canvas.noSelection")
+    : selectedIds.length === 1
+      ? i18n.t("ui.canvas.selectionOne", { id: selectedId })
+      : i18n.t("ui.canvas.selectionCount", { count: selectedIds.length });
+}
+
+function renderActiveToolStatus() {
+  const tool = TOOLS.find((candidate) => candidate.id === activeTool);
+  const button = byId("action-toolbar").querySelector(`[data-tool="${activeTool}"]`);
+  const label = i18n.t(tool?.labelKey ?? "ui.tools.select.label");
+  const key = button?.querySelector("kbd")?.textContent ?? "";
+  byId("active-tool-status").textContent = i18n.t("ui.canvas.activeTool", { tool: label, key });
 }
 
 function applyControllerSettings(settings) {
@@ -357,13 +538,15 @@ function applyControllerSettings(settings) {
 
 function reportControllerSettings(result) {
   if (applyControllerSettings(result.settings)) {
-    machineState.textContent += ` Valor $30 lido: ${result.settings.$30}.`;
+    appendMachineState("ui.machine.settingsRead", { value: result.settings.$30 });
     updateMachineControls();
     return true;
   }
-  const details = result.settingsError ?? "A resposta não continha um valor $30 válido.";
-  const message = `Não foi possível ler $30. ${details} O campo continua editável para preenchimento manual.`;
-  machineState.textContent += ` ${message}`;
+  const details = result.settingsError ?? i18n.t("ui.machine.settingsInvalid");
+  const message = i18n.t("ui.machine.settingsFailure", { details });
+    appendMachineState("ui.machine.settingsFailure", () => ({
+      details: result.settingsError ?? i18n.t("ui.machine.settingsInvalid")
+    }));
   showNotice(message);
   updateMachineControls();
   return false;
@@ -376,15 +559,14 @@ async function restoreMachineConnection() {
     machineSimulation = state.simulated;
     machineBusy = state.busy;
     if (machineBusy) {
-      machineState.textContent = machineSimulation
-        ? `Simulação em andamento: ${state.jobStatus.completed}/${state.jobStatus.total}`
-        : `Envio em andamento: ${state.jobStatus.completed}/${state.jobStatus.total}`;
+      setMachineState(machineSimulation ? "ui.machine.simulationRunning" : "ui.machine.jobRunning", {
+        completed: state.jobStatus.completed,
+        total: state.jobStatus.total
+      });
       statusPollTimer = setInterval(pollMachineJob, 500);
       void pollMachineJob();
     } else if (machineConnected) {
-      machineState.textContent = machineSimulation
-        ? "Simulador GRBL conectado. Nenhum hardware ou laser será acionado."
-        : "Controlador GRBL conectado. Confirme a máquina antes de enviar.";
+      setMachineState(machineSimulation ? "ui.machine.simulatedConnected" : "ui.machine.connected");
       if (!machineSimulation && state.settings) applyControllerSettings(state.settings);
     }
     updateMachineControls();
@@ -393,11 +575,11 @@ async function restoreMachineConnection() {
         const result = await machineApi("/api/settings", "POST", {});
         reportControllerSettings(result);
       } catch (error) {
-        reportControllerSettings({ settingsError: error.message });
+        reportControllerSettings({ settingsError: formatError(error) });
       }
     }
   } catch {
-    machineState.textContent = "Estado da conexão indisponível neste modo de execução.";
+    setMachineState("ui.machine.disconnectedMode");
   }
 }
 
@@ -410,8 +592,8 @@ async function refreshPorts() {
     option.label = [port.path, port.manufacturer].filter(Boolean).join(" — ");
     return option;
   }));
-  if (warning) machineState.textContent = warning;
-  else if (ports.length === 0) machineState.textContent = "Nenhuma porta serial encontrada. Você também pode digitar o caminho manualmente.";
+  if (warning) setMachineStateText(warning);
+  else if (ports.length === 0) setMachineState("ui.machine.noPorts");
   return { warning };
 }
 
@@ -422,36 +604,118 @@ async function pollMachineJob() {
       renderMachineSimulationProgress(result.completed, result.total, result.state);
     }
     if (result.state === "running") {
-      machineState.textContent = machineSimulation
-        ? `Simulando comandos: ${result.completed}/${result.total}`
-        : `Enviando comandos: ${result.completed}/${result.total}`;
+      setMachineState(machineSimulation ? "ui.machine.simulationRunning" : "ui.machine.jobRunning", {
+        completed: result.completed,
+        total: result.total
+      });
       return;
     }
     clearInterval(statusPollTimer);
     statusPollTimer = undefined;
     machineBusy = false;
     if (result.state === "complete") {
-      machineState.textContent = machineSimulation
-        ? "Simulação concluída; nenhum comando foi enviado a uma máquina."
-        : "Trabalho enviado e confirmado pelo controlador.";
+        setMachineState(machineSimulation ? "ui.machine.simulationComplete" : "ui.machine.jobComplete");
       showNotice(machineSimulation
-        ? "Simulação concluída sem conexão com hardware."
-        : "Envio finalizado. Confirme a máquina antes de iniciar outro trabalho.");
+        ? i18n.t("ui.machine.simulationComplete")
+        : i18n.t("ui.machine.jobComplete"));
     } else if (result.state === "stopped") {
-      machineState.textContent = `Envio interrompido: ${result.error}`;
-      showNotice(`Envio interrompido: ${result.error}`);
+      setMachineState("ui.machine.sendInterrupted", () => ({ error: formatError(new Error(result.error)) }));
+      showNotice(machineState.textContent);
     } else {
-      machineState.textContent = "Conectado ao controlador GRBL.";
+      setMachineState("ui.machine.connected");
     }
     updateMachineControls();
   } catch (error) {
     clearInterval(statusPollTimer);
     statusPollTimer = undefined;
     machineBusy = false;
-    machineState.textContent = `Falha ao consultar o controlador: ${error.message}`;
+    setMachineState("ui.machine.controllerFailure", () => ({ error: formatError(error) }));
     updateMachineControls();
   }
 }
+
+byId("machine-timeline-play").addEventListener("click", toggleTimelinePlayback);
+byId("machine-timeline-scrub").addEventListener("input", (event) => {
+  stopTimelinePlayback();
+  setTimelinePosition(Number(event.target.value));
+});
+byId("machine-preview-dialog").addEventListener("close", stopTimelinePlayback);
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+let jobMarkersTimer = null;
+
+// Planning the job is heavier than drawing, so markers are refreshed shortly after edits settle.
+function renderJobMarkers(documentModel) {
+  clearTimeout(jobMarkersTimer);
+  jobMarkersTimer = setTimeout(() => drawJobMarkers(documentModel), 120);
+}
+
+// Rotated or skewed objects cannot be sent to GRBL yet, so only the visual extents and origin are shown.
+function visualReference(documentModel) {
+  const objectsLayer = byId("objects");
+  if (!objectsLayer.hasChildNodes()) return null;
+  const box = objectsLayer.getBBox();
+  if (box.width <= 0 && box.height <= 0) return null;
+  const { corner = "top-left", flipX = false, flipY = false } = documentModel.origin ?? {};
+  const atRight = corner.endsWith("right") !== flipX;
+  const atBottom = corner.startsWith("bottom") !== flipY;
+  return {
+    bounds: {
+      minXMm: Math.max(0, box.x), minYMm: Math.max(0, box.y),
+      maxXMm: Math.min(documentModel.widthMm, box.x + box.width), maxYMm: Math.min(documentModel.heightMm, box.y + box.height)
+    },
+    origin: { xMm: atRight ? documentModel.widthMm : 0, yMm: atBottom ? documentModel.heightMm : 0 },
+    xDirection: atRight ? -1 : 1,
+    yDirection: atBottom ? -1 : 1,
+    start: null,
+    end: null
+  };
+}
+
+function drawJobMarkers(documentModel) {
+  const layer = byId("job-markers");
+  layer.replaceChildren();
+  layer.style.opacity = "0.7";
+  if (!byId("show-job-markers").checked) return;
+  let reference;
+  try {
+    reference = jobReferencePoints(documentModel, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() });
+  } catch {
+    reference = visualReference(documentModel);
+  }
+  if (!reference) return;
+  const size = Math.max(2, Math.max(documentModel.widthMm, documentModel.heightMm) / 50);
+  const make = (name, attributes, text) => {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+    if (text) node.textContent = text;
+    layer.append(node);
+  };
+  const label = (point, key, color, dx = 1.2, dy = -1.2) => make("text", {
+    x: point.xMm + size * dx, y: point.yMm + size * dy, "font-size": size * 0.9, fill: color, "font-family": "sans-serif"
+  }, i18n.t(key));
+  const { origin, start, end, xDirection, yDirection, bounds } = reference;
+  make("rect", { x: bounds.minXMm, y: bounds.minYMm, width: bounds.maxXMm - bounds.minXMm, height: bounds.maxYMm - bounds.minYMm, fill: "none", stroke: "#8a5a00", "stroke-width": size * 0.05, "stroke-dasharray": `${size * 0.15} ${size * 0.5}`, opacity: 0.45 });
+  const arrow = (dx, dy, name) => {
+    make("line", { x1: origin.xMm, y1: origin.yMm, x2: origin.xMm + dx * size * 2, y2: origin.yMm + dy * size * 2, stroke: "#8a5a00", "stroke-width": size * 0.12 });
+    make("text", { x: origin.xMm + dx * size * 2.3, y: origin.yMm + dy * size * 2.3 + size * 0.3, "font-size": size * 0.8, fill: "#8a5a00", "font-family": "sans-serif", "text-anchor": "middle" }, name);
+  };
+  arrow(xDirection, 0, "X+");
+  arrow(0, yDirection, "Y+");
+  make("circle", { cx: origin.xMm, cy: origin.yMm, r: size * 0.35, fill: "#fff", stroke: "#8a5a00", "stroke-width": size * 0.12 });
+  label(origin, "ui.canvas.markerOrigin", "#8a5a00", 0.6, xDirection === 1 && yDirection === 1 ? -0.6 : 1.4);
+  if (start && end) {
+    make("line", { x1: origin.xMm, y1: origin.yMm, x2: start.xMm, y2: start.yMm, stroke: "#8a5a00", "stroke-width": size * 0.05, "stroke-dasharray": `${size * 0.3} ${size * 0.3}`, opacity: 0.5 });
+    make("circle", { cx: start.xMm, cy: start.yMm, r: size * 0.3, fill: "#1f9d55", stroke: "#fff", "stroke-width": size * 0.12 });
+    label(start, "ui.canvas.markerStart", "#1f9d55");
+    make("rect", { x: end.xMm - size * 0.28, y: end.yMm - size * 0.28, width: size * 0.56, height: size * 0.56, fill: "#d64545", stroke: "#fff", "stroke-width": size * 0.12 });
+    label(end, "ui.canvas.markerEnd", "#d64545", 1.0, 1.8);
+  }
+}
+
+// The origin only decides machine coordinates; the STAGE always shows the drawing the same way up.
+const STAGE_ORIGIN = { corner: "top-left", flipX: false, flipY: false };
 
 function renderPreview() {
   try {
@@ -464,12 +728,13 @@ function renderPreview() {
     resizeBoard(widthMm, heightMm);
     byId("canvas-size").textContent = `${widthMm} × ${heightMm} mm`;
 
-    const svgDocument = new DOMParser().parseFromString(renderSvg(currentDocument), "image/svg+xml");
+    const svgDocument = new DOMParser().parseFromString(renderSvg({ ...currentDocument, origin: STAGE_ORIGIN }, { embedFonts: false }), "image/svg+xml");
     if (svgDocument.querySelector("parsererror")) throw new Error("Não foi possível desenhar este documento.");
     const selection = new Set(selectedIds);
     const nodes = Array.from(svgDocument.querySelectorAll("[id]"), (node) => {
+      const nodeId = node.getAttribute("id");
       const imported = document.importNode(node, true);
-      imported.dataset.id = imported.getAttribute("id");
+      imported.dataset.id = nodeId;
       imported.dataset.layerId = node.closest("[data-layer-id]")?.getAttribute("data-layer-id") ?? "";
       const layer = currentDocument.layers.find((candidate) => candidate.id === imported.dataset.layerId);
       if (layer?.locked) imported.dataset.locked = "true";
@@ -477,11 +742,8 @@ function renderPreview() {
       return imported;
     });
     objects.replaceChildren(...nodes);
-    selectionStatus.textContent = selectedIds.length === 0
-      ? "Nenhum objeto selecionado"
-      : selectedIds.length === 1
-        ? `Selecionado: ${selectedId}`
-        : `${selectedIds.length} objetos selecionados`;
+    renderJobMarkers(currentDocument);
+    renderSelectionStatus();
     const selected = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
     const hasLockedLayer = selected.some((element) =>
       currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked
@@ -490,7 +752,7 @@ function renderPreview() {
     byId("duplicate-selection").disabled = selected.length === 0 || hasLockedLayer;
     renderLayers();
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
@@ -547,9 +809,16 @@ function addShape() {
   commitHistory();
 }
 
+function getProjectFilename(extension) {
+  const baseName = projectNameInput.value.trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/[. ]+$/g, "");
+  return `${baseName || "Trabalho sem título"}.${extension}`;
+}
+
 function exportSvg() {
   const svg = renderSvg(readDocument());
-  downloadFile(svg, "commburn-trabalho.svg", "image/svg+xml;charset=utf-8");
+  downloadFile(svg, getProjectFilename("svg"), "image/svg+xml;charset=utf-8");
   showNotice("SVG exportado com medidas em milímetros.");
 }
 
@@ -564,7 +833,7 @@ function downloadFile(contents, filename, type) {
 
 function exportProject() {
   const source = serializeProject(readDocument());
-  downloadFile(source, "commburn-trabalho.commburn.json", "application/json;charset=utf-8");
+  downloadFile(source, getProjectFilename("commburn.json"), "application/json;charset=utf-8");
   showNotice("Projeto editável salvo com camadas e objetos.");
 }
 
@@ -575,9 +844,67 @@ function machineMaxSpindleSpeed(allowDefaultSmax = false) {
   return numberFrom(byId("machine-smax"), "Velocidade máxima S", Number.MIN_VALUE);
 }
 
+const rasterCache = new Map();
+
+async function decodeImageGray(element, spacingMm) {
+  const widthPx = Math.max(1, Math.min(2000, Math.round(element.widthMm / spacingMm)));
+  const heightPx = Math.max(1, Math.min(2000, Math.round(element.heightMm / spacingMm)));
+  const key = `${element.id}|${element.imageDataUri.length}|${widthPx}x${heightPx}`;
+  if (rasterCache.has(key)) return { key, raster: rasterCache.get(key) };
+  const image = new Image();
+  image.src = element.imageDataUri;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, widthPx, heightPx);
+  context.drawImage(image, 0, 0, widthPx, heightPx);
+  const { data } = context.getImageData(0, 0, widthPx, heightPx);
+  const gray = new Uint8Array(widthPx * heightPx);
+  for (let index = 0; index < gray.length; index += 1) {
+    gray[index] = Math.round(0.299 * data[index * 4] + 0.587 * data[index * 4 + 1] + 0.114 * data[index * 4 + 2]);
+  }
+  let binary = "";
+  for (let index = 0; index < gray.length; index += 8192) binary += String.fromCharCode(...gray.subarray(index, index + 8192));
+  const raster = { widthPx, heightPx, gray: btoa(binary) };
+  rasterCache.set(key, raster);
+  return { key, raster };
+}
+
+let currentRasters = {};
+
+async function prepareRasters(documentModel = readDocument()) {
+  const rasters = {};
+  for (const element of documentModel.elements) {
+    if (element.type !== "image") continue;
+    const layer = documentModel.layers.find(({ id }) => id === element.layerId);
+    if (!layer?.enabled) continue;
+    try {
+      rasters[element.id] = (await decodeImageGray(element, Math.max(0.05, layer.fillSpacingMm))).raster;
+    } catch {
+      // The planner reports the unsupported image with its stable error code.
+    }
+  }
+  currentRasters = rasters;
+}
+
+function readJobPlacement() {
+  const workCoordinateSystem = byId("work-system").value;
+  return {
+    rasters: currentRasters,
+    imageMode: byId("image-mode").value,
+    startFrom: byId("start-from").value,
+    startAnchor: byId("start-anchor").value,
+    ...(workCoordinateSystem ? { workCoordinateSystem } : {})
+  };
+}
+
 function createMachinePlan({ allowDefaultSmax = false, documentModel = readDocument() } = {}) {
   return planGrblJob(documentModel, {
-    maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax)
+    maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax),
+    ...readJobPlacement()
   });
 }
 
@@ -591,13 +918,38 @@ function updateMachinePreviewStats(plan) {
   byId("machine-preview-code").textContent = plan.gcode;
 }
 
-function drawMachinePreview(plan, documentModel = readDocument()) {
+function drawMachinePreview(machinePlan, documentModel = readDocument()) {
+  const plan = planToDocumentSpace(documentModel, machinePlan);
   const svg = byId("machine-path-preview");
   svg.setAttribute("viewBox", `0 0 ${documentModel.widthMm} ${documentModel.heightMm}`);
   svg.style.aspectRatio = `${documentModel.widthMm} / ${documentModel.heightMm}`;
   svg.replaceChildren();
   const layersById = new Map(documentModel.layers.map((layer) => [layer.id, layer]));
-  for (const plannedPath of groupMachinePreviewPaths(plan.paths)) {
+  const rasterPaths = plan.paths.filter((path) => path.segmentPowerFractions);
+  const intensityBuckets = new Map();
+  for (const rasterPath of rasterPaths) {
+    const layer = layersById.get(rasterPath.layerId);
+    rasterPath.segmentPowerFractions.forEach((fraction, index) => {
+      if (fraction <= 0) return;
+      const key = `${layer.id}|${fraction}`;
+      if (!intensityBuckets.has(key)) intensityBuckets.set(key, { layer, fraction, d: [] });
+      const [a, b] = [rasterPath.points[index], rasterPath.points[index + 1]];
+      intensityBuckets.get(key).d.push(`M${a.xMm} ${a.yMm}L${b.xMm} ${b.yMm}`);
+    });
+  }
+  for (const { layer, fraction, d } of intensityBuckets.values()) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", d.join(""));
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", layer.color);
+    path.setAttribute("stroke-opacity", String(Math.max(0.05, fraction)));
+    path.setAttribute("stroke-width", String(Math.max(0.05, layer.fillSpacingMm)));
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    title.textContent = `Intensidade do laser: ${Math.round(fraction * 100)}% · ${layer.name}`;
+    path.append(title);
+    svg.append(path);
+  }
+  for (const plannedPath of groupMachinePreviewPaths(plan.paths.filter((path) => !path.segmentPowerFractions))) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", plannedPath.pathData);
     path.setAttribute("fill", "none");
@@ -710,25 +1062,30 @@ function drawMachineSimulationSegments(segments) {
   if (segments.length === 0) return;
   const canvas = byId("machine-simulation-playback");
   const { context, scale } = setupMachineSimulationContext(canvas, { clear: false });
-  const layerColors = new Map(machineSimulationDocument.layers.map((layer) => [layer.id, layer.color]));
+  const layersById = new Map(machineSimulationDocument.layers.map((layer) => [layer.id, layer]));
   for (const kind of ["work", "travel"]) {
     const grouped = new Map();
     for (const segment of segments) {
       if (segment.kind !== kind) continue;
-      const color = kind === "travel" ? "#626f80" : layerColors.get(segment.layerId);
-      if (!grouped.has(color)) grouped.set(color, []);
-      grouped.get(color).push(segment);
+      if (segment.fraction === 0) continue;
+      const color = kind === "travel" ? "#626f80" : layersById.get(segment.layerId).color;
+      const key = segment.fraction === undefined ? color : `${color}|${segment.fraction}|${layersById.get(segment.layerId).fillSpacingMm}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(segment);
     }
-    for (const [color, paths] of grouped) {
+    for (const [key, paths] of grouped) {
+      const [color, fraction, spacing] = key.split("|");
       context.beginPath();
       context.strokeStyle = color;
-      context.lineWidth = (kind === "work" ? 1.4 : 0.9) / scale;
+      context.globalAlpha = fraction === undefined ? 1 : Math.max(0.05, Number(fraction));
+      context.lineWidth = fraction === undefined ? (kind === "work" ? 1.4 : 0.9) / scale : Math.max(0.05, Number(spacing));
       context.setLineDash(kind === "travel" ? [3 / scale, 2 / scale] : []);
       for (const path of paths) {
         context.moveTo(path.points[0].xMm, path.points[0].yMm);
         context.lineTo(path.points.at(-1).xMm, path.points.at(-1).yMm);
       }
       context.stroke();
+      context.globalAlpha = 1;
     }
   }
   context.setLineDash([]);
@@ -754,47 +1111,102 @@ function renderMachineSimulationProgress(completed, total, state) {
   progress.max = Math.max(1, total);
   progress.value = completedLines;
   const percent = total > 0 ? Math.floor(completedLines / total * 100) : 0;
-  byId("machine-simulation-status").textContent = state === "complete"
-    ? `Simulação concluída: ${completedLines}/${total} comandos (${percent}%). Nenhum hardware ou laser foi acionado.`
+  const statusKey = state === "complete"
+    ? "ui.dialogs.simulationCompleteStatus"
     : state === "stopped"
-      ? `Simulação interrompida em ${completedLines}/${total} comandos (${percent}%).`
-      : `Percurso simulado: ${completedLines}/${total} comandos (${percent}%). Trabalho em cores; deslocamentos tracejados com laser desligado.`;
+      ? "ui.dialogs.simulationStoppedStatus"
+      : "ui.dialogs.simulationProgressStatus";
+  byId("machine-simulation-status").textContent = i18n.t(statusKey, {
+    completed: completedLines,
+    total,
+    percent
+  });
 }
 
-function showMachineSimulation(plan, documentModel, totalLines) {
+function showMachineSimulation(machinePlan, documentModel, totalLines) {
+  const plan = planToDocumentSpace(documentModel, machinePlan);
   machineSimulationPlan = plan;
   machineSimulationDocument = documentModel;
   machineSimulationPlayback = createMachinePlayback(plan).entries;
   machineSimulationCompletedLines = 0;
   machineSimulationCanvasSize = null;
   const dialog = byId("machine-preview-dialog");
-  byId("machine-preview-title").textContent = "Simulação visual GRBL";
-  byId("machine-preview-description").textContent =
-    "Cinza claro mostra o plano completo; o traço colorido avança conforme os comandos são simulados. Tracejado indica deslocamento rápido com o laser desligado.";
+  byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machineSimulationTitle");
+  byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machineSimulationDescription");
   byId("machine-simulation-panel").hidden = false;
-  byId("machine-path-preview").hidden = true;
+  byId("machine-timeline").hidden = true;
+  stopTimelinePlayback();
+  byId("machine-path-preview").toggleAttribute("hidden", true);
   updateMachinePreviewStats(plan);
   if (!dialog.open) dialog.showModal();
   renderMachineSimulationProgress(0, totalLines, "running");
 }
 
-function showMachinePreview() {
+let timelineTimer = null;
+
+function stopTimelinePlayback() {
+  clearInterval(timelineTimer);
+  timelineTimer = null;
+  byId("machine-timeline-play").textContent = i18n.t("ui.dialogs.timelinePlay");
+}
+
+function setTimelinePosition(value) {
+  const scrub = byId("machine-timeline-scrub");
+  scrub.value = String(value);
+  renderMachineSimulationProgress(value, Number(scrub.max), "running");
+}
+
+function toggleTimelinePlayback() {
+  if (timelineTimer) return stopTimelinePlayback();
+  const scrub = byId("machine-timeline-scrub");
+  const total = Number(scrub.max);
+  if (Number(scrub.value) >= total) setTimelinePosition(0);
+  const step = Math.max(1, Math.ceil(total / 240));
+  byId("machine-timeline-play").textContent = i18n.t("ui.dialogs.timelinePause");
+  timelineTimer = setInterval(() => {
+    const next = Math.min(total, Number(scrub.value) + step);
+    setTimelinePosition(next);
+    if (next >= total) stopTimelinePlayback();
+  }, 25);
+}
+
+function showTimelinePreview(plan, documentModel) {
+  const total = createMachinePlayback(plan).totalLines;
+  showMachineSimulation(plan, documentModel, total);
+  const scrub = byId("machine-timeline-scrub");
+  scrub.max = String(Math.max(1, total));
+  byId("machine-timeline").hidden = false;
+  byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machinePreview");
+  byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machinePreviewDescription");
+  stopTimelinePlayback();
+  setTimelinePosition(total);
+}
+
+async function showMachinePreview() {
   try {
+    await prepareRasters();
+    const referenceDocument = readDocument();
     const documentModel = presentationActive
-      ? createPresentationSimulationDocument(readDocument())
-      : readDocument();
+      ? createPresentationSimulationDocument(referenceDocument)
+      : referenceDocument;
     const plan = presentationActive
       ? planGrblJob(documentModel, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED })
       : createMachinePlan({ allowDefaultSmax: true, documentModel });
     drawMachinePreview(plan, documentModel);
-    byId("machine-preview-title").textContent = "Prévia do processamento GRBL";
-    byId("machine-preview-description").textContent =
-      "Traços coloridos são movimentos de trabalho por camada; tracejado cinza são deslocamentos rápidos com o laser desligado. O primeiro deslocamento depende da posição real da cabeça.";
+    if (!presentationActive) {
+      showTimelinePreview(plan, documentModel);
+      return;
+    }
+    byId("machine-timeline").hidden = true;
+    byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machinePreview");
+    byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machinePreviewDescription");
     byId("machine-simulation-panel").hidden = true;
-    byId("machine-path-preview").hidden = false;
+    byId("machine-path-preview").toggleAttribute("hidden", false);
     byId("machine-preview-dialog").showModal();
   } catch (error) {
-    showNotice(`Não foi possível gerar a prévia GRBL: ${error.message}`);
+    showNotice(error instanceof FieldValidationError
+      ? error
+      : i18n.t("ui.dialogs.machinePreviewFailure", { error: formatError(error) }));
   }
 }
 
@@ -817,9 +1229,9 @@ function setPresentationInput(input, value) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-function setPresentationStep(index, title, description, total = 7) {
+function setPresentationStep(index, title, description, total = PRESENTATION_STEPS.length) {
   byId("presentation-step-count").textContent = `${index} / ${total}`;
-  byId("presentation-step-label").textContent = "Demonstração de exemplo";
+  byId("presentation-step-label").textContent = i18n.t("ui.presentation.label");
   byId("presentation-title").textContent = title;
   byId("presentation-description").textContent = description;
   byId("presentation-progress").max = total;
@@ -849,8 +1261,9 @@ function waitPresentation(milliseconds, run) {
 }
 
 async function movePresentationCursor(target, run) {
-  if (!target || !presentationCurrent(run)) return false;
-  target.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (!target) throw new RangeError("O alvo da etapa da apresentação não existe.");
+  if (!presentationCurrent(run)) return false;
+  target.scrollIntoView({ block: "center", behavior: "auto" });
   presentationTarget?.classList.remove("presentation-target");
   presentationTarget = target;
   target.classList.add("presentation-target");
@@ -892,7 +1305,13 @@ function savePresentationState() {
     machineSimulationDocument,
     machineSimulationPlayback,
     machineSimulationCompletedLines,
-    machineSimulationCanvasSize
+    machineSimulationCanvasSize,
+    scroll: {
+      windowX: window.scrollX,
+      windowY: window.scrollY,
+      containers: [...document.querySelectorAll(".sidebar, .stage, #machine-preview-dialog")]
+        .map((element) => ({ element, left: element.scrollLeft, top: element.scrollTop }))
+    }
   };
 }
 
@@ -926,6 +1345,12 @@ function restorePresentationState() {
   toolbar.setTool(saved.activeTool);
   syncInspector();
   renderPreview();
+  window.scrollTo(saved.scroll.windowX, saved.scroll.windowY);
+  for (const position of saved.scroll.containers) {
+    if (!position.element.isConnected) continue;
+    position.element.scrollLeft = position.left;
+    position.element.scrollTop = position.top;
+  }
   presentationSnapshot = null;
 }
 
@@ -935,9 +1360,11 @@ function finishPresentation() {
   presentationActive = false;
   presentationPaused = false;
   document.body.classList.remove("presentation-active");
+  document.documentElement.classList.remove("presentation-active");
   const { card, cursor, dialog } = presentationUi();
   presentationTarget?.classList.remove("presentation-target");
   presentationTarget = null;
+  setPresentationSubstepText("");
   movePresentationUi(document.body);
   card.hidden = true;
   cursor.hidden = true;
@@ -946,6 +1373,34 @@ function finishPresentation() {
     dialog.close();
   }
   restorePresentationState();
+}
+
+function resetPresentationDemo() {
+  const { card, dialog } = presentationUi();
+  if (dialog.open) {
+    presentationInternalClose = true;
+    dialog.close();
+  }
+  movePresentationUi(document.body);
+  card.hidden = false;
+  presentationUi().cursor.hidden = false;
+  presentationTarget?.classList.remove("presentation-target");
+  presentationTarget = null;
+  presentationUi().cursor.classList.remove("is-clicking");
+  setPresentationSubstepText("");
+  currentDocument = createPresentationDocument();
+  selectedId = null;
+  selectedIds = [];
+  activeLayerId = currentDocument.layers[0].id;
+  nextId = 1;
+  toolbar.setTool("select");
+  widthInput.value = String(currentDocument.widthMm);
+  heightInput.value = String(currentDocument.heightMm);
+  originInput.value = currentDocument.origin.corner;
+  flipXInput.checked = currentDocument.origin.flipX;
+  flipYInput.checked = currentDocument.origin.flipY;
+  syncInspector();
+  renderPreview();
 }
 
 async function animatePresentationSimulation(run) {
@@ -962,118 +1417,100 @@ async function animatePresentationSimulation(run) {
   if (presentationCurrent(run)) renderMachineSimulationProgress(totalLines, totalLines, "complete");
 }
 
-async function runPresentation(run) {
-  const steps = [
-    {
-      target: "#width",
-      title: "Comece pela área de trabalho",
-      description: "Defina o tamanho da mesa em milímetros. O CommBurn mantém a escala e as réguas alinhadas ao desenho.",
-      action: () => {
-        setPresentationInput(widthInput, 200);
-        setPresentationInput(heightInput, 140);
-      }
-    },
-    {
-      target: "#add-text",
-      title: "Adicione uma mensagem",
-      description: "Digite o texto, escolha a fonte e informe a posição. O objeto permanece editável.",
-      action: () => {
-        textInput.value = "COMMBURN";
-        fontFamilyInput.value = "sans-serif";
-        fontSizeInput.value = "12";
-        byId("new-x").value = "61";
-        byId("new-y").value = "72";
-        byId("add-text").click();
-      }
-    },
-    {
-      target: "#add-shape",
-      title: "Desenhe a moldura",
-      description: "Formas vetoriais usam dimensões e posições precisas em milímetros.",
-      action: () => {
-        setPresentationInput(byId("new-shape-type"), "rect");
-        byId("new-x").value = "35";
-        byId("new-y").value = "38";
-        byId("new-shape-width").value = "130";
-        byId("new-shape-height").value = "62";
-        byId("add-shape").click();
-      }
-    },
-    {
-      target: "#add-shape",
-      title: "Crie um detalhe vetorial",
-      description: "Combine formas simples para montar o desenho que será processado.",
-      action: () => {
-        byId("new-x").value = "48";
-        byId("new-y").value = "51";
-        byId("new-shape-width").value = "104";
-        byId("new-shape-height").value = "36";
-        byId("add-shape").click();
-      }
-    },
-    {
-      target: "#object-width",
-      title: "Ajuste com precisão",
-      description: "Selecione um objeto e refine posição e tamanho pelos campos métricos do inspetor.",
-      action: () => {
-        const selected = currentDocument.elements.at(-1);
-        selectObject(selected.id);
-        setPresentationInput(byId("object-x"), 50);
-        setPresentationInput(byId("object-width"), 100);
-        toolbar.setTool("move");
-      }
-    },
-    {
-      target: "#preview-machine-job",
-      title: "Confira o percurso",
-      description: "Veja as trajetórias e os deslocamentos rápidos antes de qualquer operação.",
-      action: () => {
-        byId("preview-machine-job").click();
-        const simulationDocument = createPresentationSimulationDocument(readDocument());
-        const plan = planGrblJob(simulationDocument, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED });
-        showMachineSimulation(plan, simulationDocument, createMachinePlayback(plan).totalLines);
-        movePresentationUi(byId("machine-preview-dialog"));
-      }
-    },
-    {
-      target: "#machine-simulation-visual",
-      title: "Simule o trabalho na mesa",
-      description: "A trajetória avança em cores; deslocamentos tracejados representam movimentos com o laser desligado. Nenhum hardware é acionado.",
-      action: async () => {
-        await animatePresentationSimulation(run);
-      }
-    }
-  ];
+function presentationFieldName(target) {
+  const label = target.closest("label");
+  if (label) return label.childNodes[0]?.textContent.trim() || target.id;
+  return target.textContent.trim() || target.id;
+}
 
+function setPresentationSubstepText(text) {
+  const line = byId("presentation-substep");
+  line.textContent = text;
+  line.hidden = !text;
+}
+
+function setPresentationSubstep(item, target) {
+  const text = item.kind === "simulate"
+    ? i18n.t("ui.presentation.substeps.simulate")
+    : i18n.t(`ui.presentation.substeps.${item.kind}`, { field: presentationFieldName(target) });
+  setPresentationSubstepText(text);
+}
+
+async function typePresentationValue(input, value, run) {
+  input.focus({ preventScroll: true });
+  input.value = "";
+  for (const character of String(value)) {
+    input.value += character;
+    if (!await waitPresentation(110, run)) return false;
+  }
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  return presentationCurrent(run);
+}
+
+async function simulatePresentationJob(run) {
+  const simulationDocument = createPresentationSimulationDocument(readDocument());
+  const plan = planGrblJob(simulationDocument, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED });
+  showMachineSimulation(plan, simulationDocument, createMachinePlayback(plan).totalLines);
+  movePresentationUi(byId("machine-preview-dialog"));
+  await animatePresentationSimulation(run);
+  return presentationCurrent(run);
+}
+
+async function performPresentationSubstep(item, target, run) {
+  if (item.kind === "type") return typePresentationValue(target, item.value, run);
+  if (item.kind === "choose") {
+    setPresentationInput(target, item.value);
+    return presentationCurrent(run);
+  }
+  if (item.kind === "click") {
+    target.click();
+    if (target.id === "preview-machine-job") movePresentationUi(byId("machine-preview-dialog"));
+    return presentationCurrent(run);
+  }
+  if (item.kind === "simulate") return simulatePresentationJob(run);
+  throw new RangeError(`Ação de apresentação desconhecida: ${item.kind}`);
+}
+
+async function runPresentation(run) {
   const { card } = presentationUi();
   card.hidden = false;
-  byId("presentation-pause").hidden = false;
+  byId("presentation-toggle").hidden = false;
   byId("presentation-restart").hidden = true;
-  for (let index = 0; index < steps.length; index += 1) {
-    const step = steps[index];
-    setPresentationStep(index + 1, step.title, step.description, steps.length);
-    if (!await movePresentationCursor(document.querySelector(step.target), run)) return;
-    if (!presentationCurrent(run)) return;
+  for (const [index, step] of PRESENTATION_STEPS.entries()) {
+    const title = i18n.t(`ui.presentation.steps.${step.key}.title`);
+    const description = i18n.t(`ui.presentation.steps.${step.key}.description`);
+    setPresentationStep(index + 1, title, description);
     try {
-      await step.action();
+      for (const item of step.substeps) {
+        const target = document.querySelector(item.target);
+        if (!target) throw new RangeError(`O alvo da apresentação não existe: ${item.target}`);
+        setPresentationSubstep(item, target);
+        if (!await movePresentationCursor(target, run)) return;
+        if (!await performPresentationSubstep(item, target, run)) return;
+      }
     } catch (error) {
-      showNotice(`A apresentação foi interrompida: ${error.message}`);
+      showNotice(i18n.t("ui.presentation.failure", { error: formatError(error) }));
       finishPresentation();
       return;
     }
     if (!presentationCurrent(run)) return;
-    if (index < steps.length - 1 && !await waitPresentation(500, run)) return;
+    if (index < PRESENTATION_STEPS.length - 1 && !await waitPresentation(500, run)) return;
   }
   if (!presentationCurrent(run)) return;
-  setPresentationStep(steps.length, "Apresentação concluída", "O projeto de demonstração e a simulação estão prontos para gravar. Seu trabalho original será restaurado ao sair.", steps.length);
-  byId("presentation-step-label").textContent = "Pronto para gravar";
-  byId("presentation-pause").hidden = true;
+  setPresentationStep(
+    PRESENTATION_STEPS.length,
+    i18n.t("ui.presentation.completeTitle"),
+    i18n.t("ui.presentation.completeDescription")
+  );
+  byId("presentation-step-label").textContent = i18n.t("ui.presentation.completeLabel");
+  byId("presentation-toggle").hidden = true;
   byId("presentation-restart").hidden = false;
 }
 
 function beginPresentation() {
   if (machineBusy) {
-    showNotice("Aguarde a operação atual terminar antes de iniciar a apresentação.");
+    showNotice(i18n.t("ui.presentation.busy"));
     return;
   }
   if (presentationActive) return;
@@ -1082,71 +1519,36 @@ function beginPresentation() {
   presentationPaused = false;
   presentationRun += 1;
   const run = presentationRun;
-  currentDocument = createPresentationDocument();
-  selectedId = null;
-  selectedIds = [];
-  activeLayerId = currentDocument.layers[0].id;
-  nextId = 1;
-  toolbar.setTool("select");
-  widthInput.value = String(currentDocument.widthMm);
-  heightInput.value = String(currentDocument.heightMm);
-  originInput.value = currentDocument.origin.corner;
-  flipXInput.checked = currentDocument.origin.flipX;
-  flipYInput.checked = currentDocument.origin.flipY;
   document.body.classList.add("presentation-active");
-  movePresentationUi(document.body);
-  presentationUi().card.hidden = false;
-  presentationUi().cursor.hidden = false;
+  document.documentElement.classList.add("presentation-active");
+  resetPresentationDemo();
   setPresentationPauseLabel(false);
-  presentationTarget?.classList.remove("presentation-target");
-  presentationTarget = null;
-  presentationUi().cursor.classList.remove("is-clicking");
-  syncInspector();
-  renderPreview();
   void runPresentation(run);
 }
 
 function restartPresentation() {
-  const { dialog, card, cursor } = presentationUi();
+  if (!presentationActive) return;
   presentationRun += 1;
-  if (dialog.open) {
-    presentationInternalClose = true;
-    dialog.close();
-  }
-  movePresentationUi(document.body);
-  card.hidden = false;
-  cursor.hidden = false;
-  cursor.classList.remove("is-clicking");
-  presentationTarget?.classList.remove("presentation-target");
-  presentationTarget = null;
-  currentDocument = createPresentationDocument();
-  selectedId = null;
-  selectedIds = [];
-  activeLayerId = currentDocument.layers[0].id;
-  nextId = 1;
-  toolbar.setTool("select");
-  widthInput.value = String(currentDocument.widthMm);
-  heightInput.value = String(currentDocument.heightMm);
-  originInput.value = currentDocument.origin.corner;
-  flipXInput.checked = currentDocument.origin.flipX;
-  flipYInput.checked = currentDocument.origin.flipY;
-  setPresentationPauseLabel(false);
-  syncInspector();
-  renderPreview();
   const run = presentationRun;
+  presentationPaused = false;
+  resetPresentationDemo();
+  setPresentationPauseLabel(false);
   void runPresentation(run);
 }
 
 function setPresentationPauseLabel(paused) {
   presentationPaused = paused;
-  const button = byId("presentation-pause");
-  const label = paused ? "Continuar" : "Pausar";
-  button.textContent = label;
-  button.setAttribute("aria-label", `${label} apresentação`);
-  button.title = `${label} a apresentação`;
+  const button = byId("presentation-toggle");
+  button.textContent = i18n.t(paused ? "ui.presentation.resume" : "ui.presentation.pause");
+  button.setAttribute("aria-pressed", String(!paused));
 }
 
-function exportGcode() {
+function togglePresentationPlayback() {
+  setPresentationPauseLabel(!presentationPaused);
+}
+
+async function exportGcode() {
+  await prepareRasters();
   const plan = createMachinePlan();
   downloadFile(plan.gcode, "commburn-trabalho.gcode", "text/plain;charset=utf-8");
   showNotice("G-code GRBL exportado. Confira a origem e os limites da máquina antes de executar.");
@@ -1158,48 +1560,34 @@ async function importSvgFile(file) {
   if (file.size > 10 * 1024 * 1024) throw new RangeError("O SVG deve ter no máximo 10 MB.");
   const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
   if (!layer || layer.locked) throw new Error("Selecione uma camada desbloqueada para importar objetos.");
-  if (!globalThis.svgson?.parseSync || !globalThis.svgson?.stringify) throw new Error("O parser SVG local não foi carregado.");
+  if (!globalThis.svgson?.parseSync) throw new Error("O parser SVG local não foi carregado.");
 
   const source = await file.text();
   const sanitizedSource = validateSvgSource(source);
   const tree = globalThis.svgson.parseSync(sanitizedSource);
-  if (byId("svg-import-mode").value === "visual") {
-    const viewport = getSvgViewport(tree);
-    const sanitized = sanitizeSvgForVisual(tree, globalThis.svgson);
-    const svgDataUri = encodeSvgDataUri(sanitized.source);
-    const fit = Math.min(1, currentDocument.widthMm / viewport.widthMm, currentDocument.heightMm / viewport.heightMm);
-    const element = {
-      id: `svg-image-${nextId++}`,
-      type: "svg-image",
-      xMm: 0,
-      yMm: 0,
-      widthMm: viewport.widthMm * fit,
-      heightMm: viewport.heightMm * fit,
-      svgDataUri,
-      layerId: activeLayerId
-    };
-    currentDocument = createDocument({ ...readDocument(), elements: [...currentDocument.elements, element] });
-    selectedIds = [element.id];
-    selectedId = element.id;
-    syncInspector();
-    renderPreview();
-    commitHistory();
-    showNotice(sanitized.removedActiveContent
-      ? "SVG visual incorporado. Scripts e eventos foram removidos; conteúdo externo não é carregado."
-      : "SVG importado como objeto visual incorporado, sem execução de scripts nem conteúdo remoto.");
-    return;
-  }
-
-  const imported = importSvgTree(tree, {
-    layerId: activeLayerId,
-    forceLayerId: activeLayerId,
-    idPrefix: `svg-${nextId}`
+  byId("svg-import-file-name").textContent = file.name;
+  const dialog = byId("svg-import-dialog");
+  const mode = await new Promise((resolve) => {
+    dialog.addEventListener("close", () => {
+      resolve(dialog.returnValue === "import" ? byId("svg-import-mode").value : null);
+    }, { once: true });
+    dialog.showModal();
   });
+  if (!mode) return;
+
+  const importOptions = {
+    layerId: activeLayerId,
+    fallbackLayer: layer,
+    idPrefix: `svg-${nextId}`
+  };
+  if (mode === "editable") {
+    importOptions.forceLayerId = activeLayerId;
+  }
+  importOptions.splitShapes = byId("svg-import-split").checked;
+  const imported = fitImportedToTable(importSvgTree(tree, importOptions), currentDocument.widthMm, currentDocument.heightMm);
   const elements = [...currentDocument.elements, ...imported.elements];
   currentDocument = createDocument({
     ...currentDocument,
-    widthMm: Math.max(currentDocument.widthMm, imported.widthMm),
-    heightMm: Math.max(currentDocument.heightMm, imported.heightMm),
     layers: [...currentDocument.layers, ...imported.layers.filter((candidate) => candidate.id !== activeLayerId)],
     elements
   });
@@ -1211,7 +1599,9 @@ async function importSvgFile(file) {
   syncInspector();
   renderPreview();
   commitHistory();
-  showNotice(`SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`);
+  showNotice(imported.scale < 1
+    ? `SVG importado: ${imported.elements.length} objeto(s), reduzido a ${(imported.scale * 100).toFixed(1)}% para caber na mesa. A área de trabalho foi mantida.`
+    : `SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`);
 }
 
 async function importProjectFile(file) {
@@ -1219,7 +1609,10 @@ async function importProjectFile(file) {
     throw new RangeError("O projeto deve ter entre 1 byte e 50 MB.");
   }
   const imported = parseProject(await file.text());
+  projectNameInput.value = file.name.replace(/(?:\.commburn)?\.json$/i, "") || i18n.t("app.unsavedProject");
+  projectNameIsUserValue = true;
   currentDocument = imported;
+  generatedLayerNames.clear();
   activeLayerId = imported.layers[0].id;
   selectedIds = [];
   selectedId = null;
@@ -1232,16 +1625,6 @@ async function importProjectFile(file) {
   syncInspector();
   renderPreview();
   showNotice("Projeto CommBurn carregado e validado.");
-}
-
-function encodeSvgDataUri(source) {
-  const bytes = new TextEncoder().encode(source);
-  if (bytes.length > 10 * 1024 * 1024) throw new RangeError("O SVG sanitizado deve ter no máximo 10 MB.");
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  }
-  return `data:image/svg+xml;base64,${btoa(binary)}`;
 }
 
 function imageBlobFromDataUri(dataUri) {
@@ -1341,12 +1724,8 @@ async function applyImageEdit() {
   if (!rasterImageEditor || !pendingImageEdit) throw new Error("Abra uma imagem no editor antes de aplicar.");
   const widthInputMm = byId("image-import-width");
   const heightInputMm = byId("image-import-height");
-  const widthMm = Number(widthInputMm.value);
-  const heightMm = Number(heightInputMm.value);
-  if (!widthInputMm.checkValidity() || !heightInputMm.checkValidity()
-    || !Number.isFinite(widthMm) || !Number.isFinite(heightMm) || widthMm <= 0 || heightMm <= 0) {
-    throw new RangeError("Informe largura e altura positivas em milímetros.");
-  }
+  const widthMm = numberFrom(widthInputMm, "Largura", Number.MIN_VALUE);
+  const heightMm = numberFrom(heightInputMm, "Altura", Number.MIN_VALUE);
   byId("apply-image-edit").disabled = true;
   try {
     const imageBlob = await rasterImageEditor.toBlob({ type: "image/png" });
@@ -1409,12 +1788,7 @@ async function applyImageEdit() {
 
 function imageConversionOptions(element) {
   const readNumber = (id, label) => {
-    const input = byId(id);
-    const value = Number(input.value);
-    if (!input.value.trim() || !Number.isFinite(value) || !input.checkValidity()) {
-      throw new RangeError(`${label} deve estar dentro do intervalo indicado.`);
-    }
-    return value;
+    return numberFrom(byId(id), label);
   };
   return {
     xMm: element.xMm,
@@ -1441,11 +1815,7 @@ function imageConversionOptions(element) {
 function imageVectorStyleOptions() {
   const strokeColorMode = byId("image-vector-border-mode").value;
   const strokeInput = byId("image-vector-border-width");
-  const strokeWidthMm = strokeColorMode === "none" ? 0 : Number(strokeInput.value);
-  if (strokeColorMode !== "none"
-    && (!strokeInput.value.trim() || !Number.isFinite(strokeWidthMm) || !strokeInput.checkValidity())) {
-    throw new RangeError("A espessura da borda deve estar dentro do intervalo indicado.");
-  }
+  const strokeWidthMm = strokeColorMode === "none" ? 0 : numberFrom(strokeInput, "Espessura da borda");
   return { fillColorMode: "layer", strokeColorMode, strokeWidthMm };
 }
 
@@ -1491,24 +1861,35 @@ function traceImageData(imageData, width, height, options) {
 
 async function vectorizeImageElement(element) {
   if (element.rotationDeg !== 0 || element.skewXDeg !== 0 || element.skewYDeg !== 0) {
-    throw new RangeError("Redefina rotação e distorção da imagem antes de converter.");
+    throw new RangeError("Redefina rotação e distorção antes de converter o objeto visual.");
   }
-  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(element.imageDataUri);
-  if (!match) throw new TypeError("A imagem incorporada tem um formato inválido.");
-  const binary = atob(match[2]);
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  const bitmap = await createImageBitmap(new Blob([bytes], { type: `image/${match[1]}` }));
-  if (bitmap.width * bitmap.height > 20_000_000) {
-    bitmap.close();
-    throw new RangeError("A imagem excede o limite de 20 milhões de pixels para conversão.");
+  let drawable;
+  let drawableWidth;
+  let drawableHeight;
+  let releaseDrawable = () => {};
+  if (element.type === "image") {
+    const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(element.imageDataUri);
+    if (!match) throw new TypeError("A imagem incorporada tem um formato inválido.");
+    const binary = atob(match[2]);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    drawable = await createImageBitmap(new Blob([bytes], { type: `image/${match[1]}` }));
+    drawableWidth = drawable.width;
+    drawableHeight = drawable.height;
+    releaseDrawable = () => drawable.close();
+  } else {
+    throw new TypeError("Selecione uma imagem raster para converter em vetores.");
+  }
+  if (drawableWidth * drawableHeight > 20_000_000) {
+    releaseDrawable();
+    throw new RangeError("O objeto visual excede o limite de 20 milhões de pixels para conversão.");
   }
   const options = imageConversionOptions(element);
   const maximumSamples = 2_000_000;
-  const sampleScale = Math.min(1, Math.sqrt(maximumSamples / (bitmap.width * bitmap.height)));
-  const pixelWidth = Math.max(1, Math.min(bitmap.width, maximumSamples, Math.floor(bitmap.width * sampleScale)));
+  const sampleScale = Math.min(1, Math.sqrt(maximumSamples / (drawableWidth * drawableHeight)));
+  const pixelWidth = Math.max(1, Math.min(drawableWidth, maximumSamples, Math.floor(drawableWidth * sampleScale)));
   const pixelHeight = Math.max(1, Math.min(
-    bitmap.height,
-    Math.floor(bitmap.height * sampleScale),
+    drawableHeight,
+    Math.floor(drawableHeight * sampleScale),
     Math.floor(maximumSamples / pixelWidth)
   ));
   const canvas = document.createElement("canvas");
@@ -1516,16 +1897,16 @@ async function vectorizeImageElement(element) {
   canvas.height = pixelHeight;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) {
-    bitmap.close();
+    releaseDrawable();
     throw new Error("O navegador não disponibilizou o canvas necessário para processar a imagem.");
   }
   try {
     context.imageSmoothingQuality = "high";
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, pixelWidth, pixelHeight);
-    context.drawImage(bitmap, 0, 0, pixelWidth, pixelHeight);
+    context.drawImage(drawable, 0, 0, pixelWidth, pixelHeight);
   } finally {
-    bitmap.close();
+    releaseDrawable();
   }
   const pixels = context.getImageData(0, 0, pixelWidth, pixelHeight);
   const traceSvg = await traceImageData(pixels, pixelWidth, pixelHeight, options.traceOptions);
@@ -1535,6 +1916,8 @@ async function vectorizeImageElement(element) {
   const tree = globalThis.svgson.parseSync(validateSvgSource(traceSvg));
   const sourceLayer = currentDocument.layers.find((layer) => layer.id === element.layerId);
   const imported = importTracedImageSvg(tree, {
+    xMm: options.xMm,
+    yMm: options.yMm,
     widthMm: element.widthMm,
     heightMm: element.heightMm,
     sourceLayer,
@@ -1604,7 +1987,9 @@ function updateImageVectorStyleControls() {
     if (imageVectorResult) updateImageVectorStats(imageVectorResult);
     imageVectorStyleOptions();
   } catch (error) {
-    byId("image-vector-stats").textContent = `Configuração inválida: ${error.message}`;
+    byId("image-vector-stats").textContent = error instanceof FieldValidationError
+      ? ""
+      : i18n.t("ui.dialogs.vectorInvalidConfiguration", { error: formatError(error) });
     byId("apply-image-vector").disabled = true;
   }
 }
@@ -1612,7 +1997,12 @@ function updateImageVectorStyleControls() {
 function updateImageVectorStats(result) {
   const selectedElements = result.elements.filter((element) => imageVectorColors.has(element.color));
   const selectedColors = new Set(selectedElements.map((element) => element.color));
-  byId("image-vector-stats").textContent = `${selectedElements.length} regiões vetoriais · ${selectedColors.size} cores selecionadas · ${result.stats.pixelWidth} × ${result.stats.pixelHeight} amostras.`;
+  byId("image-vector-stats").textContent = i18n.t("ui.dialogs.vectorStats", {
+    regions: selectedElements.length,
+    colors: selectedColors.size,
+    width: result.stats.pixelWidth,
+    height: result.stats.pixelHeight
+  });
   byId("apply-image-vector").disabled = selectedElements.length === 0;
 }
 
@@ -1627,7 +2017,7 @@ function showImageVectorColors(result, source) {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = true;
-    checkbox.setAttribute("aria-label", `${color}, ${count} vetores`);
+    checkbox.setAttribute("aria-label", i18n.t("ui.dialogs.vectorColorOption", { color, count }));
     const swatch = document.createElement("span");
     swatch.className = "image-vector-color-swatch";
     swatch.style.setProperty("--swatch-color", color);
@@ -1638,7 +2028,7 @@ function showImageVectorColors(result, source) {
       else imageVectorColors.delete(color);
       updateImageVectorStats(result);
       void drawVectorPreview(result, source, imageVectorColors).catch((error) => {
-        byId("image-vector-stats").textContent = `Prévia indisponível: ${error.message}`;
+        byId("image-vector-stats").textContent = i18n.t("ui.dialogs.vectorPreviewUnavailable", { error: formatError(error) });
         byId("apply-image-vector").disabled = true;
       });
     });
@@ -1654,7 +2044,7 @@ async function updateImageVectorPreview() {
   imageVectorResult = null;
   byId("apply-image-vector").disabled = true;
   byId("image-vector-color-options").replaceChildren();
-  byId("image-vector-stats").textContent = "Preparando regiões vetoriais…";
+  byId("image-vector-stats").textContent = i18n.t("ui.dialogs.preparingVectorPreview");
   const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
   if (!source || source.type !== "image") return;
   try {
@@ -1666,14 +2056,18 @@ async function updateImageVectorPreview() {
     if (sequence !== imageVectorPreviewSequence) return;
   } catch (error) {
     if (sequence !== imageVectorPreviewSequence) return;
-    byId("image-vector-stats").textContent = `Conversão indisponível: ${error.message}`;
+    byId("image-vector-stats").textContent = error instanceof FieldValidationError
+      ? ""
+      : i18n.t("ui.dialogs.vectorConversionUnavailable", { error: formatError(error) });
   }
 }
 
 function openImageVectorizer() {
   try {
     const source = currentDocument.elements.find((element) => element.id === selectedId);
-    if (!source || source.type !== "image") throw new Error("Selecione uma imagem raster incorporada.");
+    if (!source || source.type !== "image") {
+      throw new Error("Selecione uma imagem raster para converter em vetores.");
+    }
     const layer = currentDocument.layers.find((candidate) => candidate.id === source.layerId);
     if (!layer || layer.locked) throw new Error("Desbloqueie a camada da imagem antes de convertê-la.");
     imageVectorSourceId = source.id;
@@ -1681,7 +2075,7 @@ function openImageVectorizer() {
     byId("image-vector-dialog").showModal();
     void updateImageVectorPreview();
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
@@ -1689,7 +2083,9 @@ function applyImageVectorization() {
   try {
     const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
     const layer = currentDocument.layers.find((candidate) => candidate.id === source?.layerId);
-    if (!source || source.type !== "image" || !imageVectorResult) throw new Error("Gere uma prévia válida antes de aplicar.");
+    if (!source || source.type !== "image" || !imageVectorResult) {
+      throw new Error("Gere uma prévia vetorial válida para uma imagem raster antes de aplicar.");
+    }
     if (!layer || layer.locked) throw new Error("A camada da imagem não está disponível.");
     const styles = imageVectorStyleOptions();
     const convertedElements = imageVectorResult.elements
@@ -1713,7 +2109,7 @@ function applyImageVectorization() {
     byId("image-vector-dialog").close();
     showNotice(`${convertedIds.length} região(ões) vetorial(is) sólida(s) criada(s) em ${new Set(convertedElements.map((element) => element.color)).size} cor(es).`);
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
@@ -1734,17 +2130,21 @@ function openPathEditor() {
         renderPreview();
         commitHistory();
       } catch (error) {
-        showNotice(error.message);
+        showNotice(error);
         return false;
       }
     });
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
 function newDocument() {
+  projectNameInput.value = i18n.t("app.unsavedProject");
+  projectNameIsUserValue = false;
   currentDocument = createDocument({ widthMm: 180, heightMm: 120 });
+    generatedLayerNames.clear();
+    generatedLayerNames.set(currentDocument.layers[0].id, { kind: "engraving" });
   activeLayerId = currentDocument.layers[0].id;
   widthInput.value = "180";
   heightInput.value = "120";
@@ -1761,7 +2161,25 @@ function newDocument() {
   showNotice("Novo trabalho criado.");
 }
 
-for (const input of [widthInput, heightInput, originInput, flipXInput, flipYInput]) {
+function renderDocumentFields(commit = false) {
+  for (const input of [widthInput, heightInput]) {
+    const result = validateNumberField(input);
+    if (!result.valid) {
+      showNumberFieldError(input, result, i18n.t);
+      input.focus({ preventScroll: true });
+      return;
+    }
+    clearNumberFieldError(input);
+  }
+  renderPreview();
+  if (commit) commitHistory();
+}
+
+for (const input of [widthInput, heightInput]) {
+  input.addEventListener("input", () => renderDocumentFields());
+  input.addEventListener("change", () => renderDocumentFields(true));
+}
+for (const input of [originInput, flipXInput, flipYInput]) {
   input.addEventListener("input", renderPreview);
   input.addEventListener("change", () => {
     renderPreview();
@@ -1781,7 +2199,15 @@ function updateSelectedFromInput(input) {
   };
   if (numericProperties[input.id]) {
     const [property, minimum] = numericProperties[input.id];
-    updateSelected({ [property]: numberFrom(input, property, minimum) });
+    const value = numberFrom(input, property, minimum);
+    const patch = { [property]: value };
+    const current = currentDocument.elements.find((element) => element.id === selectedId);
+    const other = property === "widthMm" ? "heightMm" : "widthMm";
+    if (byId("object-lock-ratio").checked && current && ["widthMm", "heightMm"].includes(property)
+      && current.widthMm > 0 && current.heightMm > 0 && value > 0) {
+      patch[other] = current[other] * value / current[property];
+    }
+    updateSelected(patch);
   } else if (input.id === "object-text") {
     updateSelected({ text: input.value }, true, false);
   } else if (input.id === "object-font") {
@@ -1794,7 +2220,7 @@ for (const input of byId("object-inspector").querySelectorAll("input, textarea, 
     try {
       updateSelectedFromInput(input);
     } catch (error) {
-      showNotice(error.message);
+      showNotice(error);
     }
   });
 }
@@ -1814,10 +2240,10 @@ byId("orientation").addEventListener("click", () => {
   commitHistory();
 });
 byId("add-text").addEventListener("click", () => {
-  try { addText(); } catch (error) { showNotice(error.message); }
+  try { addText(); } catch (error) { showNotice(error); }
 });
 byId("add-shape").addEventListener("click", () => {
-  try { addShape(); } catch (error) { showNotice(error.message); }
+  try { addShape(); } catch (error) { showNotice(error); }
 });
 removeButton.addEventListener("click", removeSelectedObject);
 byId("duplicate-selection").addEventListener("click", duplicateSelectedObject);
@@ -1881,7 +2307,7 @@ function pasteCopiedObjects() {
     commitHistory();
     showNotice(`${pasted.length} objeto(s) colado(s) na camada "${targetLayer.name}".`);
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
@@ -1906,7 +2332,7 @@ function duplicateSelectedObject() {
     renderPreview();
     commitHistory();
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
@@ -1914,7 +2340,8 @@ function duplicateLayer(layerId) {
   try {
     const source = currentDocument.layers.find((layer) => layer.id === layerId);
     if (!source) throw new RangeError("A camada a duplicar não foi encontrada.");
-    const baseName = `${source.name} (cópia)`;
+    const sourceIndex = currentDocument.layers.findIndex((layer) => layer.id === source.id);
+    const baseName = i18n.t("ui.layers.copyName", { name: getLayerDisplayName(source, sourceIndex) });
     let name = baseName;
     let suffix = 2;
     while (currentDocument.layers.some((layer) => layer.name === name)) {
@@ -1940,15 +2367,24 @@ function duplicateLayer(layerId) {
       layers,
       elements: [...currentDocument.elements, ...duplicatedElements]
     });
+    generatedLayerNames.set(duplicate.id, {
+      kind: "copy",
+      sourceId: source.id,
+      sourceName: getLayerDisplayName(source, sourceIndex),
+      suffix: name === baseName ? "" : ` ${suffix - 1}`
+    });
     activeLayerId = duplicate.id;
     selectedIds = duplicatedElements.map((element) => element.id);
     selectedId = selectedIds.at(-1) ?? null;
     syncInspector();
     renderPreview();
     commitHistory();
-    showNotice(`Camada "${source.name}" duplicada com ${duplicatedElements.length} objeto(s).`);
+    showNotice(i18n.t("ui.layers.duplicateNotice", {
+      name: getLayerDisplayName(source, sourceIndex),
+      count: duplicatedElements.length
+    }));
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 }
 
@@ -1968,12 +2404,13 @@ function restoreDocument(snapshot) {
 
 function showShortcuts() {
   const list = byId("shortcuts-list");
-  list.replaceChildren(...SHORTCUTS.map(({ keys, description }) => {
+  list.replaceChildren(...SHORTCUTS.map(({ keys, translationKey, toolId }) => {
     const row = document.createElement("tr");
     const keyCell = document.createElement("td");
     const descriptionCell = document.createElement("td");
     keyCell.textContent = keys;
-    descriptionCell.textContent = description;
+    const tool = TOOLS.find((candidate) => candidate.id === toolId);
+    descriptionCell.textContent = i18n.t(translationKey, { tool: tool ? i18n.t(tool.labelKey) : "" });
     row.append(keyCell, descriptionCell);
     return row;
   }));
@@ -1984,7 +2421,7 @@ function addLayer() {
   const layerIndex = currentDocument.layers.length + 1;
   const layer = {
     id: `layer-${crypto.randomUUID()}`,
-    name: `Camada ${layerIndex}`,
+    name: i18n.t("ui.layers.defaultName", { index: layerIndex }),
     operation: "engrave",
     feedMmPerMinute: 300,
     powerPercent: 10,
@@ -1997,6 +2434,7 @@ function addLayer() {
     locked: false,
     color: ["#3978eb", "#e58a2d", "#32a77f", "#9665d8", "#d65d8c", "#5a718f"][layerIndex % 6]
   };
+  generatedLayerNames.set(layer.id, { kind: "numbered" });
   currentDocument = createDocument({ ...currentDocument, layers: [...currentDocument.layers, layer] });
   activeLayerId = layer.id;
   selectedId = null;
@@ -2007,6 +2445,7 @@ function addLayer() {
 }
 
 const layersPanel = new LayersPanel(byId("layers-list"), {
+  t: i18n.t,
   onSelect: (layerId) => {
     activeLayerId = layerId;
     selectedId = null;
@@ -2021,11 +2460,12 @@ const layersPanel = new LayersPanel(byId("layers-list"), {
         ...currentDocument,
         layers: currentDocument.layers.map((layer) => layer.id === layerId ? { ...layer, ...patch } : layer)
       });
+      if (Object.hasOwn(patch, "name")) generatedLayerNames.delete(layerId);
       syncInspector();
       renderPreview();
       commitHistory();
     } catch (error) {
-      showNotice(error.message);
+      showNotice(error);
     }
   },
   onDelete: (layerId) => {
@@ -2036,6 +2476,7 @@ const layersPanel = new LayersPanel(byId("layers-list"), {
       element.layerId === layerId ? { ...element, layerId: fallback.id } : element
     );
     currentDocument = createDocument({ ...currentDocument, layers: remainingLayers, elements });
+    generatedLayerNames.delete(layerId);
     if (activeLayerId === layerId) activeLayerId = fallback.id;
     syncInspector();
     renderPreview();
@@ -2059,12 +2500,14 @@ byId("object-layer").addEventListener("change", (event) => {
 const toolbar = connectToolbar(byId("action-toolbar"), (toolId) => {
   activeTool = toolId;
   const button = byId("action-toolbar").querySelector(`[data-tool="${toolId}"]`);
-  const label = button?.querySelector("span:nth-child(2)")?.textContent ?? toolId;
+  const tool = TOOLS.find((candidate) => candidate.id === toolId);
+  const label = i18n.t(tool?.labelKey ?? "ui.tools.select.label");
+  const description = i18n.t(tool?.descriptionKey ?? "ui.tools.select.description");
   const key = button?.querySelector("kbd")?.textContent ?? "";
-  byId("tool-status").textContent = `${label}: ${button?.dataset.tooltip ?? ""}`;
-  byId("active-tool-status").textContent = `${label} · ${key}`;
+  byId("tool-status").textContent = i18n.t("ui.tools.status", { tool: label, description, shortcut: i18n.t("ui.tools.shortcut", { key }) });
+  renderActiveToolStatus();
   artboard.dataset.tool = toolId;
-});
+}, { t: i18n.t });
 
 new CanvasController(artboard, {
   getDocument: () => currentDocument,
@@ -2098,14 +2541,14 @@ installShortcuts({
     if (next) restoreDocument(next);
   },
   export: () => {
-    try { exportSvg(); } catch (error) { showNotice(error.message); }
+    try { exportSvg(); } catch (error) { showNotice(error); }
   },
   remove: removeSelectedObject,
   duplicate: duplicateSelectedObject,
   copy: copySelectedObjects,
   paste: pasteCopiedObjects,
   addText: () => {
-    try { addText(); } catch (error) { showNotice(error.message); }
+    try { addText(); } catch (error) { showNotice(error); }
   },
   help: showShortcuts,
   deselect: () => selectObject(null)
@@ -2114,12 +2557,12 @@ byId("shortcut-help").addEventListener("click", showShortcuts);
 byId("shortcuts-dialog").querySelector(".dialog-close").addEventListener("click", () => byId("shortcuts-dialog").close());
 byId("open-path-editor").addEventListener("click", openPathEditor);
 byId("edit-image").addEventListener("click", () => {
-  void openImageEditor().catch((error) => showNotice(error.message));
+  void openImageEditor().catch((error) => showNotice(error));
 });
 byId("open-image-vectorizer").addEventListener("click", openImageVectorizer);
 byId("apply-image-vector").addEventListener("click", applyImageVectorization);
 byId("apply-image-edit").addEventListener("click", () => {
-  void applyImageEdit().catch((error) => showNotice(error.message));
+  void applyImageEdit().catch((error) => showNotice(error));
 });
 byId("cancel-image-edit").addEventListener("click", () => byId("image-edit-dialog").close());
 byId("image-edit-dialog").addEventListener("close", () => {
@@ -2148,6 +2591,15 @@ for (const id of [
 byId("image-vector-border-mode").addEventListener("change", updateImageVectorStyleControls);
 byId("image-vector-border-width").addEventListener("input", updateImageVectorStyleControls);
 installTooltips();
+projectNameInput.addEventListener("input", () => {
+  projectNameIsUserValue = true;
+});
+languageSelect.addEventListener("change", () => {
+  i18n.setLocale(languageSelect.value);
+  try { localStorage.setItem("commburn.locale", i18n.locale); } catch {}
+  applyInterfaceLocale();
+});
+applyInterfaceLocale();
 new ResizeObserver(() => resizeBoard()).observe(stage);
 
 for (const button of document.querySelectorAll('[data-action="new"]')) button.addEventListener("click", newDocument);
@@ -2166,33 +2618,35 @@ byId("svg-file-input").addEventListener("change", async (event) => {
       await openImageEditor(file);
     }
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   } finally {
     event.target.value = "";
   }
 });
 for (const button of document.querySelectorAll('[data-action="export"]')) button.addEventListener("click", () => {
-  try { exportSvg(); } catch (error) { showNotice(error.message); }
+  try { exportSvg(); } catch (error) { showNotice(error); }
 });
 for (const button of document.querySelectorAll('[data-action="export-project"]')) button.addEventListener("click", () => {
-  try { exportProject(); } catch (error) { showNotice(error.message); }
+  try { exportProject(); } catch (error) { showNotice(error); }
 });
 for (const button of document.querySelectorAll('[data-action="preview-machine"]')) {
   button.addEventListener("click", showMachinePreview);
 }
 byId("preview-machine-job").addEventListener("click", showMachinePreview);
 for (const button of document.querySelectorAll('[data-action="export-gcode"]')) {
-  button.addEventListener("click", () => {
-    try { exportGcode(); } catch (error) { showNotice(`Não foi possível exportar G-code: ${error.message}`); }
+  button.addEventListener("click", async () => {
+    try { await exportGcode(); } catch (error) {
+      showNotice(error instanceof FieldValidationError
+        ? error
+        : `Não foi possível exportar G-code: ${formatError(error)}`);
+    }
   });
 }
 byId("machine-preview-dialog").querySelector(".dialog-close").addEventListener("click", () => byId("machine-preview-dialog").close());
 byId("start-presentation").addEventListener("click", beginPresentation);
 byId("presentation-exit").addEventListener("click", finishPresentation);
-byId("presentation-pause").addEventListener("click", () => {
-  setPresentationPauseLabel(!presentationPaused);
-});
 byId("presentation-restart").addEventListener("click", restartPresentation);
+byId("presentation-toggle").addEventListener("click", togglePresentationPlayback);
 byId("machine-preview-dialog").addEventListener("close", () => {
   if (presentationInternalClose) {
     presentationInternalClose = false;
@@ -2207,15 +2661,12 @@ document.addEventListener("keydown", (event) => {
   event.stopImmediatePropagation();
   if (event.key === "Escape") finishPresentation();
 }, true);
-for (const button of document.querySelectorAll('[data-action="add-text"]')) button.addEventListener("click", () => byId("add-text").click());
-for (const button of document.querySelectorAll('[data-action="add-rect"]')) button.addEventListener("click", () => byId("add-shape").click());
-
 byId("refresh-ports").addEventListener("click", async () => {
   try {
     const { warning } = await refreshPorts();
     showNotice(warning ?? "Lista de portas seriais atualizada.");
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 });
 connectButton.addEventListener("click", async () => {
@@ -2230,15 +2681,12 @@ connectButton.addEventListener("click", async () => {
     machineSimulation = false;
     if (result.autoDetected) byId("baud-rate").value = String(result.baudRate);
     byId("machine-smax").value = "";
-    const baudDescription = result.autoDetected
-      ? `baud detectado automaticamente: ${result.baudRate}`
-      : `${result.baudRate} baud selecionado`;
-    machineState.textContent = `Conectado em ${result.path}; ${baudDescription}. Verifique o firmware e a máquina antes de enviar.`;
+    setMachineState("ui.machine.connectedAt", () => ({ path: result.path, baud: i18n.t(result.autoDetected ? "ui.machine.baudDetected" : "ui.machine.baudSelected", { rate: result.baudRate }) }));
     reportControllerSettings(result);
     updateMachineControls();
   } catch (error) {
-    machineState.textContent = `Falha na conexão: ${error.message}`;
-    showNotice(error.message);
+    setMachineState("ui.machine.connectionFailure", () => ({ error: formatError(error) }));
+    showNotice(error);
   }
 });
 byId("read-machine-settings").addEventListener("click", async () => {
@@ -2246,7 +2694,7 @@ byId("read-machine-settings").addEventListener("click", async () => {
     const result = await machineApi("/api/settings", "POST", {});
     reportControllerSettings(result);
   } catch (error) {
-    reportControllerSettings({ settingsError: error.message });
+    reportControllerSettings({ settingsError: formatError(error) });
   }
 });
 simulateMachineButton.addEventListener("click", async () => {
@@ -2254,11 +2702,11 @@ simulateMachineButton.addEventListener("click", async () => {
     const result = await machineApi("/api/simulate-connect", "POST", {});
     machineConnected = result.connected;
     machineSimulation = result.simulated;
-    machineState.textContent = "Simulador GRBL conectado. Nenhum hardware ou laser será acionado.";
+    setMachineState("ui.machine.simulatedConnected");
     updateMachineControls();
   } catch (error) {
-    machineState.textContent = `Falha ao iniciar simulador: ${error.message}`;
-    showNotice(error.message);
+    setMachineState("ui.machine.simulationFailure", () => ({ error: formatError(error) }));
+    showNotice(error);
   }
 });
 disconnectButton.addEventListener("click", async () => {
@@ -2266,19 +2714,58 @@ disconnectButton.addEventListener("click", async () => {
     await machineApi("/api/disconnect", "POST", {});
     machineConnected = false;
     machineSimulation = false;
-    machineState.textContent = "Desconectado.";
+    setMachineState("ui.machine.disconnected");
     updateMachineControls();
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 });
 safetyCheckbox.addEventListener("change", updateMachineControls);
+// Placement options do not change the document, so only the markers are redrawn and the sidebar keeps its scroll.
+function refreshPlacement() {
+  const sidebar = document.querySelector(".sidebar");
+  const scrollTop = sidebar.scrollTop;
+  updateMachineControls();
+  drawJobMarkers(currentDocument);
+  sidebar.scrollTop = scrollTop;
+}
+for (const id of ["show-job-markers", "start-anchor", "work-system", "start-from"]) byId(id).addEventListener("change", refreshPlacement);
+byId("read-position").addEventListener("click", async () => {
+  try {
+    const { position } = await machineApi("/api/position");
+    const format = (value) => value === undefined || value === null ? "?" : value.toFixed(3);
+    byId("machine-position").textContent = position?.work
+      ? i18n.t("ui.machine.positionRead", { mx: format(position.machine?.xMm), my: format(position.machine?.yMm), wx: format(position.work.xMm), wy: format(position.work.yMm) })
+      : i18n.t("ui.machine.positionMachineOnly", { mx: format(position?.machine?.xMm), my: format(position?.machine?.yMm) });
+  } catch (error) {
+    showNotice(error);
+  }
+});
+byId("set-zero").addEventListener("click", async () => {
+  try {
+    const system = byId("work-system").value || "G54";
+    await machineApi("/api/set-zero", "POST", { slot: Number(system.slice(1)) - 53 });
+    showNotice(i18n.t("ui.machine.zeroSet", { slot: system }));
+  } catch (error) {
+    showNotice(error);
+  }
+});
+byId("home-machine").addEventListener("click", async () => {
+  try {
+    if (!window.confirm(i18n.t("ui.machine.homeConfirm"))) return;
+    await machineApi("/api/home", "POST", { confirmed: true });
+    showNotice(i18n.t("ui.machine.homed"));
+  } catch (error) {
+    showNotice(error);
+  }
+});
 byId("machine-smax").addEventListener("input", updateMachineControls);
 startMachineButton.addEventListener("click", async () => {
   try {
-    if (!machineSimulation && !safetyCheckbox.checked) throw new Error("Confirme a lista de segurança antes de enviar.");
+    if (!machineSimulation && !safetyCheckbox.checked) throw new Error(i18n.t("ui.machine.confirmSafety"));
     const documentModel = readDocument();
-    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation) };
+    await prepareRasters(documentModel);
+    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), ...readJobPlacement() };
     const simulationPlan = machineSimulation
       ? planGrblJob(documentModel, settings)
       : null;
@@ -2288,28 +2775,59 @@ startMachineButton.addEventListener("click", async () => {
       settings
     });
     machineBusy = true;
-    machineState.textContent = machineSimulation
-      ? `Simulação aceita: ${result.lines} comandos. Nenhum hardware será acionado.`
-      : `Trabalho aceito: ${result.lines} comandos.`;
+    setMachineState(machineSimulation ? "ui.machine.simulationAccepted" : "ui.machine.jobAccepted", { lines: result.lines });
     if (simulationPlan) showMachineSimulation(simulationPlan, documentModel, result.lines);
     updateMachineControls();
     statusPollTimer = setInterval(pollMachineJob, 500);
     await pollMachineJob();
   } catch (error) {
-    machineState.textContent = `Trabalho recusado: ${error.message}`;
-    showNotice(error.message);
+    setMachineState("ui.machine.rejected", () => ({ error: formatError(error) }));
+    showNotice(error);
   }
 });
 holdMachineButton.addEventListener("click", async () => {
   try {
     await machineApi("/api/hold", "POST", {});
-    machineState.textContent = "Pausa solicitada; use a parada de emergência física se houver risco.";
-    showNotice("Pausa solicitada ao controlador.");
+    setMachineState("ui.machine.pauseWarning");
+    showNotice(i18n.t("ui.machine.pauseRequested"));
   } catch (error) {
-    showNotice(error.message);
+    showNotice(error);
   }
 });
 
+await Promise.all(["CommBurn Sans", "CommBurn Serif", "CommBurn Mono"].map((family) => document.fonts.load(`16px "${family}"`)));
 renderPreview();
 updateMachineControls();
 void restoreMachineConnection();
+void loadDesktopPlugins({
+  i18n,
+  documentApi: (plugin) => Object.freeze({
+    get: () => structuredClone(readDocument()),
+    addElement(element) {
+      if (!element || typeof element !== "object" || Array.isArray(element)) {
+        throw new TypeError("O plugin deve fornecer um objeto vetorial válido.");
+      }
+      const documentModel = readDocument();
+      const layerId = element.layerId ?? activeLayerId;
+      const layer = documentModel.layers.find((candidate) => candidate.id === layerId);
+      if (!layer || layer.locked) throw new Error("O plugin precisa usar uma camada desbloqueada.");
+      const id = element.id ?? `plugin-${plugin.id}-${nextId++}`;
+      const nextElement = { ...element, id, layerId };
+      currentDocument = createDocument({ ...documentModel, elements: [...documentModel.elements, nextElement] });
+      selectedId = id;
+      selectedIds = [id];
+      syncInspector();
+      renderPreview();
+      commitHistory();
+      return id;
+    }
+  }),
+  notify: showNotice
+}).then(({ errors }) => {
+  if (errors.length === 0) return;
+  console.warn("CommBurn plugin errors:", errors);
+  showNotice(`Falha ao carregar plugins: ${errors.map(({ id }) => id).join(", ")}`);
+}).catch((error) => {
+  console.warn("Unable to load CommBurn plugins:", error);
+  showNotice(`Não foi possível carregar plugins locais: ${formatError(error)}`);
+});

@@ -1,10 +1,11 @@
 import { importSvgTree } from "./svg-import.js";
+import { CommBurnRangeError, CommBurnTypeError } from "./i18n.js";
 
 const MAX_PATHS = 15_000;
 
 function positiveFinite(value, label) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new RangeError(`${label} must be a finite number greater than zero`);
+    throw new CommBurnRangeError("imageTrace.invalidDimension", { label }, { message: `${label} must be a finite number greater than zero` });
   }
   return value;
 }
@@ -17,16 +18,34 @@ function cloneNode(node) {
   };
 }
 
+function removeTracerStrokes(node) {
+  if (node.name === "path") {
+    delete node.attributes.stroke;
+    delete node.attributes["stroke-width"];
+  }
+  for (const child of node.children ?? []) removeTracerStrokes(child);
+}
+
 export function importTracedImageSvg(tree, options) {
   const widthMm = positiveFinite(options.widthMm, "widthMm");
   const heightMm = positiveFinite(options.heightMm, "heightMm");
+  const xMm = options.xMm ?? 0;
+  const yMm = options.yMm ?? 0;
+  for (const [label, value] of [["xMm", xMm], ["yMm", yMm]]) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new CommBurnRangeError("imageTrace.invalidPosition", { label }, { message: `${label} must be finite` });
+    }
+  }
   const sourceLayer = options.sourceLayer;
   if (!sourceLayer || sourceLayer.locked) {
-    throw new RangeError("image vectors require an unlocked layer");
+    throw new CommBurnRangeError("imageTrace.lockedLayer", {}, { message: "image vectors require an unlocked layer" });
   }
 
   const root = cloneNode(tree);
-  if (root.name !== "svg" || root.type !== "element") throw new TypeError("Image tracer output must have an SVG root");
+  if (root.name !== "svg" || root.type !== "element") {
+    throw new CommBurnTypeError("imageTrace.invalidRoot", {}, { message: "Image tracer output must have an SVG root" });
+  }
+  removeTracerStrokes(root);
   delete root.attributes.desc;
   root.attributes.width = `${widthMm}mm`;
   root.attributes.height = `${heightMm}mm`;
@@ -39,15 +58,21 @@ export function importTracedImageSvg(tree, options) {
   });
   const colorsByLayer = new Map(imported.layers.map((layer) => [layer.id, layer.color]));
   const elements = imported.elements.map((element) => {
-    if (element.type !== "path") throw new TypeError("Image tracer output contains non-path geometry");
+    if (element.type !== "path") {
+      throw new CommBurnTypeError("imageTrace.invalidGeometry", {}, { message: "Image tracer output contains non-path geometry" });
+    }
     const color = colorsByLayer.get(element.layerId);
-    if (!color) throw new RangeError(`Traced path refers to missing color "${element.layerId}"`);
+    if (!color) {
+      throw new CommBurnRangeError("imageTrace.missingColor", { layerId: element.layerId }, { message: `Traced path refers to missing color "${element.layerId}"` });
+    }
     return { ...element, layerId: sourceLayer.id, color };
   });
   if (elements.length > MAX_PATHS) {
-    throw new RangeError(`Image tracing creates more than ${MAX_PATHS} paths; reduce the color count or detail`);
+    throw new CommBurnRangeError("imageTrace.tooManyPaths", { maxPaths: MAX_PATHS }, { message: `Image tracing creates more than ${MAX_PATHS} paths; reduce the color count or detail` });
   }
-  if (elements.length === 0) throw new RangeError("Image tracing produced no vector regions");
+  if (elements.length === 0) {
+    throw new CommBurnRangeError("imageTrace.noRegions", {}, { message: "Image tracing produced no vector regions" });
+  }
   const bounds = elements.reduce((result, element) => ({
     minX: Math.min(result.minX, element.xMm),
     minY: Math.min(result.minY, element.yMm),
@@ -57,7 +82,7 @@ export function importTracedImageSvg(tree, options) {
   const tracedWidthMm = bounds.maxX - bounds.minX;
   const tracedHeightMm = bounds.maxY - bounds.minY;
   if (![tracedWidthMm, tracedHeightMm].every(Number.isFinite) || tracedWidthMm <= 0 || tracedHeightMm <= 0) {
-    throw new RangeError("Image tracing produced invalid vector bounds");
+    throw new CommBurnRangeError("imageTrace.invalidBounds", {}, { message: "Image tracing produced invalid vector bounds" });
   }
   const scaleX = widthMm / tracedWidthMm;
   const scaleY = heightMm / tracedHeightMm;
@@ -72,8 +97,8 @@ export function importTracedImageSvg(tree, options) {
       : (element.yMm + element.heightMm - bounds.minY) * scaleY;
     return {
       ...element,
-      xMm: left,
-      yMm: top,
+      xMm: xMm + left,
+      yMm: yMm + top,
       widthMm: right - left,
       heightMm: bottom - top
     };

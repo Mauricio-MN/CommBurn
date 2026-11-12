@@ -3,16 +3,16 @@ import { TOOLS } from "./toolbar.js";
 const EDITABLE_SELECTOR = "input, textarea, select, [contenteditable='true']";
 
 export const SHORTCUTS = Object.freeze([
-  ...TOOLS.map(({ key, label }) => ({ keys: key, description: `${label} ferramenta` })),
-  { keys: "Ctrl+Enter", description: "Adicionar texto" },
-  { keys: "Ctrl+C", description: "Copiar objeto(s) selecionado(s)" },
-  { keys: "Ctrl+V", description: "Colar na camada ativa" },
-  { keys: "Delete", description: "Remover objeto(s) selecionado(s)" },
-  { keys: "Ctrl+D", description: "Duplicar objeto(s) selecionado(s)" },
-  { keys: "Ctrl+Z", description: "Desfazer" },
-  { keys: "Ctrl+Y", description: "Refazer" },
-  { keys: "Ctrl+S", description: "Exportar SVG" },
-  { keys: "?", description: "Mostrar atalhos" }
+  ...TOOLS.map(({ id, key }) => ({ keys: key, translationKey: "ui.shortcuts.tool", toolId: id })),
+  { keys: "Ctrl+Enter", translationKey: "ui.shortcuts.addText" },
+  { keys: "Ctrl+C", translationKey: "ui.shortcuts.copy" },
+  { keys: "Ctrl+V", translationKey: "ui.shortcuts.paste" },
+  { keys: "Delete", translationKey: "ui.shortcuts.remove" },
+  { keys: "Ctrl+D", translationKey: "ui.shortcuts.duplicate" },
+  { keys: "Ctrl+Z", translationKey: "ui.shortcuts.undo" },
+  { keys: "Ctrl+Y", translationKey: "ui.shortcuts.redo" },
+  { keys: "Ctrl+S", translationKey: "ui.shortcuts.export" },
+  { keys: "?", translationKey: "ui.shortcuts.help" }
 ]);
 
 export function installShortcuts(actions) {

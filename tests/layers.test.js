@@ -99,7 +99,12 @@ test("GRBL plan estimates work time per operation using configured feed and pass
 });
 
 test("layer configurations and object layer references are validated", () => {
-  assert.throws(() => createDocument({ layers: [] }), /at least one layer/);
+  assert.throws(() => createDocument({ layers: [] }), (error) => {
+    assert.ok(error instanceof RangeError);
+    assert.equal(error.code, "layers.invalidCount");
+    assert.match(error.message, /at least one layer/);
+    return true;
+  });
   assert.throws(() => createDocument({
     layers: [{ id: "bad", operation: "unknown" }]
   }), /unsupported operation/);

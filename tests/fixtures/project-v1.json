@@ -1,0 +1,81 @@
+{
+  "format": "commburn-project",
+  "version": 1,
+  "document": {
+    "widthMm": 50,
+    "heightMm": 40,
+    "origin": {
+      "corner": "top-left",
+      "flipX": false,
+      "flipY": false
+    },
+    "layers": [
+      {
+        "id": "engrave",
+        "name": "Engrave",
+        "operation": "engrave",
+        "feedMmPerMinute": 300,
+        "powerPercent": 10,
+        "passes": 1,
+        "fillSpacingMm": 1,
+        "fillAlgorithm": "horizontal-serpentine",
+        "objectOrder": "document",
+        "enabled": true,
+        "visible": true,
+        "locked": false,
+        "color": "#3978eb"
+      }
+    ],
+    "elements": [
+      {
+        "id": "frame",
+        "type": "rect",
+        "xMm": 1,
+        "yMm": 2,
+        "widthMm": 12,
+        "heightMm": 8,
+        "rotationDeg": 0,
+        "skewXDeg": 0,
+        "skewYDeg": 0,
+        "layerId": "engrave"
+      },
+      {
+        "id": "label",
+        "type": "text",
+        "xMm": 4,
+        "yMm": 15,
+        "text": "Legacy",
+        "fontSizeMm": 6,
+        "fontFamily": "sans-serif",
+        "rotationDeg": 0,
+        "skewXDeg": 0,
+        "skewYDeg": 0,
+        "layerId": "engrave"
+      },
+      {
+        "id": "svg-reference",
+        "type": "svg-image",
+        "xMm": 25,
+        "yMm": 3,
+        "widthMm": 10,
+        "heightMm": 10,
+        "svgDataUri": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMG1tIiBoZWlnaHQ9IjEwbW0iPjxjaXJjbGUgY3g9IjUiIGN5PSI1IiByPSI0Ii8+PC9zdmc+",
+        "layerId": "engrave"
+      },
+      {
+        "id": "raster-reference",
+        "type": "image",
+        "xMm": 38,
+        "yMm": 3,
+        "widthMm": 5,
+        "heightMm": 5,
+        "imageDataUri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=",
+        "preserveAspectRatio": "xMidYMid meet",
+        "rotationDeg": 0,
+        "skewXDeg": 0,
+        "skewYDeg": 0,
+        "layerId": "engrave"
+      }
+    ]
+  }
+}
