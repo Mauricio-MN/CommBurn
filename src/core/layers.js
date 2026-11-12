@@ -5,7 +5,10 @@ export const FILL_ALGORITHMS = Object.freeze([
   "horizontal-serpentine",
   "vertical-serpentine",
   "crosshatch",
-  "horizontal-unidirectional"
+  "horizontal-unidirectional",
+  "vertical-unidirectional",
+  "diagonal-serpentine",
+  "diagonal-crosshatch"
 ]);
 export const OBJECT_ORDERS = Object.freeze(["document", "nearest", "center-out"]);
 function finitePositive(value, label) {

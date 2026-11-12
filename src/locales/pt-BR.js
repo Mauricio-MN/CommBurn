@@ -68,7 +68,7 @@ export default Object.freeze({
       height: "Altura",
       orientation: "↻ Alternar orientação",
       coordinates: "Posição e sentido",
-      coordinatesDescription: "Definidos por você, sem sensores",
+      coordinatesDescription: "Método manual: você escolhe a origem e os eixos; nenhum sensor é lido",
       origin: "Origem das coordenadas",
       topLeft: "Canto superior esquerdo",
       topRight: "Canto superior direito",
@@ -76,7 +76,7 @@ export default Object.freeze({
       bottomRight: "Canto inferior direito",
       flipX: "Inverter eixo X",
       flipY: "Inverter eixo Y",
-      coordinatesHelp: "Origem e eixos são aplicados à exportação. O desenho do texto permanece legível."
+      coordinatesHelp: "Método manual: o G-code usa coordenadas absolutas (G90) a partir da origem escolhida aqui. Antes de executar, posicione a cabeça do laser nesse canto e defina-o como zero (X0 Y0) no controlador. O CommBurn não lê sensores nem fins de curso. O desenho do texto permanece legível."
     },
     layers: {
       title: "Camadas de trabalho",
@@ -110,7 +110,10 @@ export default Object.freeze({
         horizontal: "Horizontal serpentina",
         vertical: "Vertical serpentina",
         crosshatch: "Cruzado (horizontal + vertical)",
-        unidirectional: "Horizontal unidirecional"
+        unidirectional: "Horizontal unidirecional",
+        verticalUnidirectional: "Vertical unidirecional",
+        diagonal: "Diagonal serpentina (45°)",
+        diagonalCrosshatch: "Diagonal cruzada (45° + 135°)"
       },
       order: { document: "Ordem da lista", nearest: "Mais próximo primeiro", centerOut: "Centro para bordas" }
     },

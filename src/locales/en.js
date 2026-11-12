@@ -68,7 +68,7 @@ export default Object.freeze({
       height: "Height",
       orientation: "↻ Change orientation",
       coordinates: "Position and direction",
-      coordinatesDescription: "Set by you, without sensors",
+      coordinatesDescription: "Manual method: you choose the origin and axes; no sensor is read",
       origin: "Coordinate origin",
       topLeft: "Top left corner",
       topRight: "Top right corner",
@@ -76,7 +76,7 @@ export default Object.freeze({
       bottomRight: "Bottom right corner",
       flipX: "Flip X axis",
       flipY: "Flip Y axis",
-      coordinatesHelp: "Origin and axes are applied to exports. Text remains readable."
+      coordinatesHelp: "Manual method: the G-code uses absolute coordinates (G90) from the origin chosen here. Before running, move the laser head to that corner and set it as zero (X0 Y0) in the controller. CommBurn reads no sensors or limit switches. Text drawing stays readable."
     },
     layers: {
       title: "Work layers",
@@ -110,7 +110,10 @@ export default Object.freeze({
         horizontal: "Horizontal serpentine",
         vertical: "Vertical serpentine",
         crosshatch: "Crosshatch (horizontal + vertical)",
-        unidirectional: "Horizontal unidirectional"
+        unidirectional: "Horizontal unidirectional",
+        verticalUnidirectional: "Vertical unidirectional",
+        diagonal: "Diagonal serpentine (45°)",
+        diagonalCrosshatch: "Diagonal crosshatch (45° + 135°)"
       },
       order: { document: "List order", nearest: "Nearest first", centerOut: "Center outward" }
     },

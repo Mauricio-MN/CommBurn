@@ -117,4 +117,4 @@ Cada valor inválido aponta para o controle que falhou, usa a unidade/limite per
 2. SVG: removida a ação que rasterizava SVG visual; importação editável por cor/camada gera geometrias nativas e trajetórias compatíveis.
 3. Apresentação: sete etapas com subetapas (digitação, escolha e cliques nos controles reais), ponteiro `mouse-cursor-presentation.svg`, pausa/retomada e reinício; estado original restaurado ao sair.
 4. Validação: erros numéricos distinguem formato, obrigatório, mínimo, máximo e passo; mensagens acessíveis e locais incluem unidade.
-5. Verificação: `npm test` passou com 117 testes.
+5. Verificação: `npm test` passou com 118 testes.

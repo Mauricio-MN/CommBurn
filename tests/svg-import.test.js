@@ -516,3 +516,27 @@ test("STAGE preview: every vector type looks the same way per operation (fill so
     assert.match(tagOf(render("cut"), id), /fill="none" stroke="#123456"[^>]*stroke-dasharray/, `cut ${id}`);
   }
 });
+
+test("diagonal and vertical-unidirectional fills stay inside the shape and follow the right direction", () => {
+  const element = { id: "tri", type: "path", xMm: 2, yMm: 2, widthMm: 10, heightMm: 10, pathData: "M0 0L10 0L10 10Z", layerId: "f" };
+  const rect = { id: "box", type: "rect", xMm: 2, yMm: 2, widthMm: 10, heightMm: 10, layerId: "f" };
+  const run = (algorithm, el) => planGrblJob({
+    widthMm: 20, heightMm: 20,
+    layers: [{ ...DEFAULT_LAYER, id: "f", operation: "fill", fillAlgorithm: algorithm, fillSpacingMm: 1 }],
+    elements: [el]
+  }, { maxSpindleSpeed: 1000 }).paths.filter(({ kind }) => kind === "work");
+  for (const el of [element, rect]) {
+    for (const algorithm of ["diagonal-serpentine", "diagonal-crosshatch"]) {
+      const paths = run(algorithm, el);
+      assert.ok(paths.length > 5, `${algorithm} ${el.id}`);
+      for (const { points } of paths) for (const { xMm, yMm } of points) {
+        assert.ok(xMm >= 1.99 && xMm <= 12.01 && yMm >= 1.99 && yMm <= 12.01, `${algorithm} ${el.id} stays inside`);
+      }
+      const [{ points: [first, second] }] = paths;
+      assert.ok(Math.abs(Math.abs(second.xMm - first.xMm) - Math.abs(second.yMm - first.yMm)) < 1e-6, "45 degrees");
+    }
+  }
+  const vertical = run("vertical-unidirectional", rect);
+  assert.ok(vertical.every(({ points: [a, b] }) => b.yMm !== a.yMm && a.xMm === b.xMm));
+  assert.equal(new Set(vertical.map(({ points: [a, b] }) => Math.sign(b.yMm - a.yMm))).size, 1);
+});

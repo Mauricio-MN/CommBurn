@@ -56,7 +56,7 @@
         </section>
 
         <section class="panel" data-ui-module="coordinate-settings" data-extension-slot="coordinate-settings">
-          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌖</span><div><h2 data-i18n="ui.document.coordinates">Posição e sentido</h2><p data-i18n="ui.document.coordinatesDescription">Definidos por você, sem sensores</p></div></div>
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌖</span><div><h2 data-i18n="ui.document.coordinates">Posição e sentido</h2><p data-i18n="ui.document.coordinatesDescription">Método manual: você escolhe a origem e os eixos; nenhum sensor é lido</p></div></div>
           <label class="field" data-i18n="ui.document.origin">Origem das coordenadas<select id="origin">
             <option value="top-left" data-i18n="ui.document.topLeft">Canto superior esquerdo</option><option value="top-right" data-i18n="ui.document.topRight">Canto superior direito</option>
             <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
@@ -65,7 +65,7 @@
             <label class="toggle"><input id="flip-x" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipX">Inverter eixo X</span></label>
             <label class="toggle"><input id="flip-y" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipY">Inverter eixo Y</span></label>
           </div>
-          <p class="help-text" data-i18n="ui.document.coordinatesHelp">Origem e eixos são aplicados à exportação. O desenho do texto permanece legível.</p>
+          <p class="help-text" data-i18n="ui.document.coordinatesHelp">Método manual: o G-code usa coordenadas absolutas (G90) a partir da origem escolhida aqui. Antes de executar, posicione a cabeça do laser nesse canto e defina-o como zero (X0 Y0) no controlador. O CommBurn não lê sensores nem fins de curso. O desenho do texto permanece legível.</p>
         </section>
 
         <section class="panel layers-panel" data-ui-module="layers" data-extension-slot="layers" aria-labelledby="layers-title">

@@ -13,7 +13,10 @@ const FILL_ALGORITHMS = [
   { value: "horizontal-serpentine", labelKey: "ui.layers.algorithm.horizontal" },
   { value: "vertical-serpentine", labelKey: "ui.layers.algorithm.vertical" },
   { value: "crosshatch", labelKey: "ui.layers.algorithm.crosshatch" },
-  { value: "horizontal-unidirectional", labelKey: "ui.layers.algorithm.unidirectional" }
+  { value: "horizontal-unidirectional", labelKey: "ui.layers.algorithm.unidirectional" },
+  { value: "vertical-unidirectional", labelKey: "ui.layers.algorithm.verticalUnidirectional" },
+  { value: "diagonal-serpentine", labelKey: "ui.layers.algorithm.diagonal" },
+  { value: "diagonal-crosshatch", labelKey: "ui.layers.algorithm.diagonalCrosshatch" }
 ];
 const OBJECT_ORDERS = [
   { value: "document", labelKey: "ui.layers.order.document" },

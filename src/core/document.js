@@ -497,7 +497,7 @@ function fillPaths(element, algorithm, spacingMm) {
   const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
   const columnCount = Math.floor(element.widthMm / spacingMm) + 1;
   const usesHorizontal = ["horizontal-serpentine", "horizontal-unidirectional", "crosshatch"].includes(algorithm);
-  const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
+  const usesVertical = ["vertical-serpentine", "vertical-unidirectional", "crosshatch"].includes(algorithm);
   if ((usesHorizontal && rowCount > 50000) || (usesVertical && columnCount > 50000)
     || ((usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0)) > 50000) {
     throw new RangeError(`O preenchimento de ${element.id} excede 50.000 linhas de varredura; aumente o espaçamento.`);
@@ -514,7 +514,7 @@ function fillPaths(element, algorithm, spacingMm) {
   if (usesVertical) {
     for (let column = 0; column < columnCount; column += 1) {
       const xMm = Math.min(element.xMm + column * spacingMm, element.xMm + element.widthMm);
-      const reverse = column % 2 === 1;
+      const reverse = algorithm !== "vertical-unidirectional" && column % 2 === 1;
       vertical.push(reverse
         ? [[xMm, element.yMm + element.heightMm], [xMm, element.yMm]]
         : [[xMm, element.yMm], [xMm, element.yMm + element.heightMm]]);
@@ -523,16 +523,42 @@ function fillPaths(element, algorithm, spacingMm) {
   return [...horizontal, ...vertical];
 }
 
-function fillVectorPaths(element, algorithm, spacingMm) {
-  const polygons = flattenVectorPath(element);
+const DIAGONAL_FILL_ANGLES = Object.freeze({ "diagonal-serpentine": [45], "diagonal-crosshatch": [45, -45] });
+
+// Diagonal fills rotate the shape, scan it horizontally, then rotate the routes back.
+function diagonalFillPaths(element, polygons, algorithm, spacingMm) {
+  const routes = [];
+  for (const degrees of DIAGONAL_FILL_ANGLES[algorithm]) {
+    const radians = degrees * Math.PI / 180;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    const rotated = polygons.map((points) => points.map(([x, y]) => [x * cos + y * sin, -x * sin + y * cos]));
+    const flat = rotated.flat();
+    const minX = Math.min(...flat.map((point) => point[0]));
+    const minY = Math.min(...flat.map((point) => point[1]));
+    const scanned = fillVectorPaths({
+      id: element.id,
+      xMm: minX,
+      yMm: minY,
+      widthMm: Math.max(...flat.map((point) => point[0])) - minX,
+      heightMm: Math.max(...flat.map((point) => point[1])) - minY
+    }, "horizontal-serpentine", spacingMm, rotated);
+    for (const route of scanned) routes.push(route.map(([x, y]) => [x * cos - y * sin, x * sin + y * cos]));
+  }
+  return routes;
+}
+
+function fillVectorPaths(element, algorithm, spacingMm, polygonsOverride) {
+  const polygons = polygonsOverride ?? flattenVectorPath(element);
   if (!polygons.length || polygons.some((points) => points.length < 4
     || points[0][0] !== points.at(-1)[0] || points[0][1] !== points.at(-1)[1])) {
     throw new RangeError(`GRBL fill requires closed vector paths; path ${element.id} is open or degenerate`);
   }
+  if (DIAGONAL_FILL_ANGLES[algorithm]) return diagonalFillPaths(element, polygons, algorithm, spacingMm);
   const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
   const columnCount = Math.floor(element.widthMm / spacingMm) + 1;
   const usesHorizontal = ["horizontal-serpentine", "horizontal-unidirectional", "crosshatch"].includes(algorithm);
-  const usesVertical = ["vertical-serpentine", "crosshatch"].includes(algorithm);
+  const usesVertical = ["vertical-serpentine", "vertical-unidirectional", "crosshatch"].includes(algorithm);
   if ((usesHorizontal && rowCount > 50000) || (usesVertical && columnCount > 50000)
     || ((usesHorizontal ? rowCount : 0) + (usesVertical ? columnCount : 0)) > 50000) {
     throw new RangeError(`O preenchimento de ${element.id} excede 50.000 linhas de varredura; aumente o espaçamento.`);
@@ -617,7 +643,7 @@ function fillVectorPaths(element, algorithm, spacingMm) {
   }
   if (usesVertical) {
     visitScanlines(0, element.xMm, element.widthMm, columnCount, (column, xMm, spans) => {
-      const reverse = column % 2 === 1;
+      const reverse = algorithm !== "vertical-unidirectional" && column % 2 === 1;
       appendSpans(0, xMm, spans, reverse);
     });
   }
@@ -648,7 +674,9 @@ function createElementWorkPaths(document, layer, element) {
     [geometryElement.xMm, geometryElement.yMm]
   ];
   const sourcePaths = layer.operation === "fill"
-    ? geometryElement.type === "rect"
+    ? geometryElement.type === "rect" && DIAGONAL_FILL_ANGLES[layer.fillAlgorithm]
+      ? fillVectorPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm, [outline])
+    : geometryElement.type === "rect"
       ? fillPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm)
       : fillVectorPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm)
     : geometryElement.type === "path"
