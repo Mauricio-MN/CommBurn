@@ -1141,10 +1141,11 @@ export function importSvgTree(root, {
             fillColorMode: "layer", strokeColorMode: "none",
             type: "path", ...shape
           });
+          const { strokeWidthMm: bandWidth, ...bandCommon } = common;
           elements.push({
-            ...common, id: `${idPrefix}-${elements.length + 1}`, layerId: splitLayerIds.stroke,
-            fillColorMode: "none", strokeColorMode: "layer",
-            type: "path", ...shape
+            ...bandCommon, id: `${idPrefix}-${elements.length + 1}`, layerId: splitLayerIds.stroke,
+            fillColorMode: "layer", strokeColorMode: "none",
+            type: "path", ...(bandWidth > 0 ? strokeOutlineShape(shape, bandWidth) : shape)
           });
         } else if (forceLayerId && node.name === "path" && fillColor && strokeColor && fillColor !== strokeColor) {
           const { strokeWidthMm: _strokeWidth, ...fillOnly } = common;

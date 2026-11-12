@@ -185,7 +185,7 @@ test("SVG editable import can group geometry into layers by source color", () =>
 test("SVG paths with different fill and stroke colors import as separate layer paths", () => {
   const imported = importSvg(`
     <svg width="20mm" height="10mm" viewBox="0 0 20 10">
-      <path d="M1 1 L5 1 L5 5 Z" style="fill:#ff0000; stroke:#0000ff; stroke-width:1.5"/>
+      <path d="M3 3 L7 3 L7 7 Z" style="fill:#ff0000; stroke:#0000ff; stroke-width:1.5"/>
     </svg>`, { layerId: "active", idPrefix: "split" });
   const [fillPath, strokePath] = imported.elements;
   const fillLayer = imported.layers.find(({ id }) => id === fillPath.layerId);
@@ -196,12 +196,13 @@ test("SVG paths with different fill and stroke colors import as separate layer p
   assert.equal(fillPath.type, "path");
   assert.equal(strokePath.type, "path");
   assert.notEqual(fillPath.id, strokePath.id);
-  assert.equal(fillPath.pathData, strokePath.pathData);
-  assert.equal(strokePath.strokeWidthMm, 1.5);
+  assert.notEqual(fillPath.pathData, strokePath.pathData);
+  assert.equal(strokePath.pathData.match(/M/g).length, 2);
+  assert.equal(strokePath.strokeWidthMm, undefined);
   assert.deepEqual([fillLayer.operation, fillLayer.color], ["fill", "#ff0000"]);
   assert.deepEqual([strokeLayer.operation, strokeLayer.color], ["engrave", "#0000ff"]);
   assert.deepEqual([fillPath.fillColorMode, fillPath.strokeColorMode], ["layer", "none"]);
-  assert.deepEqual([strokePath.fillColorMode, strokePath.strokeColorMode], ["none", "layer"]);
+  assert.deepEqual([strokePath.fillColorMode, strokePath.strokeColorMode], ["layer", "none"]);
   assert.match(rendered, /fill="#ff0000" stroke="none"/);
   assert.match(rendered, /fill="none" stroke="#0000ff" stroke-width="0.2"/);
   assert.ok(plan.paths.some(({ elementId, operation }) => elementId === fillPath.id && operation === "fill"));
