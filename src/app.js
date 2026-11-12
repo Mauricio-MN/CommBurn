@@ -661,7 +661,10 @@ function visualReference(documentModel) {
   const atRight = corner.endsWith("right") !== flipX;
   const atBottom = corner.startsWith("bottom") !== flipY;
   return {
-    bounds: { minXMm: box.x, minYMm: box.y, maxXMm: box.x + box.width, maxYMm: box.y + box.height },
+    bounds: {
+      minXMm: Math.max(0, box.x), minYMm: Math.max(0, box.y),
+      maxXMm: Math.min(documentModel.widthMm, box.x + box.width), maxYMm: Math.min(documentModel.heightMm, box.y + box.height)
+    },
     origin: { xMm: atRight ? documentModel.widthMm : 0, yMm: atBottom ? documentModel.heightMm : 0 },
     xDirection: atRight ? -1 : 1,
     yDirection: atBottom ? -1 : 1,
@@ -682,7 +685,7 @@ function drawJobMarkers(documentModel) {
     reference = visualReference(documentModel);
   }
   if (!reference) return;
-  const size = Math.max(1.4, Math.max(documentModel.widthMm, documentModel.heightMm) / 75);
+  const size = Math.max(2, Math.max(documentModel.widthMm, documentModel.heightMm) / 50);
   const make = (name, attributes, text) => {
     const node = document.createElementNS(SVG_NS, name);
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
