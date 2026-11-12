@@ -61,10 +61,6 @@
             <option value="top-left" data-i18n="ui.document.topLeft">Canto superior esquerdo</option><option value="top-right" data-i18n="ui.document.topRight">Canto superior direito</option>
             <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
           </select></label>
-          <div class="toggle-row">
-            <label class="toggle"><input id="flip-x" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipX">Inverter eixo X</span></label>
-            <label class="toggle"><input id="flip-y" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipY">Inverter eixo Y</span></label>
-          </div>
           <label class="field" data-i18n="ui.document.startFrom">Iniciar o trabalho de<select id="start-from">
             <option value="absolute" data-i18n="ui.document.startAbsolute">Origem absoluta da mesa</option>
             <option value="objects" data-i18n="ui.document.startObjects">Posição dos objetos (cabeça no ponto escolhido)</option>
@@ -74,7 +70,12 @@
             <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
             <option value="center" data-i18n="ui.document.center">Centro</option>
           </select></label>
-          <details class="advanced-details"><summary data-i18n="ui.document.advanced">Avançado</summary><label class="field" data-i18n="ui.document.workSystem">Sistema de coordenadas do controlador<select id="work-system">
+          <details class="advanced-details"><summary data-i18n="ui.document.advanced">Avançado</summary>
+          <div class="toggle-row">
+            <label class="toggle"><input id="flip-x" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipX">Inverter eixo X</span></label>
+            <label class="toggle"><input id="flip-y" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipY">Inverter eixo Y</span></label>
+          </div>
+<label class="field" data-i18n="ui.document.workSystem">Sistema de coordenadas do controlador<select id="work-system">
             <option value="" data-i18n="ui.document.workSystemDefault">Atual do controlador (não enviar)</option>
             <option value="G54">G54</option><option value="G55">G55</option><option value="G56">G56</option>
             <option value="G57">G57</option><option value="G58">G58</option><option value="G59">G59</option>

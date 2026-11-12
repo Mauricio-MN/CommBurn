@@ -294,3 +294,4 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
   .statusbar { flex-wrap: wrap; }
   .statusbar { padding: 9px 12px; }
 }
+.advanced-details { margin: 6px 0; font-size: 11px; color: #5b6b82; } .advanced-details > summary { cursor: pointer; padding: 4px 0; font-weight: 600; } .advanced-details[open] > summary { margin-bottom: 6px; }

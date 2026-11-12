@@ -2633,11 +2633,15 @@ disconnectButton.addEventListener("click", async () => {
   }
 });
 safetyCheckbox.addEventListener("change", updateMachineControls);
-for (const id of ["show-job-markers", "start-anchor", "work-system"]) byId(id).addEventListener("change", renderPreview);
-byId("start-from").addEventListener("change", () => {
+// Placement options do not change the document, so only the markers are redrawn and the sidebar keeps its scroll.
+function refreshPlacement() {
+  const sidebar = document.querySelector(".sidebar");
+  const scrollTop = sidebar.scrollTop;
   updateMachineControls();
-  renderPreview();
-});
+  drawJobMarkers(currentDocument);
+  sidebar.scrollTop = scrollTop;
+}
+for (const id of ["show-job-markers", "start-anchor", "work-system", "start-from"]) byId(id).addEventListener("change", refreshPlacement);
 byId("read-position").addEventListener("click", async () => {
   try {
     const { position } = await machineApi("/api/position");
