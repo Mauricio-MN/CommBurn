@@ -15,6 +15,7 @@
   "dependencies": {
     "@jodit/image-editor": "^0.2.5",
     "imagetracerjs": "^1.2.6",
+    "opentype.js": "^2.0.0",
     "serialport": "^13.0.0",
     "svg-pathdata": "^6.0.3",
     "svgson": "^5.3.1"

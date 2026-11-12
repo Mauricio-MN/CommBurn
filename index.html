@@ -41,23 +41,16 @@
           <p class="tool-status" id="tool-status" role="status" data-i18n="ui.action.selectStatus">Selecionar: clique, arraste uma caixa ou use Shift+clique.</p>
         </section>
         <section class="panel" data-ui-module="svg-import" data-extension-slot="document-settings">
-          <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2 data-i18n="ui.import.title">Importar vetor ou imagem</h2><p data-i18n="ui.import.description">SVG visual completo ou vetores editáveis</p></div></div>
-          <label class="field" data-i18n="ui.import.mode">Modo de importação SVG
-            <select id="svg-import-mode">
-              <option value="visual" data-i18n="ui.import.visual">Preservar aparência completa</option>
-              <option value="editable-colors" data-i18n="ui.import.editableColors">Separar vetores editáveis por cor</option>
-              <option value="editable" data-i18n="ui.import.editable">Usar a camada atual</option>
-            </select>
-          </label>
-          <p class="help-text" data-i18n="ui.import.help">O modo visual conserva os recursos gráficos como um único objeto. Scripts e eventos são removidos; referências externas não são carregadas.</p>
-          <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importe SVG no modo visual ou converta a geometria editável; imagens raster são incorporadas." data-i18n-title="ui.import.tooltip" data-i18n="ui.import.button">Importar arquivo</button>
+          <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2 data-i18n="ui.import.title">Importar vetor ou imagem</h2><p data-i18n="ui.import.description">SVG editável por cor ou na camada atual</p></div></div>
+          <p class="help-text" data-i18n="ui.import.help">As opções de importação do SVG aparecem depois que você seleciona o arquivo.</p>
+          <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importe SVG como vetores editáveis por cor ou na camada atual." data-i18n-title="ui.import.tooltip" data-i18n="ui.import.button">Importar arquivo</button>
         </section>
 
         <section class="panel" data-ui-module="document-settings" data-extension-slot="document-settings">
           <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">▦</span><div><h1 data-i18n="ui.document.title">Área de trabalho</h1><p data-i18n="ui.document.description">Dimensões reais do material</p></div></div>
           <div class="field-row">
-            <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="width" type="number" min="0.1" step="1" value="180"><span>mm</span></span></label>
-            <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="height" type="number" min="0.1" step="1" value="120"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="width" type="number" min="0.1" step="0.1" value="180"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="height" type="number" min="0.1" step="0.1" value="120"><span>mm</span></span></label>
           </div>
           <button class="button button-secondary full-width" type="button" id="orientation"><span class="button-icon icon-violet" aria-hidden="true">↻</span> <span data-i18n="ui.document.orientation">Alternar orientação</span></button>
         </section>
@@ -102,8 +95,8 @@
           <div class="panel-heading"><span class="section-icon icon-green" aria-hidden="true">▱</span><div><h2 data-i18n="ui.creation.shapeTitle">Criar forma</h2><p data-i18n="ui.creation.shapeDescription">Tipo e dimensões editáveis em mm</p></div></div>
           <label class="field" data-i18n="ui.creation.shape">Forma<select id="new-shape-type"><option value="rect" data-i18n="ui.creation.rectangle">Retângulo</option><option value="ellipse" data-i18n="ui.creation.ellipse">Elipse</option><option value="line" data-i18n="ui.creation.line">Linha</option></select></label>
           <div class="field-row">
-            <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="new-shape-width" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
-            <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="new-shape-height" type="number" min="0" step="0.1" value="20"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="new-shape-width" type="number" min="0.1" step="0.1" value="20"><span>mm</span></span></label>
+            <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="new-shape-height" type="number" min="0.1" step="0.1" value="20"><span>mm</span></span></label>
           </div>
           <p class="help-text" id="shape-help" data-i18n="ui.creation.shapeHelp">O retângulo precisa de largura e altura maiores que zero.</p>
           <button class="button button-secondary full-width" id="add-shape" type="button" data-tooltip="Criar a forma com o tipo e as dimensões acima." data-i18n-title="ui.creation.addShapeTooltip" data-i18n="ui.creation.addShape">Adicionar forma</button>
@@ -127,8 +120,7 @@
             <button class="button button-secondary full-width" id="open-image-vectorizer" type="button" data-i18n="ui.inspector.vectorizeImage">Converter imagem para gravação vetorial</button>
           </div>
           <div id="svg-inspector-fields" hidden>
-            <p class="help-text" data-i18n="ui.inspector.svgHelp">Converta a aparência estática em regiões vetoriais antes de enviar ao GRBL.</p>
-            <button class="button button-secondary full-width" id="open-svg-vectorizer" type="button" data-i18n="ui.inspector.vectorizeSvg">Converter SVG para gravação vetorial</button>
+            <p class="help-text" data-i18n="ui.inspector.svgHelp">Objeto visual de referência. Reimporte o arquivo usando um modo vetorial para criar trajetórias.</p>
           </div>
           <div class="field-row">
             <label class="field" data-i18n="ui.inspector.positionX">Posição X<span class="input-with-unit"><input id="object-x" type="number" step="0.1"><span>mm</span></span></label>
@@ -138,6 +130,7 @@
             <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="object-width" type="number" min="0" step="0.1"><span>mm</span></span></label>
             <label class="field" data-i18n="ui.document.height">Altura<span class="input-with-unit"><input id="object-height" type="number" min="0" step="0.1"><span>mm</span></span></label>
           </div>
+          <label class="toggle" id="object-lock-ratio-field"><input id="object-lock-ratio" type="checkbox" checked><span class="toggle-track"></span> <span data-i18n="ui.inspector.lockRatio">Manter proporção ao redimensionar</span></label>
           <div class="field-row">
             <label class="field" data-i18n="ui.inspector.rotation">Rotação<input id="object-rotation" type="number" step="1"><span class="unit-note" data-i18n="ui.inspector.degrees">graus</span></label>
             <label class="field" data-i18n="ui.inspector.skewX">Inclinação X<input id="object-skew-x" type="number" min="-79" max="79" step="1"><span class="unit-note" data-i18n="ui.inspector.degrees">graus</span></label>
@@ -192,6 +185,25 @@
       </section>
     </main>
     <input id="svg-file-input" type="file" accept=".svg,.json,image/*,application/json" hidden>
+    <dialog id="svg-import-dialog" class="svg-import-dialog" aria-labelledby="svg-import-title">
+      <form method="dialog">
+        <button class="dialog-close" type="submit" value="cancel" aria-label="Cancelar importação" data-i18n-aria-label="ui.import.cancel">×</button>
+        <h2 id="svg-import-title" data-i18n="ui.import.dialogTitle">Opções de importação SVG</h2>
+        <p><span data-i18n="ui.import.fileLabel">Arquivo:</span> <strong id="svg-import-file-name"></strong></p>
+        <label class="field" data-i18n="ui.import.mode">Modo de importação SVG
+          <select id="svg-import-mode">
+            <option value="editable-colors" data-i18n="ui.import.editableColors">Uma camada para cada cor do SVG</option>
+            <option value="editable" data-i18n="ui.import.editable">Somente camada atual (usa a cor da camada)</option>
+          </select>
+        </label>
+        <label class="toggle"><input id="svg-import-split" type="checkbox" checked><span class="toggle-track"></span> <span data-i18n="ui.import.splitShapes">Dividir o SVG em formas separadas</span></label>
+        <p class="help-text" data-i18n="ui.import.dialogHelp">Por cor cria camadas com as cores do SVG. Camada atual coloca toda a geometria na camada selecionada e respeita a cor dela. A espessura visual do traço SVG não expande o path nem muda a trajetória.</p>
+        <div class="preview-actions">
+          <button class="button button-secondary" type="submit" value="cancel" data-i18n="common.cancel">Cancelar</button>
+          <button class="button button-primary" type="submit" value="import" data-i18n="ui.import.confirm">Importar SVG</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="image-edit-dialog" class="image-edit-dialog" aria-labelledby="image-edit-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar editor de imagem" data-i18n-aria-label="ui.dialogs.closeImageEditor">×</button></form>
       <h2 id="image-edit-title" data-i18n="ui.dialogs.editImage">Editar imagem</h2>
@@ -234,17 +246,18 @@
         <span class="presentation-kicker" data-i18n="ui.dialogs.guidedPresentation">APRESENTAÇÃO GUIADA</span>
         <button id="presentation-exit" class="presentation-exit" type="button" aria-label="Sair da apresentação" data-i18n-aria-label="ui.dialogs.exitPresentation">×</button>
       </div>
-      <p class="presentation-step"><span id="presentation-step-count">1 / 35</span><span id="presentation-step-label" data-i18n="ui.dialogs.exampleDemo">Demonstração de exemplo</span></p>
+      <p class="presentation-step"><span id="presentation-step-count">1 / 7</span><span id="presentation-step-label" data-i18n="ui.dialogs.exampleDemo">Demonstração de exemplo</span></p>
       <h2 id="presentation-title"></h2>
       <p id="presentation-description"></p>
-      <progress id="presentation-progress" max="35" value="0" aria-label="Progresso da apresentação"></progress>
+      <p id="presentation-substep" class="presentation-substep" aria-live="polite" hidden></p>
+      <progress id="presentation-progress" max="7" value="0" aria-label="Progresso da apresentação"></progress>
       <div class="presentation-actions">
-        <button id="presentation-pause" class="button button-secondary" type="button" data-i18n="ui.dialogs.pause">Pausar</button>
-        <button id="presentation-restart" class="button button-primary" type="button" hidden data-i18n="ui.dialogs.restart">Recomeçar</button>
+        <button id="presentation-restart" class="button button-secondary" type="button" data-i18n="ui.dialogs.restart" hidden>Recomeçar</button>
+        <button id="presentation-toggle" class="button button-secondary" type="button" aria-pressed="true" data-i18n="ui.presentation.pause">Pausar</button>
       </div>
     </aside>
     <div id="presentation-cursor" class="presentation-cursor" aria-hidden="true" hidden>
-      <svg viewBox="0 0 28 36" focusable="false"><path d="M3 2v25l6.8-6.2 4.2 11 4.2-1.6-4.5-10.7 9.5-.3L3 2Z" /></svg>
+      <img src="/mouse-cursor-presentation.svg" alt="" width="30" height="38" draggable="false">
     </div>
     <dialog id="image-vector-dialog" class="image-vector-dialog" aria-labelledby="image-vector-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar conversor de imagem" data-i18n-aria-label="ui.dialogs.closeImageVectorizer">×</button></form>

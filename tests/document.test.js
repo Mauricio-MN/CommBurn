@@ -13,7 +13,7 @@ test("document dimensions, positions, and SVG output use millimetres", () => {
   assert.equal(document.widthMm, 180);
   assert.equal(document.elements[0].xMm, 10.5);
   assert.match(renderSvg(document), /width="180mm" height="120mm"/);
-  assert.match(renderSvg(document), /x="10.5" y="20"/);
+  assert.match(renderSvg(document), /<text id="label" font-family="CommBurn Sans"/);
 });
 
 test("origin corner maps rectangle coordinates without sensor input", () => {
@@ -25,13 +25,41 @@ test("origin corner maps rectangle coordinates without sensor input", () => {
   assert.match(svg, /<rect id="box" x="70" y="60" width="20" height="15"/);
 });
 
-test("SVG text and identifiers are escaped", () => {
+test("SVG text uses native font text and identifiers are escaped", () => {
   const svg = renderSvg({
-    elements: [{ id: 'label"&', type: "text", xMm: 1, yMm: 2, text: "<&>", fontSizeMm: 4, fontFamily: 'A "font"' }]
+    elements: [{ id: 'label"&', type: "text", xMm: 1, yMm: 12, text: "<&>", fontSizeMm: 4, fontFamily: "sans-serif" }]
   });
   assert.match(svg, /id="label&quot;&amp;"/);
-  assert.match(svg, /&lt;&amp;&gt;/);
-  assert.match(svg, /font-family="A &quot;font&quot;"/);
+  assert.match(svg, /font-family="CommBurn Sans"/);
+  assert.match(svg, /<tspan x="1" y="12">&lt;&amp;&gt;<\/tspan>/);
+});
+
+test("SVG text preserves external font names while GRBL rejects missing outlines", () => {
+  const documentModel = {
+    elements: [{ id: "label", type: "text", xMm: 1, yMm: 8, text: "Text", fontSizeMm: 4, fontFamily: "Liberation Serif" }]
+  };
+
+  assert.match(renderSvg(documentModel), /font-family="Liberation Serif"/);
+  assert.throws(
+    () => planGrblJob(documentModel, { maxSpindleSpeed: 1000 }),
+    (error) => error.code === "grbl.unsupportedTextFont"
+  );
+});
+
+test("text SVG keeps native text and embeds the selected font with inverted coordinates", () => {
+  const documentModel = {
+    widthMm: 100,
+    heightMm: 80,
+    origin: { corner: "top-right", flipY: true },
+    layers: [{ id: "engrave", operation: "engrave", color: "#267b62" }],
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "AB", fontSizeMm: 8, layerId: "engrave" }]
+  };
+  const svg = renderSvg(documentModel);
+
+  assert.match(svg, /<text id="label" font-family="CommBurn Sans" font-size="8" font-kerning="none"/);
+  assert.match(svg, /<tspan x="90" y="55">AB<\/tspan>/);
+  assert.match(svg, /@font-face\{font-family:"CommBurn Sans"/);
+  assert.equal(documentModel.elements[0].type, "text");
 });
 
 test("invalid metric dimensions, positions, and axis settings are rejected", () => {
@@ -112,23 +140,36 @@ test("GRBL text stays upright when the selected origin inverts an axis", () => {
   assert.ok(flippedPoints[0].xMm > normalPoints[0].xMm);
 });
 
-test("GRBL engraves stroke-font text in fill layers and fills closed shapes", () => {
+test("GRBL text contours follow fill, engrave, and cut layer operations", () => {
   const plan = planGrblJob({
-    layers: [{ id: "fill", operation: "fill" }],
+    layers: [
+      { id: "fill", operation: "fill", fillAlgorithm: "vertical-serpentine", fillSpacingMm: 0.5 },
+      { id: "engrave", operation: "engrave" },
+      { id: "cut", operation: "cut" }
+    ],
     elements: [
       { type: "text", xMm: 1, yMm: 8, text: "Open strokes", fontSizeMm: 4, layerId: "fill" },
-      { id: "closed", type: "rect", xMm: 20, yMm: 20, widthMm: 2, heightMm: 2, layerId: "fill" }
+      { id: "closed", type: "rect", xMm: 20, yMm: 20, widthMm: 2, heightMm: 2, layerId: "fill" },
+      { id: "engraved-text", type: "text", xMm: 30, yMm: 20, text: "AB", fontSizeMm: 4, layerId: "engrave" },
+      { id: "cut-text", type: "text", xMm: 40, yMm: 20, text: "AB", fontSizeMm: 4, layerId: "cut" }
     ]
   }, { maxSpindleSpeed: 1000 });
   const textPaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "element-1");
   const closedShapePaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "closed");
+  const engravedTextPaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "engraved-text");
+  const cutTextPaths = plan.paths.filter(({ kind, elementId }) => kind === "work" && elementId === "cut-text");
 
-  assert.ok(textPaths.length > 0);
-  assert.ok(textPaths.every(({ operation, algorithm }) => operation === "engrave" && algorithm === "single-line"));
+  assert.ok(textPaths.length > 10);
+  assert.ok(textPaths.every(({ operation, algorithm }) => operation === "fill" && algorithm === "vertical-serpentine"));
   assert.ok(closedShapePaths.length > 0);
-  assert.ok(closedShapePaths.every(({ operation, algorithm }) => operation === "fill" && algorithm === "horizontal-serpentine"));
-  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.engrave > 0);
+  assert.ok(closedShapePaths.every(({ operation, algorithm }) => operation === "fill" && algorithm === "vertical-serpentine"));
+  assert.ok(engravedTextPaths.length > 0);
+  assert.ok(engravedTextPaths.every(({ operation, algorithm }) => operation === "engrave" && algorithm === "outline"));
+  assert.ok(cutTextPaths.length > 0);
+  assert.ok(cutTextPaths.every(({ operation, algorithm }) => operation === "cut" && algorithm === "outline"));
   assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.fill > 0);
+  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.engrave > 0);
+  assert.ok(plan.stats.estimatedWorkTimeSecondsByOperation.cut > 0);
   assert.match(plan.gcode, /M4 S/);
 });
 

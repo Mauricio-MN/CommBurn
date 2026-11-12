@@ -53,6 +53,7 @@ test("ImageTracer regions stay as solid, individually colored metric paths witho
   assert.equal(result.elements.length, 2);
   assert.equal("layers" in result, false);
   assert.deepEqual(new Set(result.elements.map((element) => element.color)), new Set(["#000000", "#ffffff"]));
+  assert.ok(result.elements.every((element) => element.strokeWidthMm === undefined));
   assert.ok(result.elements.every((element) => element.layerId === DEFAULT_LAYER.id));
   assert.ok(result.elements.every((element) => /z$/i.test(element.pathData.trim())));
   assert.ok(result.elements.every((element) => element.widthMm > 0 && element.heightMm > 0));
@@ -167,7 +168,7 @@ test("ImageTracer paths can generate a GRBL fill on the current fill layer", () 
   assert.match(plan.gcode, /M4 S100/);
 });
 
-test("image preview keeps source colors and editor vectors always follow the layer color", () => {
+test("image preview keeps source colors and editor vectors follow the layer color and operation", () => {
   const vector = {
     id: "region-red",
     type: "path",
@@ -185,32 +186,40 @@ test("image preview keeps source colors and editor vectors always follow the lay
   const renderWithLayerColor = (color, element = vector) => renderSvg({
     widthMm: 20,
     heightMm: 20,
-    layers: [{ ...DEFAULT_LAYER, color }],
+    layers: [{ ...DEFAULT_LAYER, color, operation: "fill" }],
     elements: [element]
   });
 
   const previewSvg = renderSvg({
     widthMm: 20,
     heightMm: 20,
-    layers: [{ ...DEFAULT_LAYER, color: "#123456" }],
+    layers: [{ ...DEFAULT_LAYER, color: "#123456", operation: "fill" }],
     elements: [{ ...vector, fillColorMode: "image", strokeColorMode: "none", strokeWidthMm: 0 }]
   });
   assert.match(previewSvg, /fill="#ff0000" stroke="none"/);
 
   const editorVector = { ...vector, fillColorMode: "layer", strokeColorMode: "layer" };
-  assert.match(renderWithLayerColor("#123456", editorVector), /fill="#123456" stroke="#123456" stroke-width="0\.2"/);
+  assert.match(renderWithLayerColor("#123456", editorVector), /fill="#123456" stroke="none"/);
   assert.match(renderSvg({
     widthMm: 20,
     heightMm: 20,
-    layers: [{ ...DEFAULT_LAYER, color: "#654321" }],
+    layers: [{ ...DEFAULT_LAYER, color: "#654321", operation: "fill" }],
     elements: [editorVector]
-  }), /fill="#654321" stroke="#654321" stroke-width="0\.2"/);
+  }), /fill="#654321" stroke="none"/);
 
   const layerFill = renderSvg({
     widthMm: 20,
     heightMm: 20,
-    layers: [{ ...DEFAULT_LAYER, color: "#123456" }],
+    layers: [{ ...DEFAULT_LAYER, color: "#123456", operation: "fill" }],
     elements: [{ ...vector, fillColorMode: "layer", strokeColorMode: "none" }]
   });
   assert.match(layerFill, /fill="#123456" stroke="none"/);
+
+  const engraveOutline = renderSvg({
+    widthMm: 20,
+    heightMm: 20,
+    layers: [{ ...DEFAULT_LAYER, color: "#123456", operation: "engrave" }],
+    elements: [{ ...vector, fillColorMode: "layer", strokeColorMode: "none" }]
+  });
+  assert.match(engraveOutline, /fill="none" stroke="#123456" stroke-width="0\.2"/);
 });

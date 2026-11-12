@@ -1,6 +1,6 @@
 import { DEFAULT_LAYER, normalizeLayers } from "./layers.js";
 import { CommBurnRangeError, CommBurnTypeError } from "./i18n.js";
-import { createTextStrokePaths } from "./text-to-path.js";
+import { createTextOutlinePathData, getTextFontAsset, getTextSvgFamily } from "./text-to-path.js";
 import { SVGPathData } from "../../node_modules/svg-pathdata/lib/SVGPathData.module.js";
 
 const ORIGIN_CORNERS = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
@@ -272,17 +272,43 @@ function transformAttribute(element, centerX, centerY) {
   return ` transform="translate(${centerX} ${centerY}) rotate(${rotationDeg}) skewX(${skewXDeg}) skewY(${skewYDeg}) translate(${-centerX} ${-centerY})"`;
 }
 
-export function renderSvg(input) {
+// One visual language for every vector object, driven only by the layer operation:
+// fill = solid, engrave = solid outline, cut = dashed outline. The object itself never changes.
+function operationLook(layer, widthMm = 0.2) {
+  if (layer.operation === "fill") return `fill="${layer.color}" stroke="none"`;
+  const dash = layer.operation === "cut"
+    ? ` stroke-dasharray="${Math.max(2, widthMm * 3)} ${Math.max(1, widthMm * 1.5)}"`
+    : "";
+  return `fill="none" stroke="${layer.color}" stroke-width="${widthMm}"${dash}`;
+}
+
+export function renderSvg(input, { embedFonts = true } = {}) {
   const document = createDocument(input);
   const nodesByLayer = new Map(document.layers.map((layer) => [layer.id, []]));
+  const textFamilies = new Set(document.elements
+    .filter((element) => element.type === "text")
+    .map((element) => element.fontFamily ?? "sans-serif"));
+  const fontStyle = embedFonts && textFamilies.size > 0
+    ? `<style>${[...textFamilies].map((family) => {
+      const asset = getTextFontAsset(family);
+      if (!asset) return "";
+      const { family: svgFamily, bytes } = asset;
+      const base64 = btoa(Array.from(new Uint8Array(bytes), (byte) => String.fromCharCode(byte)).join(""));
+      return `@font-face{font-family:"${svgFamily}";src:url(data:font/woff;base64,${base64}) format("woff");font-style:normal;font-weight:400}`;
+    }).join("")}</style>`
+    : "";
   for (const element of document.elements) {
     const layer = document.layers.find((candidate) => candidate.id === element.layerId);
     if (!layer.visible) continue;
     const point = mapDocumentPoint(document, element.xMm, element.yMm);
     const fill = layer.operation === "fill" ? layer.color : "none";
     if (element.type === "text") {
+      const svgFamily = getTextSvgFamily(element.fontFamily);
       const transform = transformAttribute(element, point.xMm, point.yMm);
-      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" x="${point.xMm}" y="${point.yMm}" fill="${layer.color}" font-family="${escapeXml(element.fontFamily)}" font-size="${element.fontSizeMm}"${transform}>${escapeXml(element.text)}</text>`);
+      const lines = element.text.normalize("NFC").replace(/\r\n?/g, "\n").replaceAll("\t", "    ").split("\n");
+      const lineHeight = element.fontSizeMm * 1.2;
+      const spans = lines.map((line, index) => `<tspan x="${point.xMm}" y="${point.yMm + index * lineHeight}">${escapeXml(line)}</tspan>`).join("");
+      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" font-family="${escapeXml(svgFamily)}" font-size="${element.fontSizeMm}" font-kerning="none" font-variant-ligatures="none" xml:space="preserve" ${operationLook(layer)}${transform}>${spans}</text>`);
       continue;
     }
     const xMm = point.flipX ? point.xMm - element.widthMm : point.xMm;
@@ -290,14 +316,14 @@ export function renderSvg(input) {
     if (element.type === "line") {
       const endPoint = mapDocumentPoint(document, element.xMm + element.widthMm, element.yMm + element.heightMm);
       const transform = transformAttribute(element, (point.xMm + endPoint.xMm) / 2, (point.yMm + endPoint.yMm) / 2);
-      nodesByLayer.get(layer.id).push(`<line id="${escapeXml(element.id)}" x1="${point.xMm}" y1="${point.yMm}" x2="${endPoint.xMm}" y2="${endPoint.yMm}" fill="none" stroke="${layer.color}"${transform}/>`);
+      nodesByLayer.get(layer.id).push(`<line id="${escapeXml(element.id)}" x1="${point.xMm}" y1="${point.yMm}" x2="${endPoint.xMm}" y2="${endPoint.yMm}" ${operationLook({ ...layer, operation: layer.operation === "fill" ? "engrave" : layer.operation })}${transform}/>`);
       continue;
     }
     const centerX = xMm + element.widthMm / 2;
     const centerY = yMm + element.heightMm / 2;
     const transform = transformAttribute(element, centerX, centerY);
     if (element.type === "ellipse") {
-      nodesByLayer.get(layer.id).push(`<ellipse id="${escapeXml(element.id)}" cx="${centerX}" cy="${centerY}" rx="${element.widthMm / 2}" ry="${element.heightMm / 2}" fill="${fill}" stroke="${layer.color}"${transform}/>`);
+      nodesByLayer.get(layer.id).push(`<ellipse id="${escapeXml(element.id)}" cx="${centerX}" cy="${centerY}" rx="${element.widthMm / 2}" ry="${element.heightMm / 2}" ${operationLook(layer)}${transform}/>`);
       continue;
     }
     if (element.type === "path") {
@@ -314,10 +340,28 @@ export function renderSvg(input) {
       const pathTransform = transformAttribute(element, point.xMm - (point.flipX ? element.widthMm / 2 : -element.widthMm / 2),
         point.yMm - (point.flipY ? element.heightMm / 2 : -element.heightMm / 2));
       const power = element.powerPercent === undefined ? "" : ` data-power-percent="${element.powerPercent}"`;
+      const layerColored = element.fillColorMode === "layer" || element.strokeColorMode === "layer";
+      const machineFaithful = element.fillColorMode !== "image" && element.strokeColorMode !== "image"
+        && (layerColored || element.color === undefined);
+      if (machineFaithful) {
+        const noModes = element.fillColorMode === undefined && element.strokeColorMode === undefined;
+        const fillIntent = noModes || element.fillColorMode === "layer";
+        const strokeIntent = !noModes && element.strokeColorMode === "layer";
+        const isFill = layer.operation === "fill";
+        const fillOn = fillIntent && isFill;
+        const strokeOn = noModes ? !isFill : strokeIntent ? !(fillIntent && isFill) : fillIntent && !isFill;
+        const width = 0.2;
+        const look = strokeOn
+          ? operationLook({ ...layer, operation: isFill ? "engrave" : layer.operation }, width)
+          : `fill="${fillOn ? layer.color : "none"}" stroke="none"`;
+        const paint = strokeOn && fillOn ? look.replace('fill="none"', `fill="${layer.color}"`) : look;
+        nodesByLayer.get(layer.id).push(`<path id="${escapeXml(element.id)}" d="${escapeXml(path.encode())}" ${paint}${power}${pathTransform}/>`);
+        continue;
+      }
       const pathFill = element.fillColorMode === "none"
         ? "none"
         : element.fillColorMode === "layer"
-          ? layer.color
+          ? fill
           : element.color ?? fill;
       const pathStroke = element.strokeColorMode === "none"
         ? "none"
@@ -338,7 +382,7 @@ export function renderSvg(input) {
       nodesByLayer.get(layer.id).push(`<image id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" href="${escapeXml(element.svgDataUri)}" preserveAspectRatio="xMidYMid meet"${transform}/>`);
       continue;
     }
-    nodesByLayer.get(layer.id).push(`<rect id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" fill="${fill}" stroke="${layer.color}"${transform}/>`);
+    nodesByLayer.get(layer.id).push(`<rect id="${escapeXml(element.id)}" x="${xMm}" y="${yMm}" width="${element.widthMm}" height="${element.heightMm}" ${operationLook(layer)}${transform}/>`);
   }
   const layerGroups = document.layers.map((layer) =>
     `<g data-layer-id="${escapeXml(layer.id)}" data-layer-name="${escapeXml(layer.name)}" data-operation="${layer.operation}" data-color="${layer.color}" data-feed-mm-per-minute="${layer.feedMmPerMinute}" data-power-percent="${layer.powerPercent}" data-passes="${layer.passes}" data-fill-spacing-mm="${layer.fillSpacingMm}" data-fill-algorithm="${layer.fillAlgorithm}" data-object-order="${layer.objectOrder}" data-enabled="${layer.enabled}" data-visible="${layer.visible}" data-locked="${layer.locked}">${nodesByLayer.get(layer.id).join("\n")}</g>`
@@ -347,6 +391,7 @@ export function renderSvg(input) {
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="http://www.w3.org/2000/svg" data-commburn-version="1" width="${document.widthMm}mm" height="${document.heightMm}mm" viewBox="0 0 ${document.widthMm} ${document.heightMm}">`,
+    fontStyle,
     `<g fill="#172033" stroke-linecap="round" stroke-linejoin="round">`,
     ...layerGroups,
     `</g>`,
@@ -363,19 +408,11 @@ function mapPoints(document, points) {
   return points.map(([xMm, yMm]) => mapDocumentPoint(document, xMm, yMm));
 }
 
-function mapTextStrokePaths(document, paths) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const path of paths) {
-    for (const [x, y] of path) {
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-    }
-  }
+function mapTextOutlines(document, paths, bounds) {
+  const minX = bounds.xMm;
+  const maxX = bounds.xMm + bounds.widthMm;
+  const minY = bounds.yMm;
+  const maxY = bounds.yMm + bounds.heightMm;
   const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
   return paths.map((path) => mapPoints(document, path.map(([x, y]) => [
     flipX ? minX + maxX - x : x,
@@ -588,36 +625,45 @@ function fillVectorPaths(element, algorithm, spacingMm) {
 }
 
 function createElementWorkPaths(document, layer, element) {
-  const outline = [
-    [element.xMm, element.yMm],
-    [element.xMm + element.widthMm, element.yMm],
-    [element.xMm + element.widthMm, element.yMm + element.heightMm],
-    [element.xMm, element.yMm + element.heightMm],
-    [element.xMm, element.yMm]
-  ];
-  const sourcePaths = element.type === "text"
-    ? createTextStrokePaths(element)
-    : layer.operation === "fill"
-    ? element.type === "rect"
-      ? fillPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
-      : fillVectorPaths(element, layer.fillAlgorithm, layer.fillSpacingMm)
-    : element.type === "path"
-      ? flattenVectorPath(element)
-      : [outline];
-  if (sourcePaths.length * layer.passes > 100000) {
-    throw new RangeError(`A camada ${layer.name} excede 100.000 trajetórias; aumente o espaçamento ou reduza o número de passagens.`);
+  let geometryElement = element;
+  if (element.type === "text") {
+    const pathData = createTextOutlinePathData(element);
+    if (!pathData) return [];
+    const bounds = new SVGPathData(pathData).getBounds();
+    geometryElement = {
+      ...element,
+      type: "path",
+      pathData,
+      xMm: bounds.minX,
+      yMm: bounds.minY,
+      widthMm: bounds.maxX - bounds.minX,
+      heightMm: bounds.maxY - bounds.minY
+    };
   }
+  const outline = [
+    [geometryElement.xMm, geometryElement.yMm],
+    [geometryElement.xMm + geometryElement.widthMm, geometryElement.yMm],
+    [geometryElement.xMm + geometryElement.widthMm, geometryElement.yMm + geometryElement.heightMm],
+    [geometryElement.xMm, geometryElement.yMm + geometryElement.heightMm],
+    [geometryElement.xMm, geometryElement.yMm]
+  ];
+  const sourcePaths = layer.operation === "fill"
+    ? geometryElement.type === "rect"
+      ? fillPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm)
+      : fillVectorPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm)
+    : geometryElement.type === "path"
+      ? flattenVectorPath(geometryElement)
+      : [outline];
   const workPaths = [];
-  const mappedTextPaths = element.type === "text" ? mapTextStrokePaths(document, sourcePaths) : null;
-  const operation = element.type === "text" && layer.operation === "fill" ? "engrave" : layer.operation;
+  const mappedTextPaths = element.type === "text" ? mapTextOutlines(document, sourcePaths, geometryElement) : null;
   for (let pass = 1; pass <= layer.passes; pass += 1) {
     for (const [sourceIndex, points] of sourcePaths.entries()) {
       workPaths.push({
         kind: "work",
         elementId: element.id,
         layerId: layer.id,
-        operation,
-        algorithm: element.type === "text" ? "single-line" : layer.operation === "fill" ? layer.fillAlgorithm : "outline",
+        operation: layer.operation,
+        algorithm: layer.operation === "fill" ? layer.fillAlgorithm : "outline",
         pass,
         ...(element.powerPercent === undefined ? {} : { powerPercent: element.powerPercent }),
         points: mappedTextPaths?.[sourceIndex] ?? mapPoints(document, points)
@@ -678,6 +724,24 @@ function orderLayerElements(document, layer, elements, workByElement, startPoint
   return ordered;
 }
 
+function paintPartKey(element) {
+  return [element.pathData, element.xMm, element.yMm, element.widthMm, element.heightMm].join("|");
+}
+
+// A fill part and a stroke part imported from one SVG path share geometry; the layer operation
+// decides which one is machined so the same contour is never burned twice.
+function withoutShadowedPaintParts(layerElements, layer) {
+  const isPart = (element, fillMode, strokeMode) => element.type === "path"
+    && element.fillColorMode === fillMode && element.strokeColorMode === strokeMode;
+  const keep = (element) => {
+    const loser = layer.operation === "fill" ? isPart(element, "none", "layer") : isPart(element, "layer", "none");
+    const winner = layer.operation === "fill" ? ["layer", "none"] : ["none", "layer"];
+    return !loser || !layerElements.some((other) => other !== element && isPart(other, ...winner)
+      && paintPartKey(other) === paintPartKey(element));
+  };
+  return layerElements.filter(keep);
+}
+
 export function planGrblJob(input, settings) {
   const document = createDocument(input);
   const feedOverride = settings.feedMmPerMinute === undefined
@@ -707,7 +771,7 @@ export function planGrblJob(input, settings) {
   let workDistanceMm = 0;
   const estimatedWorkTimeSecondsByOperation = { engrave: 0, cut: 0, fill: 0 };
   for (const layer of activeLayers) {
-    const layerElements = elements.filter((element) => element.layerId === layer.id);
+    const layerElements = withoutShadowedPaintParts(elements.filter((element) => element.layerId === layer.id), layer);
     if (layerElements.length === 0) continue;
     const feedMmPerMinute = feedOverride ?? layer.feedMmPerMinute;
     const powerPercent = powerOverride ?? layer.powerPercent;

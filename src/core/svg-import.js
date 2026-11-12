@@ -5,7 +5,7 @@ import { DEFAULT_LAYER } from "./layers.js";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const UNIT_TO_MM = { mm: 1, cm: 10, in: 25.4, px: 25.4 / 96, pt: 25.4 / 72, pc: 25.4 / 6 };
 const PRESENTATION_ATTRIBUTES = new Set([
-  "fill", "stroke", "stroke-width", "fill-rule", "stroke-linecap", "stroke-linejoin",
+  "fill", "stroke", "stroke-width", "stroke-dasharray", "fill-rule", "stroke-linecap", "stroke-linejoin",
   "opacity", "fill-opacity", "stroke-opacity"
 ]);
 const GEOMETRY_ATTRIBUTES = {
@@ -13,7 +13,7 @@ const GEOMETRY_ATTRIBUTES = {
   circle: new Set(["cx", "cy", "r", "transform"]),
   ellipse: new Set(["cx", "cy", "rx", "ry", "transform"]),
   line: new Set(["x1", "y1", "x2", "y2", "transform"]),
-  path: new Set(["d", "transform", "data-power-percent"]),
+  path: new Set(["d", "transform", "data-power-percent", "style"]),
   polygon: new Set(["points", "transform"]),
   polyline: new Set(["points", "transform"]),
   text: new Set(["x", "y", "font-size", "font-family", "text-anchor", "dominant-baseline", "transform"]),
@@ -375,6 +375,51 @@ function checkedAttributes(node, allowed, label) {
   }
 }
 
+function parseInlinePathStyle(attributes) {
+  if (attributes.style === undefined) return { attributes, hasStyle: false };
+  const parsed = { ...attributes };
+  const declarations = parsed.style;
+  delete parsed.style;
+  validateVisualCss(declarations, "<path> style");
+  for (const declaration of declarations.split(";")) {
+    if (!declaration.trim()) continue;
+    const separator = declaration.indexOf(":");
+    if (separator <= 0) fail("<path> style contains an invalid declaration.");
+    const property = declaration.slice(0, separator).trim().toLowerCase();
+    const value = declaration.slice(separator + 1).trim();
+    if (property === "stroke-width") {
+      const match = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*(?:mm|cm|in|px|pt|pc|%)?$/i.exec(value);
+      if (!match || !Number.isFinite(Number(match[1])) || Number(match[1]) < 0) {
+        fail("<path> style stroke-width must be a non-negative finite SVG length.");
+      }
+      parsed["stroke-width"] = value;
+      continue;
+    }
+    if (!["fill", "stroke"].includes(property)) {
+      fail(`unsupported <path> style property "${property}".`);
+    }
+    if (!value || /!important/i.test(value)) fail(`<path> style ${property} value is unsupported.`);
+    parsed[property] = value;
+  }
+  return { attributes: parsed, hasStyle: true };
+}
+
+function pathStyleProperties(attributes, layerId, layers, forceLayerColor) {
+  const fill = parseColor(attributes.fill);
+  const stroke = parseColor(attributes.stroke);
+  if (!forceLayerColor && fill && stroke && fill !== stroke) {
+    fail("different fill and stroke colors on <path> cannot be represented by one CommBurn layer.");
+  }
+  const color = forceLayerColor ? null : fill ?? stroke;
+  const layerColor = layers.find((layer) => layer.id === layerId)?.color;
+  const colorMode = forceLayerColor || color === layerColor ? "layer" : "image";
+  return {
+    ...(color ? { color } : {}),
+    fillColorMode: fill ? colorMode : "none",
+    strokeColorMode: stroke ? colorMode : "none"
+  };
+}
+
 function parseColor(value) {
   if (value === undefined || value === "" || value === "none" || value === "transparent") return null;
   const normalized = value.trim().toLowerCase();
@@ -398,6 +443,32 @@ function parseColor(value) {
     }
   }
   fail(`unsupported paint color "${value}"; use a named basic color, #RGB, #RRGGBB, or rgb().`);
+}
+
+function strokeWidthInMm(value, view, transform) {
+  if (value === undefined) return undefined;
+  const match = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*(mm|cm|in|px|pt|pc|%)?$/i.exec(value.trim());
+  if (!match) fail("stroke-width must use a finite SVG length in mm, cm, in, px, pt, pc, %, or user units.");
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount < 0) fail("stroke-width must be a non-negative finite SVG length.");
+
+  const matrix = mapMatrix(view, transform);
+  const scaleX = Math.hypot(matrix[0], matrix[1]);
+  const scaleY = Math.hypot(matrix[2], matrix[3]);
+  const scale = (scaleX + scaleY) / 2;
+  const tolerance = scale * 1e-8;
+  if (scale === 0 || Math.abs(scaleX - scaleY) > tolerance
+    || Math.abs(matrix[0] * matrix[2] + matrix[1] * matrix[3]) > scaleX * scaleY * 1e-8) {
+    fail("stroke-width cannot be preserved through non-uniform or skewed transforms.");
+  }
+
+  const unit = match[2]?.toLowerCase();
+  const userUnits = unit === "%"
+    ? amount / 100 * Math.sqrt(((view.widthMm / view.scaleX) ** 2 + (view.heightMm / view.scaleY) ** 2) / 2)
+    : unit
+      ? amount * UNIT_TO_MM[unit] / UNIT_TO_MM.px
+      : amount;
+  return userUnits * scale;
 }
 
 function importedLayerId(prefix, index) {
@@ -654,6 +725,27 @@ function parsePoints(value) {
   return points;
 }
 
+function splitSubpaths(pathData) {
+  let path;
+  try {
+    path = new SVGPathData(pathData).toAbs().aToC();
+  } catch (error) {
+    fail(`invalid path data: ${error.message}`);
+  }
+  const groups = [];
+  for (const command of path.commands) {
+    if (command.type === SVGPathData.MOVE_TO || groups.length === 0) groups.push([]);
+    groups.at(-1).push(command);
+  }
+  return groups
+    .filter((commands) => commands.length > 1)
+    .map((commands) => {
+      const piece = new SVGPathData("");
+      piece.commands = commands;
+      return piece.encode();
+    });
+}
+
 function localTransformedPath(pathData, view, transform) {
   if (pathData.length > 1_000_000) fail("path data exceeds the 1000000 character limit.");
   let path;
@@ -677,11 +769,102 @@ function localTransformedPath(pathData, view, transform) {
   };
 }
 
+function flattenSubpaths(pathData) {
+  const subpaths = [];
+  let current = null;
+  let cursor = [0, 0];
+  const steps = 24;
+  for (const c of new SVGPathData(pathData).toAbs().aToC().commands) {
+    if (c.type === SVGPathData.MOVE_TO) {
+      current = { points: [[c.x, c.y]], closed: false };
+      subpaths.push(current);
+      cursor = [c.x, c.y];
+    } else if (c.type === SVGPathData.CLOSE_PATH) {
+      if (current) current.closed = true;
+    } else if (current) {
+      const from = cursor;
+      if (c.type === SVGPathData.LINE_TO) current.points.push([c.x, c.y]);
+      else if (c.type === SVGPathData.HORIZ_LINE_TO) current.points.push([c.x, from[1]]);
+      else if (c.type === SVGPathData.VERT_LINE_TO) current.points.push([from[0], c.y]);
+      else if (c.type === SVGPathData.CURVE_TO) {
+        for (let i = 1; i <= steps; i += 1) {
+          const t = i / steps, u = 1 - t;
+          current.points.push([
+            u ** 3 * from[0] + 3 * u * u * t * c.x1 + 3 * u * t * t * c.x2 + t ** 3 * c.x,
+            u ** 3 * from[1] + 3 * u * u * t * c.y1 + 3 * u * t * t * c.y2 + t ** 3 * c.y
+          ]);
+        }
+      } else fail("stroke outline supports only line and curve path commands.");
+      cursor = c.type === SVGPathData.HORIZ_LINE_TO ? [c.x, from[1]]
+        : c.type === SVGPathData.VERT_LINE_TO ? [from[0], c.y] : [c.x, c.y];
+    }
+  }
+  return subpaths;
+}
+
+function offsetPolyline(points, closed, distance) {
+  const pts = points.filter((q, i) => i === 0 || Math.hypot(q[0] - points[i - 1][0], q[1] - points[i - 1][1]) > 1e-9);
+  if (closed && pts.length > 1 && Math.hypot(pts[0][0] - pts.at(-1)[0], pts[0][1] - pts.at(-1)[1]) <= 1e-9) pts.pop();
+  const n = pts.length;
+  if (n < 2) return [];
+  const normal = (a, b) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
+    return [-dy / len, dx / len];
+  };
+  const out = [];
+  for (let i = 0; i < n; i += 1) {
+    const prev = closed ? pts[(i - 1 + n) % n] : pts[i - 1];
+    const next = closed ? pts[(i + 1) % n] : pts[i + 1];
+    const q = pts[i];
+    if (!prev || !next) {
+      const nn = prev ? normal(prev, q) : normal(q, next);
+      out.push([q[0] + nn[0] * distance, q[1] + nn[1] * distance]);
+      continue;
+    }
+    const n0 = normal(prev, q), n1 = normal(q, next);
+    const mx = n0[0] + n1[0], my = n0[1] + n1[1], ml = Math.hypot(mx, my);
+    const cos = ml > 1e-9 ? (mx / ml) * n0[0] + (my / ml) * n0[1] : 0;
+    if (cos < 0.25) {
+      out.push([q[0] + n0[0] * distance, q[1] + n0[1] * distance], [q[0] + n1[0] * distance, q[1] + n1[1] * distance]);
+    } else {
+      const k = distance / cos / ml;
+      out.push([q[0] + mx * k, q[1] + my * k]);
+    }
+  }
+  return out;
+}
+
+// Turns a stroked path into the plain path that follows the edges of the stroke band.
+function strokeOutlineShape(shape, widthMm) {
+  const half = widthMm / 2;
+  const contours = [];
+  for (const sub of flattenSubpaths(shape.pathData)) {
+    const left = offsetPolyline(sub.points, sub.closed, half);
+    const right = offsetPolyline(sub.points, sub.closed, -half);
+    if (left.length < 2 || right.length < 2) continue;
+    if (sub.closed) contours.push(left, right.reverse());
+    else contours.push([...left, ...right.reverse()]);
+  }
+  if (contours.length === 0) fail("stroke outline has no drawable geometry.");
+  const xs = contours.flat().map((q) => q[0]);
+  const ys = contours.flat().map((q) => q[1]);
+  const minX = Math.min(...xs), minY = Math.min(...ys);
+  const f = (v) => Number(v.toFixed(6));
+  return {
+    pathData: contours.map((c) => `M${c.map((q) => `${f(q[0] - minX)} ${f(q[1] - minY)}`).join("L")}Z`).join(""),
+    xMm: shape.xMm + minX,
+    yMm: shape.yMm + minY,
+    widthMm: Math.max(...xs) - minX,
+    heightMm: Math.max(...ys) - minY
+  };
+}
+
 export function importSvgTree(root, {
   layerId = "layer-engrave",
   idPrefix = "svg",
   fallbackLayer,
-  forceLayerId
+  forceLayerId,
+  splitShapes = false
 } = {}) {
   if (!root || root.name !== "svg" || root.type !== "element") fail("the document must have an <svg> root.");
   const rootAttributes = decodeAttributes(root.attributes, "<svg>");
@@ -692,7 +875,11 @@ export function importSvgTree(root, {
   const sourceLayers = new Map();
   const colorLayers = new Map();
   const elements = [];
-  const rootStyle = { fill: rootAttributes.fill, stroke: rootAttributes.stroke };
+  const rootStyle = {
+    fill: rootAttributes.fill,
+    stroke: rootAttributes.stroke,
+    strokeWidth: rootAttributes["stroke-width"]
+  };
   const rootTransform = parseTransform(rootAttributes.transform);
   const stack = root.children.map((node) => ({
     node, depth: 1, layerId, commBurnLayer: false, style: rootStyle,
@@ -734,7 +921,10 @@ export function importSvgTree(root, {
       })).reverse());
       continue;
     }
-    const a = decodeAttributes(node.attributes, `<${node.name}>`);
+    const decodedAttributes = decodeAttributes(node.attributes, `<${node.name}>`);
+    const { attributes: a, hasStyle: hasInlinePathStyle } = node.name === "path"
+      ? parseInlinePathStyle(decodedAttributes)
+      : { attributes: decodedAttributes, hasStyle: false };
     if (node.name === "g") {
       checkedAttributes(node, new Set(["id", "transform", ...LAYER_ATTRIBUTES]), "group");
       const childTransform = multiplyTransforms(inheritedTransform, parseTransform(a.transform));
@@ -765,7 +955,11 @@ export function importSvgTree(root, {
           childIsCommBurnLayer = true;
         }
       }
-      const childStyle = { fill: a.fill ?? style.fill, stroke: a.stroke ?? style.stroke };
+      const childStyle = {
+        fill: a.fill ?? style.fill,
+        stroke: a.stroke ?? style.stroke,
+        strokeWidth: a["stroke-width"] ?? style.strokeWidth
+      };
       stack.push(...node.children.map((child) => ({
         node: child,
         depth: depth + 1,
@@ -781,16 +975,48 @@ export function importSvgTree(root, {
     if (!allowed) fail(`unsupported element <${node.name}>.`);
     checkedAttributes(node, allowed, `<${node.name}>`);
     const id = `${idPrefix}-${elements.length + 1}`;
+    const fillPaint = a.fill ?? style.fill;
+    const strokePaint = a.stroke ?? style.stroke;
+    const fillColor = node.name === "path" ? parseColor(fillPaint) : null;
+    const strokeColor = node.name === "path" ? parseColor(strokePaint) : null;
+    const splitPathPaints = node.name === "path" && !commBurnLayer && !forceLayerId
+      && fillColor && strokeColor && fillColor !== strokeColor;
+    const splitLayerIds = splitPathPaints ? {
+      fill: fallbackLayerIdForElement(
+        "path", { fill: fillPaint, stroke: "none" }, {}, inheritedLayerId,
+        layers, colorLayers, defaultLayer, idPrefix
+      ),
+      stroke: fallbackLayerIdForElement(
+        "path", { fill: "none", stroke: strokePaint }, {}, inheritedLayerId,
+        layers, colorLayers, defaultLayer, idPrefix
+      )
+    } : null;
+    const elementTransform = multiplyTransforms(inheritedTransform, parseTransform(a.transform));
+    const elementLayerId = commBurnLayer || forceLayerId
+      ? inheritedLayerId
+      : splitLayerIds?.fill ?? fallbackLayerIdForElement(
+        node.name, a, style, inheritedLayerId, layers, colorLayers, defaultLayer, idPrefix
+      );
+    const hasPathPaint = fillPaint !== undefined || strokePaint !== undefined;
+    const strokeWidthMm = node.name === "path" && parseColor(strokePaint)
+      ? strokeWidthInMm(a["stroke-width"] ?? style.strokeWidth, view, elementTransform)
+      : undefined;
     const common = {
-      id, layerId: commBurnLayer || forceLayerId
-        ? inheritedLayerId
-        : fallbackLayerIdForElement(node.name, a, style, inheritedLayerId, layers, colorLayers, defaultLayer, idPrefix, forceLayerId),
+      id, layerId: elementLayerId,
+      ...(hasInlinePathStyle && hasPathPaint && !splitPathPaints
+        ? pathStyleProperties(
+          { ...a, fill: fillPaint, stroke: strokePaint },
+          elementLayerId,
+          layers,
+          Boolean(forceLayerId || commBurnLayer)
+        )
+        : {}),
       ...(a["data-power-percent"] === undefined
         ? {}
         : { powerPercent: number(a["data-power-percent"], "object power") }),
+      ...(strokeWidthMm === undefined ? {} : { strokeWidthMm }),
       rotationDeg: 0, skewXDeg: 0, skewYDeg: 0
     };
-    const elementTransform = multiplyTransforms(inheritedTransform, parseTransform(a.transform));
     const x = (value, label) => view.mapX(number(value, label));
     const y = (value, label) => view.mapY(number(value, label));
 
@@ -903,9 +1129,39 @@ export function importSvgTree(root, {
           return commands;
         }, []).join(" ")}${node.name === "polygon" ? " Z" : ""}`;
       }
-      const shape = localTransformedPath(pathData, view, elementTransform);
-      if (shape.widthMm === 0 && shape.heightMm === 0) fail("paths must have a positive width or height.");
-      elements.push({ ...common, type: "path", ...shape });
+      const pieces = node.name === "path" && splitShapes ? splitSubpaths(pathData) : [pathData];
+      if (pieces.length === 0) fail("path must contain drawable geometry.");
+      for (const piecePath of pieces) {
+        const shape = localTransformedPath(piecePath, view, elementTransform);
+        if (shape.widthMm === 0 && shape.heightMm === 0) fail("paths must have a positive width or height.");
+        const pieceId = () => `${idPrefix}-${elements.length + 1}`;
+        if (splitLayerIds) {
+          elements.push({
+            ...common, id: pieceId(), layerId: splitLayerIds.fill,
+            fillColorMode: "layer", strokeColorMode: "none",
+            type: "path", ...shape
+          });
+          elements.push({
+            ...common, id: `${idPrefix}-${elements.length + 1}`, layerId: splitLayerIds.stroke,
+            fillColorMode: "none", strokeColorMode: "layer",
+            type: "path", ...shape
+          });
+        } else if (forceLayerId && node.name === "path" && fillColor && strokeColor && fillColor !== strokeColor) {
+          const { strokeWidthMm: _strokeWidth, ...fillOnly } = common;
+          elements.push({
+            ...fillOnly, id: pieceId(), fillColorMode: "layer", strokeColorMode: "none",
+            type: "path", ...shape
+          });
+          const { strokeWidthMm: ringWidth, ...ringCommon } = common;
+          elements.push({
+            ...ringCommon, id: `${idPrefix}-${elements.length + 1}`,
+            fillColorMode: "layer", strokeColorMode: "none",
+            type: "path", ...(ringWidth > 0 ? strokeOutlineShape(shape, ringWidth) : shape)
+          });
+        } else {
+          elements.push({ ...common, id: pieceId(), type: "path", ...shape });
+        }
+      }
     }
   }
 
@@ -922,4 +1178,16 @@ export function importSvgTree(root, {
     layers: normalized.layers,
     elements: normalized.elements
   };
+}
+
+export function fitImportedToTable(imported, tableWidthMm, tableHeightMm) {
+  const factor = Math.min(1, tableWidthMm / imported.widthMm, tableHeightMm / imported.heightMm);
+  if (!(factor > 0) || factor === 1) return { ...imported, scale: 1 };
+  const scaleKeys = ["xMm", "yMm", "widthMm", "heightMm", "fontSizeMm", "strokeWidthMm"];
+  const elements = imported.elements.map((element) => {
+    const scaled = { ...element };
+    for (const key of scaleKeys) if (typeof scaled[key] === "number") scaled[key] *= factor;
+    return scaled;
+  });
+  return { ...imported, elements, widthMm: imported.widthMm * factor, heightMm: imported.heightMm * factor, scale: factor };
 }

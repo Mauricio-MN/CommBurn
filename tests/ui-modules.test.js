@@ -1,13 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { SHORTCUTS } from "../src/ui/shortcuts.js";
 import { TOOLS } from "../src/ui/toolbar.js";
 import { loadDesktopPlugins } from "../src/ui/plugins.js";
+import { LayersPanel } from "../src/ui/layers-panel.js";
+import { getInspectorSections } from "../src/ui/inspector-state.js";
 import { createI18n } from "../src/core/i18n.js";
 import { planGrblJob } from "../src/core/document.js";
 import {
+  clearNumberFieldError,
+  numberFieldErrorMessage,
+  showNumberFieldError,
+  validateNumberField
+} from "../src/ui/field-validation.js";
+import enCatalog from "../src/locales/en.js";
+import ptBrCatalog from "../src/locales/pt-BR.js";
+import {
   createPresentationDocument,
-  createPresentationSimulationDocument
+  createPresentationSimulationDocument,
+  PRESENTATION_STEPS
 } from "../src/ui/presentation.js";
 
 test("each editor tool has one documented and keyboard-accessible shortcut", () => {
@@ -52,6 +64,167 @@ test("presentation starts with an empty metric document and a safe unlocked demo
   assert.deepEqual(documentModel.elements, []);
   assert.equal(documentModel.layers[0].operation, "engrave");
   assert.equal(documentModel.layers[0].locked, false);
+});
+
+test("guided presentation drives real fields through typed and clicked sub-steps", () => {
+  assert.deepEqual(PRESENTATION_STEPS.map(({ key }) => key), [
+    "workspace", "text", "frame", "detail", "inspect", "preview", "simulate"
+  ]);
+  assert.equal(new Set(PRESENTATION_STEPS.map(({ key }) => key)).size, PRESENTATION_STEPS.length);
+  const kinds = new Set(["type", "choose", "click", "simulate"]);
+  const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  for (const catalog of [enCatalog, ptBrCatalog]) {
+    for (const kind of ["type", "choose", "click", "simulate"]) {
+      assert.equal(typeof catalog.ui.presentation.substeps[kind], "string", `locale must define substeps.${kind}`);
+    }
+  }
+  assert.ok(indexHtml.includes('src="/mouse-cursor-presentation.svg"'));
+});
+
+test("numeric field validation distinguishes parse, bounds, and step errors", () => {
+  const field = (value, attributes = {}) => ({
+    value,
+    min: attributes.min ?? "",
+    max: attributes.max ?? "",
+    step: attributes.step ?? "",
+    validity: attributes.validity ?? {}
+  });
+
+  assert.deepEqual(validateNumberField(field(" ")), { valid: false, code: "required" });
+  assert.deepEqual(validateNumberField(field("NaN")), { valid: false, code: "invalid" });
+  assert.deepEqual(validateNumberField(field("Infinity")), { valid: false, code: "invalid" });
+  assert.deepEqual(validateNumberField(field("0", { min: "0.1" })), {
+    valid: false, code: "minimum", minimum: 0.1
+  });
+  assert.deepEqual(validateNumberField(field("101", { max: "100" })), {
+    valid: false, code: "maximum", maximum: 100
+  });
+  assert.deepEqual(validateNumberField(field("1.2", {
+    step: "1", validity: { stepMismatch: true }
+  })), { valid: false, code: "step", step: 1 });
+  assert.deepEqual(validateNumberField(field("1.5", { min: "0.1", max: "10" })), {
+    valid: true, value: 1.5
+  });
+});
+
+test("numeric errors name the correct field and clear only its inline state", () => {
+  const i18n = createI18n({ locale: "en", catalogs: { en: enCatalog }, fallbackLocale: "en" });
+  const makeInput = (label) => {
+    const children = [];
+    const attributes = new Map();
+    const field = {
+      firstChild: { textContent: label },
+      append(child) { children.push(child); },
+      querySelector(selector) { return children.find((child) => `#${child.id}` === selector) ?? null; }
+    };
+    return {
+      children,
+      attributes,
+      dataset: { unit: "mm" },
+      closest(selector) { return selector === "label" ? field : null; },
+      getAttribute(name) { return attributes.get(name) ?? null; },
+      setAttribute(name, value) { attributes.set(name, value); },
+      removeAttribute(name) { attributes.delete(name); },
+      setCustomValidity(value) { this.customValidity = value; },
+      field
+    };
+  };
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement() {
+      return { setAttribute(name, value) { this[name] = value; }, remove() { this.removed = true; } };
+    }
+  };
+  const width = makeInput("Width");
+  const height = makeInput("Height");
+  const result = { valid: false, code: "maximum", maximum: 50 };
+  try {
+    assert.equal(numberFieldErrorMessage(width, result, i18n.t), "Width must be at most 50 mm.");
+    showNumberFieldError(width, result, i18n.t);
+    showNumberFieldError(height, result, i18n.t);
+    assert.equal(width.attributes.get("aria-invalid"), "true");
+    assert.match(width.attributes.get("aria-describedby"), /number-field-error-/);
+    assert.equal(width.children[0].textContent, "Width must be at most 50 mm.");
+    clearNumberFieldError(width);
+    assert.equal(width.attributes.has("aria-invalid"), false);
+    assert.equal(width.attributes.has("aria-describedby"), false);
+    assert.equal(width.customValidity, "");
+    assert.equal(height.attributes.get("aria-invalid"), "true");
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
+
+test("layer panel keeps invalid values local and updates only after correction", () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = {
+    createElement() {
+      return { setAttribute(name, value) { this[name] = value; }, remove() { this.removed = true; } };
+    }
+  };
+  const children = [];
+  const attributes = new Map();
+  const fieldLabel = {
+    firstChild: { textContent: "Feed rate" },
+    append(child) { children.push(child); },
+    querySelector(selector) { return children.find((child) => `#${child.id}` === selector) ?? null; }
+  };
+  const layerItem = { dataset: { layerId: "engrave" } };
+  let updates = 0;
+  const panel = new LayersPanel({ addEventListener() {} }, {
+    onUpdate() { updates += 1; },
+    t: (key, values) => `${values.label} ${values.minimum}${values.unit}`
+  });
+  const input = {
+    type: "number",
+    value: "0.5",
+    min: "1",
+    max: "",
+    step: "1",
+    validity: { rangeUnderflow: true },
+    dataset: { layerProperty: "feedMmPerMinute", unit: "mm/min" },
+    closest(selector) {
+      if (selector === "[data-layer-property]") return this;
+      if (selector === "[data-layer-id]") return layerItem;
+      if (selector === "label") return fieldLabel;
+      return null;
+    },
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    setAttribute(name, value) { attributes.set(name, value); },
+    removeAttribute(name) { attributes.delete(name); },
+    setCustomValidity(value) { this.customValidity = value; },
+    focus() { this.focused = true; }
+  };
+
+  try {
+    panel.handleChange({ target: input });
+    assert.equal(updates, 0);
+    assert.equal(input.focused, true);
+    assert.equal(attributes.get("aria-invalid"), "true");
+    assert.equal(children[0].textContent, "Feed rate 1 mm/min");
+
+    input.value = "300";
+    input.validity = {};
+    panel.handleChange({ target: input });
+    assert.equal(updates, 1);
+    assert.equal(attributes.has("aria-invalid"), false);
+    assert.equal(input.customValidity, "");
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
+
+test("inspector identifies visual SVG objects without confusing raster images", () => {
+  assert.deepEqual(getInspectorSections({ type: "svg-image" }), {
+    isText: false,
+    isPath: false,
+    isImage: false,
+    isSvgImage: true
+  });
+  assert.equal(getInspectorSections({ type: "image" }).isSvgImage, false);
+  assert.equal(getInspectorSections(null).isSvgImage, false);
 });
 
 test("desktop plugins register UI elements in named extension slots", async () => {

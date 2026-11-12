@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSync, stringify } from "svgson";
 import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "../src/core/svg-import.js";
-import { renderSvg } from "../src/core/document.js";
+import { planGrblJob, renderSvg } from "../src/core/document.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
@@ -106,6 +106,66 @@ test("SVG can be imported entirely into the explicitly selected active layer", (
   assert.deepEqual(imported.elements.map((element) => element.layerId), ["selected-layer", "selected-layer"]);
 });
 
+test("active-layer SVG import can split an SVG into one object per closed subpath without duplicating geometry", () => {
+  const source = '<svg width="10mm" height="10mm"><path d="M1 1 L3 1 L3 3 Z M5 5 L8 5 L8 8 Z" style="fill:#ff0000; stroke:#0000ff; stroke-width:2px"/></svg>';
+  const options = { layerId: "selected", forceLayerId: "selected", fallbackLayer: { id: "selected", color: "#267b62", operation: "engrave" } };
+
+  const kept = importSvg(source, options);
+  assert.equal(kept.elements.length, 2);
+
+  const split = importSvg(source, { ...options, splitShapes: true });
+  assert.equal(split.elements.length, 4);
+  assert.ok(split.elements.every((element) => element.layerId === "selected" && element.type === "path"));
+  assert.equal(new Set(split.elements.map((element) => element.id)).size, 4);
+  assert.deepEqual(split.elements.map((element) => `${element.fillColorMode}/${element.strokeColorMode}`),
+    ["layer/none", "layer/none", "layer/none", "layer/none"]);
+  assert.ok(split.elements[2].xMm > split.elements[0].xMm);
+});
+
+test("the layer operation changes only how objects look and are machined, never the objects", () => {
+  const imported = importSvg(
+    '<svg width="10mm" height="10mm"><path d="M3 3 L6 3 L6 6 Z" style="fill:#ff0000; stroke:#0000ff; stroke-width:2"/></svg>',
+    { layerId: "selected", forceLayerId: "selected", fallbackLayer: { id: "selected", color: "#267b62", operation: "engrave" } }
+  );
+  assert.equal(imported.elements.length, 2);
+  const asLayer = (operation) => ({ ...imported, layers: [{ ...DEFAULT_LAYER, id: "selected", color: "#267b62", operation }] });
+  const engrave = renderSvg(asLayer("engrave"));
+  assert.match(engrave, /<path id="svg-1"[^>]*fill="none" stroke="#267b62" stroke-width="0.2"/);
+  assert.match(engrave, /<path id="svg-2"[^>]*fill="none" stroke="#267b62" stroke-width="0.2"/);
+  assert.notEqual(imported.elements[0].pathData, imported.elements[1].pathData);
+  assert.equal(imported.elements[1].pathData.match(/M/g).length, 2);
+  const fill = renderSvg(asLayer("fill"));
+  assert.match(fill, /<path id="svg-1"[^>]*fill="#267b62" stroke="none"/);
+  assert.match(fill, /<path id="svg-2"[^>]*fill="#267b62" stroke="none"/);
+  const worked = (operation) => new Set(planGrblJob(asLayer(operation), { maxSpindleSpeed: 1000 }).paths
+    .filter(({ kind }) => kind === "work").map(({ elementId }) => elementId));
+  assert.deepEqual([...worked("engrave")], ["svg-1", "svg-2"]);
+  assert.deepEqual([...worked("fill")], ["svg-1", "svg-2"]);
+});
+
+test("active-layer SVG import preserves the layer color even when path styles specify different paints", () => {
+  const imported = importSvg(
+    '<svg width="10mm" height="10mm"><path d="M1 1 L5 5" style="fill:#ff0000; stroke:#0000ff; stroke-width:2px"/></svg>',
+    {
+      layerId: "selected",
+      forceLayerId: "selected",
+      fallbackLayer: { id: "selected", color: "#267b62", operation: "engrave" }
+    }
+  );
+  const [element, strokePart] = imported.elements;
+  const rendered = renderSvg({
+    ...imported,
+    layers: [{ ...DEFAULT_LAYER, id: "selected", color: "#267b62", operation: "engrave" }]
+  });
+
+  assert.equal(element.layerId, "selected");
+  assert.equal(element.color, undefined);
+  assert.deepEqual([element.fillColorMode, element.strokeColorMode], ["layer", "none"]);
+  assert.deepEqual([strokePart.fillColorMode, strokePart.strokeColorMode], ["layer", "none"]);
+  assert.match(rendered, /data-color="#267b62"/);
+  assert.doesNotMatch(rendered, /#ff0000|#0000ff/);
+});
+
 test("SVG editable import can group geometry into layers by source color", () => {
   const imported = importSvg(`
     <svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10">
@@ -120,6 +180,108 @@ test("SVG editable import can group geometry into layers by source color", () =>
   assert.equal(redLayer.operation, "fill");
   assert.equal(blueLayer.operation, "fill");
   assert.deepEqual(imported.elements.map((element) => element.layerId), [redLayer.id, blueLayer.id]);
+});
+
+test("SVG paths with different fill and stroke colors import as separate layer paths", () => {
+  const imported = importSvg(`
+    <svg width="20mm" height="10mm" viewBox="0 0 20 10">
+      <path d="M1 1 L5 1 L5 5 Z" style="fill:#ff0000; stroke:#0000ff; stroke-width:1.5"/>
+    </svg>`, { layerId: "active", idPrefix: "split" });
+  const [fillPath, strokePath] = imported.elements;
+  const fillLayer = imported.layers.find(({ id }) => id === fillPath.layerId);
+  const strokeLayer = imported.layers.find(({ id }) => id === strokePath.layerId);
+  const rendered = renderSvg(imported);
+  const plan = planGrblJob(imported, { maxSpindleSpeed: 1000 });
+
+  assert.equal(fillPath.type, "path");
+  assert.equal(strokePath.type, "path");
+  assert.notEqual(fillPath.id, strokePath.id);
+  assert.equal(fillPath.pathData, strokePath.pathData);
+  assert.equal(strokePath.strokeWidthMm, 1.5);
+  assert.deepEqual([fillLayer.operation, fillLayer.color], ["fill", "#ff0000"]);
+  assert.deepEqual([strokeLayer.operation, strokeLayer.color], ["engrave", "#0000ff"]);
+  assert.deepEqual([fillPath.fillColorMode, fillPath.strokeColorMode], ["layer", "none"]);
+  assert.deepEqual([strokePath.fillColorMode, strokePath.strokeColorMode], ["none", "layer"]);
+  assert.match(rendered, /fill="#ff0000" stroke="none"/);
+  assert.match(rendered, /fill="none" stroke="#0000ff" stroke-width="0.2"/);
+  assert.ok(plan.paths.some(({ elementId, operation }) => elementId === fillPath.id && operation === "fill"));
+  assert.ok(plan.paths.some(({ elementId, operation }) => elementId === strokePath.id && operation === "engrave"));
+});
+
+test("SVG path stroke width inherits and scales into millimetres", () => {
+  const imported = importSvg(`
+    <svg width="20mm" height="10mm" viewBox="0 0 20 10">
+      <g stroke-width="2">
+        <path d="M1 1 L5 5" transform="scale(2)" fill="none" stroke="#0000ff"/>
+      </g>
+    </svg>`);
+  const [path] = imported.elements;
+
+  assert.equal(path.strokeWidthMm, 4);
+  assert.match(renderSvg(imported), /stroke-width="0.2"/);
+});
+
+test("editable SVG geometry stays native through GRBL planning and uses the selected layer", () => {
+  const source = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10">
+      <rect x="1" y="1" width="4" height="4" fill="#ff0000"/>
+      <path d="M 8 1 L 12 5" fill="none" stroke="#0000ff"/>
+    </svg>`;
+  const byColor = importSvg(source, { layerId: "active", idPrefix: "native" });
+  const plan = planGrblJob(byColor, { maxSpindleSpeed: 1000 });
+
+  assert.deepEqual(byColor.elements.map(({ type }) => type), ["rect", "path"]);
+  assert.ok(plan.paths.some(({ kind, elementId }) => kind === "work" && elementId === "native-1"));
+  assert.ok(plan.paths.some(({ kind, elementId }) => kind === "work" && elementId === "native-2"));
+
+test("SVG path imports safe inline fill and stroke styles", () => {
+  const filled = importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 1 L5 5 Z" style="fill:#ff0000; stroke:none"/></svg>');
+  const stroked = importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 5" style="fill:none; stroke:#123456; stroke-width:1.5"/></svg>');
+  const filledElement = filled.elements[0];
+  const strokedElement = stroked.elements[0];
+  const filledLayer = filled.layers.find(({ id }) => id === filledElement.layerId);
+  const strokedLayer = stroked.layers.find(({ id }) => id === strokedElement.layerId);
+
+  assert.equal(filledLayer.operation, "fill");
+  assert.equal(filledLayer.color, "#ff0000");
+  assert.equal(filledElement.fillColorMode, "layer");
+  assert.equal(filledElement.strokeColorMode, "none");
+  assert.match(renderSvg(filled), /fill="#ff0000" stroke="none"/);
+  assert.equal(strokedLayer.operation, "engrave");
+  assert.equal(strokedLayer.color, "#123456");
+  assert.equal(strokedElement.fillColorMode, "none");
+  assert.equal(strokedElement.strokeColorMode, "layer");
+  assert.equal(strokedElement.type, "path");
+  assert.throws(
+    () => importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 5" style="fill:url(https://example.invalid/a.svg#paint)"/></svg>'),
+    /external or unsupported content/
+  );
+  assert.throws(
+    () => importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 5" style="opacity:0.5"/></svg>'),
+    /unsupported <path> style property "opacity"/
+  );
+  assert.throws(
+    () => importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 5" style="stroke-width:-1"/></svg>'),
+    /stroke-width must be a non-negative finite SVG length/
+  );
+});
+  assert.ok(byColor.elements.every(({ type }) => type !== "image" && type !== "svg-image"));
+
+  const inCurrentLayer = importSvg(source, {
+    layerId: "selected",
+    forceLayerId: "selected",
+    fallbackLayer: { id: "selected", color: "#267b62", operation: "engrave" },
+    idPrefix: "current"
+  });
+  const currentLayerSvg = renderSvg({
+    ...inCurrentLayer,
+    layers: [{ ...DEFAULT_LAYER, id: "selected", color: "#267b62", operation: "engrave" }]
+  });
+
+  assert.equal(inCurrentLayer.layers.length, 1);
+  assert.ok(inCurrentLayer.elements.every(({ layerId }) => layerId === "selected"));
+  assert.match(currentLayerSvg, /data-color="#267b62"/);
+  assert.doesNotMatch(currentLayerSvg, /data-color="#ff0000"|data-color="#0000ff"/);
 });
 
 test("SVG import strips external doctypes without fetching them and decodes standard XML references", () => {
@@ -206,7 +368,21 @@ test("SVG text imports uniform scale, translation, and rotation transforms", () 
   assert.ok(Math.abs(text.yMm - 11.5) < 1e-9);
   assert.equal(text.fontSizeMm, 8);
   assert.equal(text.rotationDeg, 90);
-  assert.match(renderSvg(imported), /font-size="8"[^>]*rotate\(90\)/);
+  assert.match(renderSvg(imported), /<text id="svg-1"[^>]*rotate\(90\)[^>]*>/);
+});
+
+test("SVG text preserves external font families and refuses unavailable GRBL outlines", () => {
+  const imported = importSvg(`
+    <svg width="100mm" height="50mm" viewBox="0 0 100 50">
+      <text x="5" y="12" font-size="8" font-family="Example Display">Laser</text>
+    </svg>`);
+
+  assert.equal(imported.elements[0].fontFamily, "Example Display");
+  assert.match(renderSvg(imported), /font-family="Example Display"/);
+  assert.throws(
+    () => planGrblJob(imported, { maxSpindleSpeed: 1000 }),
+    { code: "grbl.unsupportedTextFont" }
+  );
 });
 
 test("SVG group and geometry transforms are composed and converted to metric geometry", () => {
@@ -275,4 +451,67 @@ test("SVG import enforces finite dimensions, non-empty geometry, and supported t
     </svg>`);
   assert.equal(withMetadata.elements.length, 1);
   assert.equal(withMetadata.elements[0].type, "rect");
+});
+
+test("editor preview matches the machine plan: engrave shows outlines, fill layers show fill, nothing becomes invisible", () => {
+  for (const operation of ["engrave", "cut", "fill"]) {
+    const layer = { ...DEFAULT_LAYER, color: "#123456", operation };
+    const elements = [
+      { id: "p", type: "path", xMm: 1, yMm: 1, widthMm: 8, heightMm: 8, pathData: "M0 0L8 0L8 8Z", layerId: layer.id, layerId: layer.id },
+      { id: "t", type: "text", text: "A", fontFamily: "sans-serif", xMm: 2, yMm: 15, fontSizeMm: 5, layerId: layer.id }
+    ];
+    const svg = renderSvg({ widthMm: 20, heightMm: 20, layers: [layer], elements });
+    const expected = operation === "fill" ? /fill="#123456"/ : /fill="none" stroke="#123456"/;
+    assert.equal(svg.match(new RegExp(expected.source, "g")).length, 2, operation);
+  }
+});
+
+test("split import separates subpaths in both import modes with unique ids", () => {
+  const source = `<svg width="40mm" height="20mm" viewBox="0 0 40 20"><path d="M1 1L9 1L9 9Z M20 1L30 1L30 9Z" fill="#f00" stroke="#00f"/></svg>`;
+  for (const options of [{ layerId: "a", forceLayerId: "a", idPrefix: "s" }, { layerId: "a", idPrefix: "s" }]) {
+    const { elements } = importSvg(source, { ...options, splitShapes: true });
+    assert.ok(elements.length >= 2);
+    assert.equal(new Set(elements.map(({ id }) => id)).size, elements.length);
+    assert.ok(new Set(elements.map(({ xMm }) => xMm)).size >= 2);
+  }
+});
+
+test("mouse-cursor-presentation.svg is a single closed shape: fill and stroke objects on the active layer, fill and stroke layers by color", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../mouse-cursor-presentation.svg", import.meta.url), "utf8");
+  const fallbackLayer = { ...DEFAULT_LAYER, id: "a", color: "#000000" };
+  const base = { layerId: "a", fallbackLayer, idPrefix: "s", splitShapes: true };
+  assert.equal(importSvg(source, { ...base, forceLayerId: "a" }).elements.length, 2);
+  assert.equal(importSvg(source, base).elements.length, 2);
+});
+
+test("imports larger than the table are scaled down uniformly to fit, and the scale is reported", async () => {
+  const { fitImportedToTable } = await import("../src/core/svg-import.js");
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(new URL("../mouse-cursor-presentation.svg", import.meta.url), "utf8");
+  const imported = importSvg(source, { layerId: "a", forceLayerId: "a", fallbackLayer: { ...DEFAULT_LAYER, id: "a", color: "#000000" }, splitShapes: true });
+  const fitted = fitImportedToTable(imported, 180, 120);
+  assert.ok(fitted.scale < 1);
+  assert.ok(fitted.widthMm <= 180 + 1e-9 && fitted.heightMm <= 120 + 1e-9);
+  assert.ok(fitted.elements.every(({ xMm, yMm, widthMm, heightMm }) => xMm >= 0 && yMm >= 0 && xMm + widthMm <= 180 + 1e-9 && yMm + heightMm <= 120 + 1e-9));
+  assert.equal(fitImportedToTable(imported, 1000, 1000).scale, 1);
+});
+
+test("STAGE preview: every vector type looks the same way per operation (fill solid, engrave outline, cut dashed outline)", () => {
+  const base = { xMm: 1, yMm: 1, widthMm: 8, heightMm: 8, layerId: DEFAULT_LAYER.id };
+  const elements = [
+    { ...base, id: "r", type: "rect" },
+    { ...base, id: "e", type: "ellipse" },
+    { ...base, id: "p", type: "path", pathData: "M0 0L8 0L8 8Z" },
+    { ...base, id: "pc", type: "path", pathData: "M0 0L8 0L8 8Z", fillColorMode: "layer", strokeColorMode: "layer", strokeWidthMm: 1 },
+    { id: "t", type: "text", text: "A", fontFamily: "sans-serif", xMm: 2, yMm: 15, fontSizeMm: 5, layerId: DEFAULT_LAYER.id }
+  ];
+  const render = (operation) => renderSvg({ widthMm: 20, heightMm: 20, layers: [{ ...DEFAULT_LAYER, color: "#123456", operation }], elements });
+  const tagOf = (svg, id) => svg.match(new RegExp(`<[a-z]+ id="${id}"[^>]*>`))[0];
+  for (const { id } of elements) {
+    assert.match(tagOf(render("fill"), id), /fill="#123456" stroke="none"/, `fill ${id}`);
+    assert.match(tagOf(render("engrave"), id), /fill="none" stroke="#123456"/, `engrave ${id}`);
+    assert.doesNotMatch(tagOf(render("engrave"), id), /stroke-dasharray/, `engrave ${id}`);
+    assert.match(tagOf(render("cut"), id), /fill="none" stroke="#123456"[^>]*stroke-dasharray/, `cut ${id}`);
+  }
 });

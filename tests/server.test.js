@@ -3,7 +3,13 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { listSerialPorts, startServer } from "../server.mjs";
+import { listSerialPorts, readJson, startServer } from "../server.mjs";
+import { Readable } from "node:stream";
+
+test("JSON request bodies must not be empty", async () => {
+  await assert.rejects(readJson(Readable.from([])), { message: "Request body must contain JSON" });
+  assert.deepEqual(await readJson(Readable.from(['{"ok":true}'])), { ok: true });
+});
 
 test("serial port discovery stays usable when Linux does not provide udevadm", async () => {
   const missingUdevadm = Object.assign(new Error("spawn udevadm ENOENT"), {
@@ -36,9 +42,15 @@ test("server can be started on an ephemeral port and closed by an embedding app"
   assert.equal(brandResponse.status, 200);
   assert.match(brandResponse.headers.get("content-type"), /image\/svg\+xml/);
   assert.match(await brandResponse.text(), /<svg/);
-  const fontResponse = await fetch(`${runningServer.url}/src/core/hershey-fonts.json`);
-  assert.equal(fontResponse.status, 200);
-  assert.ok((await fontResponse.json()).futural);
+  for (const fontFile of ["DejaVuSans.woff", "DejaVuSerif.woff", "DejaVuSansMono.woff"]) {
+    const fontResponse = await fetch(`${runningServer.url}/src/core/fonts/${fontFile}`);
+    assert.equal(fontResponse.status, 200);
+    assert.match(fontResponse.headers.get("content-type"), /font\/woff/);
+    assert.ok((await fontResponse.arrayBuffer()).byteLength > 30000);
+  }
+  const parserResponse = await fetch(`${runningServer.url}/node_modules/opentype.js/dist/opentype.mjs`);
+  assert.equal(parserResponse.status, 200);
+  assert.match(parserResponse.headers.get("content-type"), /javascript/);
   assert.equal((await fetch(`${runningServer.url}/not-allowlisted.svg`)).status, 404);
 
   const statusResponse = await fetch(`${runningServer.url}/api/connection-status`);

@@ -21,7 +21,9 @@ test("CLI exports a validated document to SVG", async (t) => {
   assert.equal(result.status, 0, result.stderr);
   const svg = await readFile(outputPath, "utf8");
   assert.match(svg, /width="42mm" height="30mm"/);
-  assert.match(svg, /x="37" y="8"/);
+  assert.match(svg, /<text id="label" font-family="CommBurn Sans"/);
+  assert.match(svg, /<tspan x="37" y="8">Teste<\/tspan>/);
+  assert.match(svg, /@font-face\{font-family:"CommBurn Sans"/);
 });
 
 test("CLI reports invalid documents with a failure exit code", async (t) => {

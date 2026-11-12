@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createDocument } from "../src/core/document.js";
 import { parseProject, serializeProject } from "../src/core/project.js";
+import { convertProjectEnvelope, CURRENT_PROJECT_VERSION } from "../src/core/project-conversions.js";
+import { renderSvg } from "../src/core/document.js";
 
 test("editable projects round-trip document dimensions, origin, layers, and objects", () => {
   const document = createDocument({
@@ -24,7 +27,33 @@ test("editable projects round-trip document dimensions, origin, layers, and obje
 
   assert.deepEqual(parsed, document);
   assert.equal(JSON.parse(serialized).format, "commburn-project");
-  assert.equal(JSON.parse(serialized).version, 1);
+  assert.equal(JSON.parse(serialized).version, CURRENT_PROJECT_VERSION);
+  assert.equal(JSON.parse(serialized).units, "mm");
+});
+
+test("version 1 editable projects migrate to version 2 without visual or model loss", async () => {
+  const legacySource = await readFile(new URL("./fixtures/project-v1.json", import.meta.url), "utf8");
+  const legacyEnvelope = JSON.parse(legacySource);
+  const convertedEnvelope = convertProjectEnvelope(legacyEnvelope);
+  const expectedDocument = createDocument(legacyEnvelope.document);
+  const convertedDocument = parseProject(legacySource);
+  const serializedAgain = JSON.parse(serializeProject(convertedDocument));
+
+  assert.equal(convertedEnvelope.version, 2);
+  assert.equal(convertedEnvelope.units, "mm");
+  assert.deepEqual(convertedDocument, expectedDocument);
+  assert.equal(renderSvg(convertedDocument), renderSvg(expectedDocument));
+  assert.equal(serializedAgain.version, 2);
+  assert.equal(serializedAgain.units, "mm");
+});
+
+test("project conversion rejects future versions instead of rewriting unknown data", () => {
+  assert.throws(() => convertProjectEnvelope({
+    format: "commburn-project",
+    version: CURRENT_PROJECT_VERSION + 1,
+    units: "mm",
+    document: {}
+  }), { code: "project.unsupportedFormat" });
 });
 
 test("editable project loading rejects malformed, unknown, and invalid documents", () => {

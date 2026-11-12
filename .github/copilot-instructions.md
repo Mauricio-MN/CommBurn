@@ -12,4 +12,14 @@ CommBurn is a beginner-friendly, metric-first vector editor for laser work. Keep
 - Preserve SVG viewBox aspect ratio and keep rulers aligned to the actual drawing bounds.
 - Use the built-in Node test runner (`npm test`) for core and CLI changes. The project has no build step.
 
+## Non-negotiable compatibility rules
+
+- TABU: never remove, rename, reinterpret, round, rasterize, or silently discard data from an editable project to make a load or conversion succeed.
+- TABU: every persisted project schema change requires a format version increment, explicit one-version-at-a-time conversions, and regression fixtures for all supported older versions.
+- TABU: conversions must prove model and visual preservation in tests (`createDocument` equality and `renderSvg` equality where representable); reject unsupported data explicitly instead of claiming a faithful conversion.
+- Never overwrite a user's original file during migration; conversion happens in memory and saving is an explicit user action.
+- Treat `svg-image` as a visual reference, not editable vector geometry. Preserve it; do not send it through raster tracing as an implicit substitute for native SVG import.
+
+Follow [the editable project format contract](../docs/PROJECT_FORMAT.md) for schema versions, migrations, and required tests.
+
 See [the project guide](../docs/PROJECT_GUIDE.md) for scope, architecture, and the staged roadmap.

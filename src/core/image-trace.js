@@ -18,6 +18,14 @@ function cloneNode(node) {
   };
 }
 
+function removeTracerStrokes(node) {
+  if (node.name === "path") {
+    delete node.attributes.stroke;
+    delete node.attributes["stroke-width"];
+  }
+  for (const child of node.children ?? []) removeTracerStrokes(child);
+}
+
 export function importTracedImageSvg(tree, options) {
   const widthMm = positiveFinite(options.widthMm, "widthMm");
   const heightMm = positiveFinite(options.heightMm, "heightMm");
@@ -37,6 +45,7 @@ export function importTracedImageSvg(tree, options) {
   if (root.name !== "svg" || root.type !== "element") {
     throw new CommBurnTypeError("imageTrace.invalidRoot", {}, { message: "Image tracer output must have an SVG root" });
   }
+  removeTracerStrokes(root);
   delete root.attributes.desc;
   root.attributes.width = `${widthMm}mm`;
   root.attributes.height = `${heightMm}mm`;

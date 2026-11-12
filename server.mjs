@@ -49,7 +49,8 @@ const contentTypes = {
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
-  ".svg": "image/svg+xml; charset=utf-8"
+  ".svg": "image/svg+xml; charset=utf-8",
+  ".woff": "font/woff"
 };
 const securityHeaders = {
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
@@ -199,12 +200,13 @@ function verifyLocalRequest(request, response) {
   return true;
 }
 
-async function readJson(request) {
+export async function readJson(request) {
   let body = "";
   for await (const chunk of request) {
     body += chunk;
     if (body.length > 1_000_000) throw new RangeError("Request body is too large");
   }
+  if (!body.trim()) throw new TypeError("Request body must contain JSON");
   return JSON.parse(body);
 }
 
@@ -387,9 +389,11 @@ const server = createServer(async (request, response) => {
   if (requestedPath !== "/index.html"
     && requestedPath !== "/commburn-icon.svg"
     && requestedPath !== "/vendor/svgson.js"
-    && requestedPath !== "/src/core/hershey-fonts.json"
+    && requestedPath !== "/mouse-cursor-presentation.svg"
     && !/^\/src\/[a-zA-Z0-9_/-]+\.(?:js|css)$/.test(requestedPath)
+    && !/^\/src\/core\/fonts\/(?:DejaVuSans|DejaVuSerif|DejaVuSansMono)\.woff$/.test(requestedPath)
     && !/^\/node_modules\/svg-pathdata\/lib\/[a-zA-Z0-9_.-]+\.js$/.test(requestedPath)
+    && requestedPath !== "/node_modules/opentype.js/dist/opentype.mjs"
     && requestedPath !== "/node_modules/@jodit/image-editor/dist/jodit-image-editor.js"
     && requestedPath !== "/node_modules/imagetracerjs/imagetracer_v1.2.6.js") {
     response.writeHead(404).end("Not found");
@@ -404,7 +408,7 @@ const server = createServer(async (request, response) => {
   }
   try {
     const content = await readFile(filePath);
-    response.writeHead(200, { ...securityHeaders, "Content-Type": contentTypes[extname(filePath)] ?? "application/octet-stream" });
+    response.writeHead(200, { ...securityHeaders, "Content-Type": contentTypes[extname(filePath)] ?? "application/octet-stream", "Cache-Control": "no-cache" });
     response.end(request.method === "HEAD" ? undefined : content);
   } catch (error) {
     response.writeHead(error.code === "ENOENT" ? 404 : 500).end("Not found");

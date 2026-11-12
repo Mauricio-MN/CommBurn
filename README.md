@@ -17,6 +17,10 @@ A partir da versão `0.1.2`, o núcleo do CommBurn é licenciado sob GNU AGPL-3.
 - Execute `npm test` para rodar os testes do núcleo e da CLI.
 - Exporte um documento JSON para SVG com `node cli/commburn.mjs entrada.json saida.svg`.
 
+## Compatibilidade de projetos editáveis
+
+**TABU:** nunca descartar, reinterpretar, arredondar ou rasterizar dados de um projeto editável para fazê-lo carregar. Mudanças no schema exigem nova versão, conversões explícitas e fixtures de regressão que provem preservação do modelo e da aparência. SVG visual é preservado como referência; para obter vetores, reimporte o SVG pelo modo editável. Consulte o [contrato do formato e das conversões](docs/PROJECT_FORMAT.md).
+
 ## Aplicativo desktop
 
 - Execute `npm run desktop` para abrir o CommBurn em uma janela desktop durante o desenvolvimento; esse modo usa o mesmo host de plugins locais dos pacotes.
@@ -33,7 +37,7 @@ A partir da versão `0.1.2`, o núcleo do CommBurn é licenciado sob GNU AGPL-3.
 
 O app Electron carrega plugins locais confiáveis da pasta `plugins` dentro do diretório de dados do usuário. Os caminhos padrão são `%APPDATA%\\commburn\\plugins` no Windows, `~/Library/Application Support/commburn/plugins` no macOS e `${XDG_CONFIG_HOME:-~/.config}/commburn/plugins` no Linux. Cada plugin usa um subdiretório com `manifest.json` e um `plugin.mjs`; consulte o contrato de CLI e plugins para o formato/API v1. Feche e reabra o app depois de instalar ou remover um plugin. `npm start` e o editor aberto diretamente no navegador não carregam plugins externos.
 
-O GRBL grava texto com fontes de traço único integradas e envia retângulos e paths vetoriais editáveis sem transformações. Texto em camada de preenchimento também é gravado como traço, sem hachura; formas fechadas continuam preenchidas. SVGs podem ser importados por cor ou pela cor da camada ativa; SVGs visuais preservam a aparência e podem ser vetorizados localmente para gerar trajetórias. Confira as limitações e precauções de hardware em [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md). O contrato de automação, plugins e GRBL está em [docs/PLUGIN_CLI_CONTRACT.md](docs/PLUGIN_CLI_CONTRACT.md).
+O editor renderiza texto nativo em SVG usando fontes OpenType DejaVu incorporadas; a exportação inclui a fonte utilizada. O GRBL extrai os contornos desses mesmos glifos: a operação `fill` aplica o algoritmo e o espaçamento da camada, enquanto `engrave` e `cut` percorrem os contornos. Retângulos e paths vetoriais editáveis sem transformações também são aceitos. SVGs podem ser reimportados como vetores por cor ou pela cor da camada ativa. SVGs visuais preservam a aparência como referência e não são rasterizados para gerar trajetórias. Confira as limitações e precauções de hardware em [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md). O contrato de automação, plugins e GRBL está em [docs/PLUGIN_CLI_CONTRACT.md](docs/PLUGIN_CLI_CONTRACT.md).
 
 Para módulos de interface, ferramentas, atalhos, geometria e pontos de extensão, consulte [docs/UI_ARCHITECTURE.md](docs/UI_ARCHITECTURE.md).
 

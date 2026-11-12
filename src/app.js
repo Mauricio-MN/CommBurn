@@ -10,11 +10,17 @@ import { connectToolbar, TOOLS } from "./ui/toolbar.js";
 import { installTooltips } from "./ui/tooltips.js";
 import { LayersPanel } from "./ui/layers-panel.js";
 import { PathEditor } from "./ui/path-editor.js";
+import { getInspectorSections } from "./ui/inspector-state.js";
 import { loadDesktopPlugins } from "./ui/plugins.js";
 import { translateDom } from "./ui/dom-i18n.js";
+import {
+  clearNumberFieldError,
+  showNumberFieldError,
+  validateNumberField
+} from "./ui/field-validation.js";
 import enCatalog from "./locales/en.js";
 import ptBrCatalog from "./locales/pt-BR.js";
-import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "./core/svg-import.js";
+import { fitImportedToTable, importSvgTree, validateSvgSource } from "./core/svg-import.js";
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 import {
   createMachinePlayback,
@@ -24,7 +30,8 @@ import {
 } from "./ui/machine-preview.js";
 import {
   createPresentationDocument,
-  createPresentationSimulationDocument
+  createPresentationSimulationDocument,
+  PRESENTATION_STEPS
 } from "./ui/presentation.js";
 
 const byId = (id) => document.getElementById(id);
@@ -156,9 +163,10 @@ let machineSimulationCompletedLines = 0;
 let machineSimulationCanvasSize = null;
 let statusPollTimer;
 let presentationActive = false;
+let presentationSnapshot = null;
 let presentationPaused = false;
 let presentationRun = 0;
-let presentationSnapshot = null;
+let presentationTarget = null;
 
 function applyInterfaceLocale() {
   document.documentElement.lang = i18n.locale;
@@ -175,7 +183,6 @@ function applyInterfaceLocale() {
   updateMachineControls();
   renderMachineState();
 }
-let presentationTarget = null;
 let presentationInternalClose = false;
 const history = new DocumentHistory(currentDocument);
 const pathEditor = new PathEditor(byId("path-editor-dialog"));
@@ -190,12 +197,32 @@ function readDocument() {
   });
 }
 
-function numberFrom(input, label, min = -Infinity) {
-  const value = Number(input.value);
-  if (!Number.isFinite(value) || value < min) {
-    throw new RangeError(`${label} deve ser ${min > 0 ? "maior que zero" : "um número válido"}.`);
+class FieldValidationError extends RangeError {
+  constructor(input, result, label) {
+    super(`${label} is invalid.`);
+    this.code = `ui.validation.${result.code}`;
+    this.input = input;
+    this.result = result;
   }
-  return value;
+}
+
+function numberFrom(input, label, min = -Infinity) {
+  const result = validateNumberField(input, { minimum: min });
+  if (!result.valid) {
+    showNumberFieldError(input, result, i18n.t, label);
+    input.focus({ preventScroll: true });
+    throw new FieldValidationError(input, result, label);
+  }
+  clearNumberFieldError(input);
+  return result.value;
+}
+
+for (const input of document.querySelectorAll('input[type="number"]:not([data-layer-property])')) {
+  input.addEventListener("input", () => {
+    const result = validateNumberField(input);
+    if (result.valid) clearNumberFieldError(input);
+    else if (input.getAttribute("aria-invalid") === "true") showNumberFieldError(input, result, i18n.t);
+  });
 }
 
 function commitHistory() {
@@ -237,10 +264,7 @@ function syncInspector() {
   const selected = currentDocument.elements.find((element) => element.id === selectedId);
   const isMultiple = selectedElements.length > 1;
   inspector.hidden = selectedElements.length === 0;
-  const isText = selected?.type === "text";
-  const isPath = selected?.type === "path";
-  const isImage = selected?.type === "image";
-  const isSvgImage = selected?.type === "svg-image";
+  const { isText, isPath, isImage, isSvgImage } = getInspectorSections(selected);
   byId("text-inspector-fields").hidden = !isText;
   byId("path-inspector-fields").hidden = !isPath;
   byId("image-inspector-fields").hidden = !isImage;
@@ -261,12 +285,16 @@ function syncInspector() {
 
   byId("inspector-kind").textContent = `${i18n.t(`ui.inspector.type.${selected.type}`)} · ${selected.id}`;
   byId("shape-properties").hidden = isText;
+  byId("object-lock-ratio-field").hidden = isText;
   byId("object-text").value = isText ? selected.text : "";
   byId("object-font").value = selected.fontFamily ?? "sans-serif";
   byId("object-x").value = selected.xMm;
   byId("object-y").value = selected.yMm;
   byId("object-width").value = selected.widthMm ?? "";
   byId("object-height").value = selected.heightMm ?? "";
+  const positiveDimensions = ["rect", "ellipse"].includes(selected.type);
+  byId("object-width").min = positiveDimensions ? "0.1" : "0";
+  byId("object-height").min = positiveDimensions ? "0.1" : "0";
   byId("object-rotation").value = selected.rotationDeg;
   byId("object-skew-x").value = selected.skewXDeg;
   byId("object-skew-y").value = selected.skewYDeg;
@@ -278,7 +306,6 @@ function syncInspector() {
   byId("object-layer").value = selected.layerId;
   const imageLayer = currentDocument.layers.find((layer) => layer.id === selected.layerId);
   byId("open-image-vectorizer").disabled = !isImage || layerLocked;
-  byId("open-svg-vectorizer").disabled = !isSvgImage || layerLocked;
   removeButton.disabled = layerLocked;
   byId("duplicate-selection").disabled = layerLocked;
 }
@@ -438,6 +465,11 @@ function appendMachineState(key, values = {}) {
 }
 
 function showNotice(message) {
+  if (message instanceof FieldValidationError) {
+    showNumberFieldError(message.input, message.result, i18n.t, message.message);
+    message.input.focus({ preventScroll: true });
+    return;
+  }
   notice.textContent = message instanceof Error ? formatError(message) : message;
   notice.classList.add("visible");
   clearTimeout(noticeTimer);
@@ -450,8 +482,15 @@ async function machineApi(path, method = "GET", body) {
     headers: body ? { "Content-Type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined
   });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? `Machine request failed (${response.status})`);
+  const text = await response.text();
+  let result = null;
+  try {
+    result = text ? JSON.parse(text) : null;
+  } catch {
+    result = null;
+  }
+  if (!response.ok) throw new Error(result?.error ?? `Machine request failed (${response.status})`);
+  if (result === null) throw new Error(`Machine request returned no JSON (${response.status})`);
   return result;
 }
 
@@ -604,50 +643,11 @@ function renderPreview() {
     resizeBoard(widthMm, heightMm);
     byId("canvas-size").textContent = `${widthMm} × ${heightMm} mm`;
 
-    const svgDocument = new DOMParser().parseFromString(renderSvg(currentDocument), "image/svg+xml");
+    const svgDocument = new DOMParser().parseFromString(renderSvg(currentDocument, { embedFonts: false }), "image/svg+xml");
     if (svgDocument.querySelector("parsererror")) throw new Error("Não foi possível desenhar este documento.");
-    const textPaths = new Map();
-    if (presentationActive) {
-      const textElements = currentDocument.elements.filter((element) => element.type === "text");
-      if (textElements.length) {
-        try {
-          const textPlan = planGrblJob({ ...currentDocument, elements: textElements }, {
-            maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED
-          });
-          for (const path of textPlan.paths) {
-            if (path.kind !== "work") continue;
-            if (!textPaths.has(path.elementId)) textPaths.set(path.elementId, []);
-            textPaths.get(path.elementId).push(path.points);
-          }
-        } catch {
-          textPaths.clear();
-        }
-      }
-    }
     const selection = new Set(selectedIds);
     const nodes = Array.from(svgDocument.querySelectorAll("[id]"), (node) => {
       const nodeId = node.getAttribute("id");
-      const machineStrokes = textPaths.get(nodeId);
-      if (machineStrokes) {
-        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-        group.setAttribute("id", nodeId);
-        group.dataset.id = nodeId;
-        group.dataset.layerId = node.closest("[data-layer-id]")?.getAttribute("data-layer-id") ?? "";
-        const layer = currentDocument.layers.find((candidate) => candidate.id === group.dataset.layerId);
-        if (layer?.locked) group.dataset.locked = "true";
-        if (selection.has(nodeId)) group.classList.add("selected");
-        for (const points of machineStrokes) {
-          const stroke = document.createElementNS("http://www.w3.org/2000/svg", "path");
-          stroke.setAttribute("d", points.map(({ xMm, yMm }, index) => `${index === 0 ? "M" : "L"}${xMm} ${yMm}`).join(" "));
-          stroke.setAttribute("fill", "none");
-          stroke.setAttribute("stroke", layer?.color ?? "#000000");
-          stroke.setAttribute("stroke-width", "0.6");
-          stroke.setAttribute("stroke-linecap", "round");
-          stroke.setAttribute("stroke-linejoin", "round");
-          group.append(stroke);
-        }
-        return group;
-      }
       const imported = document.importNode(node, true);
       imported.dataset.id = nodeId;
       imported.dataset.layerId = node.closest("[data-layer-id]")?.getAttribute("data-layer-id") ?? "";
@@ -981,7 +981,9 @@ function showMachinePreview() {
     byId("machine-path-preview").hidden = false;
     byId("machine-preview-dialog").showModal();
   } catch (error) {
-    showNotice(i18n.t("ui.dialogs.machinePreviewFailure", { error: formatError(error) }));
+    showNotice(error instanceof FieldValidationError
+      ? error
+      : i18n.t("ui.dialogs.machinePreviewFailure", { error: formatError(error) }));
   }
 }
 
@@ -1004,20 +1006,7 @@ function setPresentationInput(input, value) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-async function typePresentationInput(input, value, run) {
-  input.focus({ preventScroll: true });
-  input.value = "";
-  for (const character of String(value)) {
-    if (!presentationCurrent(run)) return false;
-    input.value += character;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    if (!await waitPresentation(220, run)) return false;
-  }
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-  return true;
-}
-
-function setPresentationStep(index, title, description, total = 23) {
+function setPresentationStep(index, title, description, total = PRESENTATION_STEPS.length) {
   byId("presentation-step-count").textContent = `${index} / ${total}`;
   byId("presentation-step-label").textContent = i18n.t("ui.presentation.label");
   byId("presentation-title").textContent = title;
@@ -1049,33 +1038,19 @@ function waitPresentation(milliseconds, run) {
 }
 
 async function movePresentationCursor(target, run) {
-  if (!target || !presentationCurrent(run)) return false;
-  let scrollContainer = target.parentElement;
-  while (scrollContainer && scrollContainer !== document.body && scrollContainer !== document.documentElement) {
-    const { overflowY } = window.getComputedStyle(scrollContainer);
-    if (/(auto|scroll)/.test(overflowY) && scrollContainer.scrollHeight > scrollContainer.clientHeight) break;
-    scrollContainer = scrollContainer.parentElement;
-  }
-  if (scrollContainer && scrollContainer !== document.body && scrollContainer !== document.documentElement) {
-    const targetBounds = target.getBoundingClientRect();
-    const containerBounds = scrollContainer.getBoundingClientRect();
-    const topEdge = containerBounds.top + scrollContainer.clientTop + 8;
-    const bottomEdge = containerBounds.bottom - 8;
-    if (targetBounds.top < topEdge) scrollContainer.scrollTop -= topEdge - targetBounds.top;
-    else if (targetBounds.bottom > bottomEdge) scrollContainer.scrollTop += targetBounds.bottom - bottomEdge;
-  }
+  if (!target) throw new RangeError("O alvo da etapa da apresentação não existe.");
+  if (!presentationCurrent(run)) return false;
+  target.scrollIntoView({ block: "center", behavior: "auto" });
   presentationTarget?.classList.remove("presentation-target");
   presentationTarget = target;
   target.classList.add("presentation-target");
   const bounds = target.getBoundingClientRect();
   const { cursor } = presentationUi();
-  const left = Math.min(window.innerWidth - 32, Math.max(4, bounds.left + bounds.width / 2 - 3));
-  const top = Math.min(window.innerHeight - 40, Math.max(4, bounds.top + bounds.height / 2 - 2));
-  cursor.style.left = `${left}px`;
-  cursor.style.top = `${top}px`;
-  if (!await waitPresentation(1400, run)) return false;
+  cursor.style.left = `${bounds.left + Math.min(bounds.width / 2, 30) - 3}px`;
+  cursor.style.top = `${bounds.top + Math.min(bounds.height / 2, 20) - 2}px`;
+  if (!await waitPresentation(650, run)) return false;
   cursor.classList.add("is-clicking");
-  const clicked = await waitPresentation(350, run);
+  const clicked = await waitPresentation(180, run);
   cursor.classList.remove("is-clicking");
   return clicked;
 }
@@ -1166,6 +1141,7 @@ function finishPresentation() {
   const { card, cursor, dialog } = presentationUi();
   presentationTarget?.classList.remove("presentation-target");
   presentationTarget = null;
+  setPresentationSubstepText("");
   movePresentationUi(document.body);
   card.hidden = true;
   cursor.hidden = true;
@@ -1176,9 +1152,37 @@ function finishPresentation() {
   restorePresentationState();
 }
 
+function resetPresentationDemo() {
+  const { card, dialog } = presentationUi();
+  if (dialog.open) {
+    presentationInternalClose = true;
+    dialog.close();
+  }
+  movePresentationUi(document.body);
+  card.hidden = false;
+  presentationUi().cursor.hidden = false;
+  presentationTarget?.classList.remove("presentation-target");
+  presentationTarget = null;
+  presentationUi().cursor.classList.remove("is-clicking");
+  setPresentationSubstepText("");
+  currentDocument = createPresentationDocument();
+  selectedId = null;
+  selectedIds = [];
+  activeLayerId = currentDocument.layers[0].id;
+  nextId = 1;
+  toolbar.setTool("select");
+  widthInput.value = String(currentDocument.widthMm);
+  heightInput.value = String(currentDocument.heightMm);
+  originInput.value = currentDocument.origin.corner;
+  flipXInput.checked = currentDocument.origin.flipX;
+  flipYInput.checked = currentDocument.origin.flipY;
+  syncInspector();
+  renderPreview();
+}
+
 async function animatePresentationSimulation(run) {
   const totalLines = createMachinePlayback(machineSimulationPlan).totalLines;
-  const durationMs = 14000;
+  const durationMs = 5200;
   let elapsed = 0;
   while (elapsed < durationMs && presentationCurrent(run)) {
     if (!await waitPresentation(50, run)) return;
@@ -1190,106 +1194,94 @@ async function animatePresentationSimulation(run) {
   if (presentationCurrent(run)) renderMachineSimulationProgress(totalLines, totalLines, "complete");
 }
 
-async function runPresentation(run) {
-  const step = (key, target, action) => ({
-    target,
-    title: i18n.t(`ui.presentation.steps.${key}.title`),
-    description: i18n.t(`ui.presentation.steps.${key}.description`),
-    action
-  });
-  const steps = [
-    step("areaWidth", "#width", () => typePresentationInput(widthInput, 200, run)),
-    step("areaHeight", "#height", () => typePresentationInput(heightInput, 140, run)),
-    step("origin", "#origin", () => setPresentationInput(originInput, "top-left")),
-    step("flipX", "#flip-x", () => {
-      byId("flip-x").checked = false;
-      byId("flip-x").dispatchEvent(new Event("change", { bubbles: true }));
-    }),
-    step("flipY", "#flip-y", () => {
-      byId("flip-y").checked = false;
-      byId("flip-y").dispatchEvent(new Event("change", { bubbles: true }));
-    }),
-    step("layerOperation", '#layers-list [data-layer-property="operation"]', () =>
-      setPresentationInput(byId("layers-list").querySelector('[data-layer-property="operation"]'), "fill")),
-    step("layerColor", '#layers-list [data-layer-property="color"]', () =>
-      setPresentationInput(byId("layers-list").querySelector('[data-layer-property="color"]'), "#357a67")),
-    step("layerFeed", '#layers-list [data-layer-property="feedMmPerMinute"]', () =>
-      typePresentationInput(byId("layers-list").querySelector('[data-layer-property="feedMmPerMinute"]'), 300, run)),
-    step("layerPower", '#layers-list [data-layer-property="powerPercent"]', () =>
-      typePresentationInput(byId("layers-list").querySelector('[data-layer-property="powerPercent"]'), 12, run)),
-    step("layerPasses", '#layers-list [data-layer-property="passes"]', () =>
-      typePresentationInput(byId("layers-list").querySelector('[data-layer-property="passes"]'), 1, run)),
-    step("fillSpacing", '#layers-list [data-layer-property="fillSpacingMm"]', () =>
-      typePresentationInput(byId("layers-list").querySelector('[data-layer-property="fillSpacingMm"]'), 3, run)),
-    step("fillAlgorithm", '#layers-list [data-layer-property="fillAlgorithm"]', () =>
-      setPresentationInput(byId("layers-list").querySelector('[data-layer-property="fillAlgorithm"]'), "horizontal-serpentine")),
-    step("objectOrder", '#layers-list [data-layer-property="objectOrder"]', () =>
-      setPresentationInput(byId("layers-list").querySelector('[data-layer-property="objectOrder"]'), "document")),
-    step("shapeType", "#new-shape-type", () => setPresentationInput(byId("new-shape-type"), "rect")),
-    step("frameX", "#new-x", () => typePresentationInput(byId("new-x"), 35, run)),
-    step("frameY", "#new-y", () => typePresentationInput(byId("new-y"), 38, run)),
-    step("frameWidth", "#new-shape-width", () => typePresentationInput(byId("new-shape-width"), 130, run)),
-    step("frameHeight", "#new-shape-height", () => typePresentationInput(byId("new-shape-height"), 62, run)),
-    step("addFrame", "#add-shape", () => byId("add-shape").click()),
-    step("detailX", "#new-x", () => typePresentationInput(byId("new-x"), 48, run)),
-    step("detailY", "#new-y", () => typePresentationInput(byId("new-y"), 51, run)),
-    step("detailWidth", "#new-shape-width", () => typePresentationInput(byId("new-shape-width"), 104, run)),
-    step("detailHeight", "#new-shape-height", () => typePresentationInput(byId("new-shape-height"), 36, run)),
-    step("addDetail", "#add-shape", () => byId("add-shape").click()),
-    step("textLayer", "#add-layer", () => byId("add-layer").click()),
-    step("textContent", "#text-content", () => typePresentationInput(textInput, "COMMBURN", run)),
-    step("fontFamily", "#font-family", () => setPresentationInput(fontFamilyInput, "sans-serif")),
-    step("textSize", "#font-size", () => typePresentationInput(fontSizeInput, 12, run)),
-    step("textX", "#new-x", () => typePresentationInput(byId("new-x"), 61, run)),
-    step("textY", "#new-y", () => typePresentationInput(byId("new-y"), 72, run)),
-    step("addText", "#add-text", () => byId("add-text").click()),
-    step("inspectPosition", "#object-x", () => {
-      selectObject(currentDocument.elements.at(-1).id);
-      toolbar.setTool("move");
-      return typePresentationInput(byId("object-x"), 50, run);
-    }),
-    step("inspectWidth", "#object-width", () => typePresentationInput(byId("object-width"), 100, run)),
-    step("preview", "#preview-machine-job", () => {
-      byId("preview-machine-job").click();
-      const simulationDocument = createPresentationSimulationDocument(readDocument());
-      const plan = planGrblJob(simulationDocument, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED });
-      showMachineSimulation(plan, simulationDocument, createMachinePlayback(plan).totalLines);
-      movePresentationUi(byId("machine-preview-dialog"));
-    }),
-    step("simulate", "#machine-simulation-visual", () => animatePresentationSimulation(run))
-  ];
+function presentationFieldName(target) {
+  const label = target.closest("label");
+  if (label) return label.childNodes[0]?.textContent.trim() || target.id;
+  return target.textContent.trim() || target.id;
+}
 
+function setPresentationSubstepText(text) {
+  const line = byId("presentation-substep");
+  line.textContent = text;
+  line.hidden = !text;
+}
+
+function setPresentationSubstep(item, target) {
+  const text = item.kind === "simulate"
+    ? i18n.t("ui.presentation.substeps.simulate")
+    : i18n.t(`ui.presentation.substeps.${item.kind}`, { field: presentationFieldName(target) });
+  setPresentationSubstepText(text);
+}
+
+async function typePresentationValue(input, value, run) {
+  input.focus({ preventScroll: true });
+  input.value = "";
+  for (const character of String(value)) {
+    input.value += character;
+    if (!await waitPresentation(110, run)) return false;
+  }
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+  return presentationCurrent(run);
+}
+
+async function simulatePresentationJob(run) {
+  const simulationDocument = createPresentationSimulationDocument(readDocument());
+  const plan = planGrblJob(simulationDocument, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED });
+  showMachineSimulation(plan, simulationDocument, createMachinePlayback(plan).totalLines);
+  movePresentationUi(byId("machine-preview-dialog"));
+  await animatePresentationSimulation(run);
+  return presentationCurrent(run);
+}
+
+async function performPresentationSubstep(item, target, run) {
+  if (item.kind === "type") return typePresentationValue(target, item.value, run);
+  if (item.kind === "choose") {
+    setPresentationInput(target, item.value);
+    return presentationCurrent(run);
+  }
+  if (item.kind === "click") {
+    target.click();
+    if (target.id === "preview-machine-job") movePresentationUi(byId("machine-preview-dialog"));
+    return presentationCurrent(run);
+  }
+  if (item.kind === "simulate") return simulatePresentationJob(run);
+  throw new RangeError(`Ação de apresentação desconhecida: ${item.kind}`);
+}
+
+async function runPresentation(run) {
   const { card } = presentationUi();
   card.hidden = false;
-  byId("presentation-pause").hidden = false;
+  byId("presentation-toggle").hidden = false;
   byId("presentation-restart").hidden = true;
-  for (let index = 0; index < steps.length; index += 1) {
-    const step = steps[index];
-    setPresentationStep(index + 1, step.title, step.description, steps.length);
-    if (!await movePresentationCursor(document.querySelector(step.target), run)) return;
-    if (!presentationCurrent(run)) return;
+  for (const [index, step] of PRESENTATION_STEPS.entries()) {
+    const title = i18n.t(`ui.presentation.steps.${step.key}.title`);
+    const description = i18n.t(`ui.presentation.steps.${step.key}.description`);
+    setPresentationStep(index + 1, title, description);
     try {
-      await step.action();
+      for (const item of step.substeps) {
+        const target = document.querySelector(item.target);
+        if (!target) throw new RangeError(`O alvo da apresentação não existe: ${item.target}`);
+        setPresentationSubstep(item, target);
+        if (!await movePresentationCursor(target, run)) return;
+        if (!await performPresentationSubstep(item, target, run)) return;
+      }
     } catch (error) {
       showNotice(i18n.t("ui.presentation.failure", { error: formatError(error) }));
       finishPresentation();
       return;
     }
     if (!presentationCurrent(run)) return;
-    if (index < steps.length - 1 && !await waitPresentation(1300, run)) return;
+    if (index < PRESENTATION_STEPS.length - 1 && !await waitPresentation(500, run)) return;
   }
   if (!presentationCurrent(run)) return;
   setPresentationStep(
-    steps.length,
+    PRESENTATION_STEPS.length,
     i18n.t("ui.presentation.completeTitle"),
-    i18n.t("ui.presentation.completeDescription"),
-    steps.length
+    i18n.t("ui.presentation.completeDescription")
   );
-  presentationTarget?.classList.remove("presentation-target");
-  presentationTarget = null;
-  presentationUi().cursor.hidden = true;
   byId("presentation-step-label").textContent = i18n.t("ui.presentation.completeLabel");
-  byId("presentation-pause").hidden = true;
+  byId("presentation-toggle").hidden = true;
   byId("presentation-restart").hidden = false;
 }
 
@@ -1304,69 +1296,32 @@ function beginPresentation() {
   presentationPaused = false;
   presentationRun += 1;
   const run = presentationRun;
-  currentDocument = createPresentationDocument();
-  selectedId = null;
-  selectedIds = [];
-  activeLayerId = currentDocument.layers[0].id;
-  nextId = 1;
-  toolbar.setTool("select");
-  widthInput.value = String(currentDocument.widthMm);
-  heightInput.value = String(currentDocument.heightMm);
-  originInput.value = currentDocument.origin.corner;
-  flipXInput.checked = currentDocument.origin.flipX;
-  flipYInput.checked = currentDocument.origin.flipY;
   document.body.classList.add("presentation-active");
   document.documentElement.classList.add("presentation-active");
-  movePresentationUi(document.body);
-  presentationUi().card.hidden = false;
-  presentationUi().cursor.hidden = false;
+  resetPresentationDemo();
   setPresentationPauseLabel(false);
-  presentationTarget?.classList.remove("presentation-target");
-  presentationTarget = null;
-  presentationUi().cursor.classList.remove("is-clicking");
-  syncInspector();
-  renderPreview();
   void runPresentation(run);
 }
 
 function restartPresentation() {
-  const { dialog, card, cursor } = presentationUi();
+  if (!presentationActive) return;
   presentationRun += 1;
-  if (dialog.open) {
-    presentationInternalClose = true;
-    dialog.close();
-  }
-  movePresentationUi(document.body);
-  card.hidden = false;
-  cursor.hidden = false;
-  cursor.classList.remove("is-clicking");
-  presentationTarget?.classList.remove("presentation-target");
-  presentationTarget = null;
-  currentDocument = createPresentationDocument();
-  selectedId = null;
-  selectedIds = [];
-  activeLayerId = currentDocument.layers[0].id;
-  nextId = 1;
-  toolbar.setTool("select");
-  widthInput.value = String(currentDocument.widthMm);
-  heightInput.value = String(currentDocument.heightMm);
-  originInput.value = currentDocument.origin.corner;
-  flipXInput.checked = currentDocument.origin.flipX;
-  flipYInput.checked = currentDocument.origin.flipY;
-  setPresentationPauseLabel(false);
-  syncInspector();
-  renderPreview();
   const run = presentationRun;
+  presentationPaused = false;
+  resetPresentationDemo();
+  setPresentationPauseLabel(false);
   void runPresentation(run);
 }
 
 function setPresentationPauseLabel(paused) {
   presentationPaused = paused;
-  const button = byId("presentation-pause");
-  const label = paused ? "Continuar" : "Pausar";
-  button.textContent = label;
-  button.setAttribute("aria-label", `${label} apresentação`);
-  button.title = `${label} a apresentação`;
+  const button = byId("presentation-toggle");
+  button.textContent = i18n.t(paused ? "ui.presentation.resume" : "ui.presentation.pause");
+  button.setAttribute("aria-pressed", String(!paused));
+}
+
+function togglePresentationPlayback() {
+  setPresentationPauseLabel(!presentationPaused);
 }
 
 function exportGcode() {
@@ -1381,50 +1336,34 @@ async function importSvgFile(file) {
   if (file.size > 10 * 1024 * 1024) throw new RangeError("O SVG deve ter no máximo 10 MB.");
   const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
   if (!layer || layer.locked) throw new Error("Selecione uma camada desbloqueada para importar objetos.");
-  if (!globalThis.svgson?.parseSync || !globalThis.svgson?.stringify) throw new Error("O parser SVG local não foi carregado.");
+  if (!globalThis.svgson?.parseSync) throw new Error("O parser SVG local não foi carregado.");
 
   const source = await file.text();
   const sanitizedSource = validateSvgSource(source);
   const tree = globalThis.svgson.parseSync(sanitizedSource);
-  if (byId("svg-import-mode").value === "visual") {
-    const viewport = getSvgViewport(tree);
-    const sanitized = sanitizeSvgForVisual(tree, globalThis.svgson);
-    const svgDataUri = encodeSvgDataUri(sanitized.source);
-    const fit = Math.min(1, currentDocument.widthMm / viewport.widthMm, currentDocument.heightMm / viewport.heightMm);
-    const element = {
-      id: `svg-image-${nextId++}`,
-      type: "svg-image",
-      xMm: 0,
-      yMm: 0,
-      widthMm: viewport.widthMm * fit,
-      heightMm: viewport.heightMm * fit,
-      svgDataUri,
-      layerId: activeLayerId
-    };
-    currentDocument = createDocument({ ...readDocument(), elements: [...currentDocument.elements, element] });
-    selectedIds = [element.id];
-    selectedId = element.id;
-    syncInspector();
-    renderPreview();
-    commitHistory();
-    showNotice(sanitized.removedActiveContent
-      ? "SVG visual incorporado. Scripts e eventos foram removidos; conteúdo externo não é carregado."
-      : "SVG importado como objeto visual incorporado, sem execução de scripts nem conteúdo remoto.");
-    return;
-  }
+  byId("svg-import-file-name").textContent = file.name;
+  const dialog = byId("svg-import-dialog");
+  const mode = await new Promise((resolve) => {
+    dialog.addEventListener("close", () => {
+      resolve(dialog.returnValue === "import" ? byId("svg-import-mode").value : null);
+    }, { once: true });
+    dialog.showModal();
+  });
+  if (!mode) return;
 
   const importOptions = {
     layerId: activeLayerId,
     fallbackLayer: layer,
     idPrefix: `svg-${nextId}`
   };
-  if (byId("svg-import-mode").value === "editable") importOptions.forceLayerId = activeLayerId;
-  const imported = importSvgTree(tree, importOptions);
+  if (mode === "editable") {
+    importOptions.forceLayerId = activeLayerId;
+  }
+  importOptions.splitShapes = byId("svg-import-split").checked;
+  const imported = fitImportedToTable(importSvgTree(tree, importOptions), currentDocument.widthMm, currentDocument.heightMm);
   const elements = [...currentDocument.elements, ...imported.elements];
   currentDocument = createDocument({
     ...currentDocument,
-    widthMm: Math.max(currentDocument.widthMm, imported.widthMm),
-    heightMm: Math.max(currentDocument.heightMm, imported.heightMm),
     layers: [...currentDocument.layers, ...imported.layers.filter((candidate) => candidate.id !== activeLayerId)],
     elements
   });
@@ -1436,7 +1375,9 @@ async function importSvgFile(file) {
   syncInspector();
   renderPreview();
   commitHistory();
-  showNotice(`SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`);
+  showNotice(imported.scale < 1
+    ? `SVG importado: ${imported.elements.length} objeto(s), reduzido a ${(imported.scale * 100).toFixed(1)}% para caber na mesa. A área de trabalho foi mantida.`
+    : `SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`);
 }
 
 async function importProjectFile(file) {
@@ -1460,16 +1401,6 @@ async function importProjectFile(file) {
   syncInspector();
   renderPreview();
   showNotice("Projeto CommBurn carregado e validado.");
-}
-
-function encodeSvgDataUri(source) {
-  const bytes = new TextEncoder().encode(source);
-  if (bytes.length > 10 * 1024 * 1024) throw new RangeError("O SVG sanitizado deve ter no máximo 10 MB.");
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  }
-  return `data:image/svg+xml;base64,${btoa(binary)}`;
 }
 
 function imageBlobFromDataUri(dataUri) {
@@ -1569,12 +1500,8 @@ async function applyImageEdit() {
   if (!rasterImageEditor || !pendingImageEdit) throw new Error("Abra uma imagem no editor antes de aplicar.");
   const widthInputMm = byId("image-import-width");
   const heightInputMm = byId("image-import-height");
-  const widthMm = Number(widthInputMm.value);
-  const heightMm = Number(heightInputMm.value);
-  if (!widthInputMm.checkValidity() || !heightInputMm.checkValidity()
-    || !Number.isFinite(widthMm) || !Number.isFinite(heightMm) || widthMm <= 0 || heightMm <= 0) {
-    throw new RangeError("Informe largura e altura positivas em milímetros.");
-  }
+  const widthMm = numberFrom(widthInputMm, "Largura", Number.MIN_VALUE);
+  const heightMm = numberFrom(heightInputMm, "Altura", Number.MIN_VALUE);
   byId("apply-image-edit").disabled = true;
   try {
     const imageBlob = await rasterImageEditor.toBlob({ type: "image/png" });
@@ -1637,12 +1564,7 @@ async function applyImageEdit() {
 
 function imageConversionOptions(element) {
   const readNumber = (id, label) => {
-    const input = byId(id);
-    const value = Number(input.value);
-    if (!input.value.trim() || !Number.isFinite(value) || !input.checkValidity()) {
-      throw new RangeError(`${label} deve estar dentro do intervalo indicado.`);
-    }
-    return value;
+    return numberFrom(byId(id), label);
   };
   return {
     xMm: element.xMm,
@@ -1669,11 +1591,7 @@ function imageConversionOptions(element) {
 function imageVectorStyleOptions() {
   const strokeColorMode = byId("image-vector-border-mode").value;
   const strokeInput = byId("image-vector-border-width");
-  const strokeWidthMm = strokeColorMode === "none" ? 0 : Number(strokeInput.value);
-  if (strokeColorMode !== "none"
-    && (!strokeInput.value.trim() || !Number.isFinite(strokeWidthMm) || !strokeInput.checkValidity())) {
-    throw new RangeError("A espessura da borda deve estar dentro do intervalo indicado.");
-  }
+  const strokeWidthMm = strokeColorMode === "none" ? 0 : numberFrom(strokeInput, "Espessura da borda");
   return { fillColorMode: "layer", strokeColorMode, strokeWidthMm };
 }
 
@@ -1734,14 +1652,8 @@ async function vectorizeImageElement(element) {
     drawableWidth = drawable.width;
     drawableHeight = drawable.height;
     releaseDrawable = () => drawable.close();
-  } else if (element.type === "svg-image") {
-    drawable = new Image();
-    drawable.src = element.svgDataUri;
-    await drawable.decode();
-    drawableWidth = drawable.naturalWidth;
-    drawableHeight = drawable.naturalHeight;
   } else {
-    throw new TypeError("Selecione uma imagem raster ou um SVG visual incorporado.");
+    throw new TypeError("Selecione uma imagem raster para converter em vetores.");
   }
   if (drawableWidth * drawableHeight > 20_000_000) {
     releaseDrawable();
@@ -1851,7 +1763,9 @@ function updateImageVectorStyleControls() {
     if (imageVectorResult) updateImageVectorStats(imageVectorResult);
     imageVectorStyleOptions();
   } catch (error) {
-    byId("image-vector-stats").textContent = i18n.t("ui.dialogs.vectorInvalidConfiguration", { error: formatError(error) });
+    byId("image-vector-stats").textContent = error instanceof FieldValidationError
+      ? ""
+      : i18n.t("ui.dialogs.vectorInvalidConfiguration", { error: formatError(error) });
     byId("apply-image-vector").disabled = true;
   }
 }
@@ -1908,7 +1822,7 @@ async function updateImageVectorPreview() {
   byId("image-vector-color-options").replaceChildren();
   byId("image-vector-stats").textContent = i18n.t("ui.dialogs.preparingVectorPreview");
   const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
-  if (!source || !["image", "svg-image"].includes(source.type)) return;
+  if (!source || source.type !== "image") return;
   try {
     const result = await vectorizeImageElement(source);
     if (sequence !== imageVectorPreviewSequence) return;
@@ -1918,15 +1832,17 @@ async function updateImageVectorPreview() {
     if (sequence !== imageVectorPreviewSequence) return;
   } catch (error) {
     if (sequence !== imageVectorPreviewSequence) return;
-    byId("image-vector-stats").textContent = i18n.t("ui.dialogs.vectorConversionUnavailable", { error: formatError(error) });
+    byId("image-vector-stats").textContent = error instanceof FieldValidationError
+      ? ""
+      : i18n.t("ui.dialogs.vectorConversionUnavailable", { error: formatError(error) });
   }
 }
 
 function openImageVectorizer() {
   try {
     const source = currentDocument.elements.find((element) => element.id === selectedId);
-    if (!source || !["image", "svg-image"].includes(source.type)) {
-      throw new Error("Selecione uma imagem raster ou um SVG visual incorporado.");
+    if (!source || source.type !== "image") {
+      throw new Error("Selecione uma imagem raster para converter em vetores.");
     }
     const layer = currentDocument.layers.find((candidate) => candidate.id === source.layerId);
     if (!layer || layer.locked) throw new Error("Desbloqueie a camada da imagem antes de convertê-la.");
@@ -1943,8 +1859,8 @@ function applyImageVectorization() {
   try {
     const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
     const layer = currentDocument.layers.find((candidate) => candidate.id === source?.layerId);
-    if (!source || !["image", "svg-image"].includes(source.type) || !imageVectorResult) {
-      throw new Error("Gere uma prévia vetorial válida antes de aplicar.");
+    if (!source || source.type !== "image" || !imageVectorResult) {
+      throw new Error("Gere uma prévia vetorial válida para uma imagem raster antes de aplicar.");
     }
     if (!layer || layer.locked) throw new Error("A camada da imagem não está disponível.");
     const styles = imageVectorStyleOptions();
@@ -2021,7 +1937,25 @@ function newDocument() {
   showNotice("Novo trabalho criado.");
 }
 
-for (const input of [widthInput, heightInput, originInput, flipXInput, flipYInput]) {
+function renderDocumentFields(commit = false) {
+  for (const input of [widthInput, heightInput]) {
+    const result = validateNumberField(input);
+    if (!result.valid) {
+      showNumberFieldError(input, result, i18n.t);
+      input.focus({ preventScroll: true });
+      return;
+    }
+    clearNumberFieldError(input);
+  }
+  renderPreview();
+  if (commit) commitHistory();
+}
+
+for (const input of [widthInput, heightInput]) {
+  input.addEventListener("input", () => renderDocumentFields());
+  input.addEventListener("change", () => renderDocumentFields(true));
+}
+for (const input of [originInput, flipXInput, flipYInput]) {
   input.addEventListener("input", renderPreview);
   input.addEventListener("change", () => {
     renderPreview();
@@ -2041,7 +1975,15 @@ function updateSelectedFromInput(input) {
   };
   if (numericProperties[input.id]) {
     const [property, minimum] = numericProperties[input.id];
-    updateSelected({ [property]: numberFrom(input, property, minimum) });
+    const value = numberFrom(input, property, minimum);
+    const patch = { [property]: value };
+    const current = currentDocument.elements.find((element) => element.id === selectedId);
+    const other = property === "widthMm" ? "heightMm" : "widthMm";
+    if (byId("object-lock-ratio").checked && current && ["widthMm", "heightMm"].includes(property)
+      && current.widthMm > 0 && current.heightMm > 0 && value > 0) {
+      patch[other] = current[other] * value / current[property];
+    }
+    updateSelected(patch);
   } else if (input.id === "object-text") {
     updateSelected({ text: input.value }, true, false);
   } else if (input.id === "object-font") {
@@ -2394,7 +2336,6 @@ byId("edit-image").addEventListener("click", () => {
   void openImageEditor().catch((error) => showNotice(error));
 });
 byId("open-image-vectorizer").addEventListener("click", openImageVectorizer);
-byId("open-svg-vectorizer").addEventListener("click", openImageVectorizer);
 byId("apply-image-vector").addEventListener("click", applyImageVectorization);
 byId("apply-image-edit").addEventListener("click", () => {
   void applyImageEdit().catch((error) => showNotice(error));
@@ -2470,16 +2411,18 @@ for (const button of document.querySelectorAll('[data-action="preview-machine"]'
 byId("preview-machine-job").addEventListener("click", showMachinePreview);
 for (const button of document.querySelectorAll('[data-action="export-gcode"]')) {
   button.addEventListener("click", () => {
-    try { exportGcode(); } catch (error) { showNotice(`Não foi possível exportar G-code: ${formatError(error)}`); }
+    try { exportGcode(); } catch (error) {
+      showNotice(error instanceof FieldValidationError
+        ? error
+        : `Não foi possível exportar G-code: ${formatError(error)}`);
+    }
   });
 }
 byId("machine-preview-dialog").querySelector(".dialog-close").addEventListener("click", () => byId("machine-preview-dialog").close());
 byId("start-presentation").addEventListener("click", beginPresentation);
 byId("presentation-exit").addEventListener("click", finishPresentation);
-byId("presentation-pause").addEventListener("click", () => {
-  setPresentationPauseLabel(!presentationPaused);
-});
 byId("presentation-restart").addEventListener("click", restartPresentation);
+byId("presentation-toggle").addEventListener("click", togglePresentationPlayback);
 byId("machine-preview-dialog").addEventListener("close", () => {
   if (presentationInternalClose) {
     presentationInternalClose = false;
@@ -2589,6 +2532,7 @@ holdMachineButton.addEventListener("click", async () => {
   }
 });
 
+await Promise.all(["CommBurn Sans", "CommBurn Serif", "CommBurn Mono"].map((family) => document.fonts.load(`16px "${family}"`)));
 renderPreview();
 updateMachineControls();
 void restoreMachineConnection();

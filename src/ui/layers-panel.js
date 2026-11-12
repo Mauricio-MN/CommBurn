@@ -1,3 +1,9 @@
+import {
+  clearNumberFieldError,
+  showNumberFieldError,
+  validateNumberField
+} from "./field-validation.js";
+
 const OPERATIONS = [
   { value: "engrave", labelKey: "ui.layers.operation.engrave" },
   { value: "cut", labelKey: "ui.layers.operation.cut" },
@@ -14,6 +20,11 @@ const OBJECT_ORDERS = [
   { value: "nearest", labelKey: "ui.layers.order.nearest" },
   { value: "center-out", labelKey: "ui.layers.order.centerOut" }
 ];
+const FIELD_UNITS = {
+  feedMmPerMinute: "mm/min",
+  powerPercent: "%",
+  fillSpacingMm: "mm"
+};
 
 export class LayersPanel {
   constructor(root, { onSelect, onAdd, onUpdate, onDelete, onDuplicate, t = (key) => key }) {
@@ -22,6 +33,7 @@ export class LayersPanel {
     this.callbacks = { onSelect, onAdd, onUpdate, onDelete, onDuplicate };
     root.addEventListener("click", (event) => this.handleClick(event));
     root.addEventListener("change", (event) => this.handleChange(event));
+    root.addEventListener("input", (event) => this.handleInput(event));
   }
 
   render(layers, elements, activeLayerId) {
@@ -75,8 +87,8 @@ export class LayersPanel {
         this.createField("ui.layers.operationType", this.createSelect("operation", layer.operation, OPERATIONS)),
         this.createField("ui.layers.name", this.createInput("name", layer.name, "text")),
         this.createField("ui.layers.color", this.createInput("color", layer.color, "color")),
-        this.createField("ui.layers.feed", this.createInput("feedMmPerMinute", layer.feedMmPerMinute, "number", { min: "0.1", step: "10" })),
-        this.createField("ui.layers.power", this.createInput("powerPercent", layer.powerPercent, "number", { min: "0.1", max: "100", step: "1" })),
+        this.createField("ui.layers.feed", this.createInput("feedMmPerMinute", layer.feedMmPerMinute, "number", { min: "0.1", step: "0.1" })),
+        this.createField("ui.layers.power", this.createInput("powerPercent", layer.powerPercent, "number", { min: "0.1", max: "100", step: "0.1" })),
         this.createField("ui.layers.passes", this.createInput("passes", layer.passes, "number", { min: "1", max: "100", step: "1" }))
       );
       const fillField = this.createField("ui.layers.fillSpacing", this.createInput("fillSpacingMm", layer.fillSpacingMm, "number", { min: "0.05", step: "0.05" }));
@@ -120,6 +132,7 @@ export class LayersPanel {
     const input = document.createElement("input");
     input.type = type;
     input.dataset.layerProperty = key;
+    if (FIELD_UNITS[key]) input.dataset.unit = FIELD_UNITS[key];
     input.value = value;
     for (const [name, attributeValue] of Object.entries(attributes)) input.setAttribute(name, attributeValue);
     return input;
@@ -175,11 +188,25 @@ export class LayersPanel {
     const item = input?.closest("[data-layer-id]");
     if (!input || !item) return;
     const { layerProperty } = input.dataset;
-    let value = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value;
-    if (input.type === "number" && (!Number.isFinite(value) || !input.checkValidity())) {
-      input.reportValidity();
-      return;
+    let value = input.type === "checkbox" ? input.checked : input.value;
+    if (input.type === "number") {
+      const result = validateNumberField(input);
+      if (!result.valid) {
+        showNumberFieldError(input, result, this.t);
+        input.focus({ preventScroll: true });
+        return;
+      }
+      clearNumberFieldError(input);
+      value = result.value;
     }
     this.callbacks.onUpdate(item.dataset.layerId, { [layerProperty]: value });
+  }
+
+  handleInput(event) {
+    const input = event.target.closest('[data-layer-property][type="number"]');
+    if (!input) return;
+    const result = validateNumberField(input);
+    if (result.valid) clearNumberFieldError(input);
+    else if (input.getAttribute("aria-invalid") === "true") showNumberFieldError(input, result, this.t);
   }
 }
