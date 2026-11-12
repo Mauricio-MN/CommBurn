@@ -587,3 +587,30 @@ test("job reference points follow origin, axis inversion and start mode in docum
   const onObjects = jobReferencePoints(base, { ...settings, startFrom: "objects", startAnchor: "bottom-right" });
   assert.deepEqual(onObjects.origin, { xMm: 40, yMm: 26 });
 });
+
+test("job reference bounds cover every work point in document coordinates for any origin", () => {
+  const base = {
+    widthMm: 100, heightMm: 80,
+    layers: [{ ...DEFAULT_LAYER, id: "l" }],
+    elements: [
+      { id: "a", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, layerId: "l" },
+      { id: "b", type: "rect", xMm: 60, yMm: 50, widthMm: 10, heightMm: 6, layerId: "l" }
+    ]
+  };
+  const expected = { minXMm: 30, minYMm: 20, maxXMm: 70, maxYMm: 56 };
+  for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
+    assert.deepEqual(jobReferencePoints({ ...base, origin: { corner } }, { maxSpindleSpeed: 1000 }).bounds, expected);
+  }
+  const shifted = jobReferencePoints(base, { maxSpindleSpeed: 1000, startFrom: "objects", startAnchor: "bottom-right" });
+  assert.deepEqual(shifted.bounds, expected);
+  assert.deepEqual(shifted.end, { xMm: 60, yMm: 50 });
+});
+
+test("job reference points are unavailable for rotated objects instead of guessing", () => {
+  const rotated = {
+    widthMm: 100, heightMm: 80,
+    layers: [{ ...DEFAULT_LAYER, id: "l" }],
+    elements: [{ id: "a", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, rotationDeg: 30, layerId: "l" }]
+  };
+  assert.throws(() => jobReferencePoints(rotated, { maxSpindleSpeed: 1000 }), /transform/i);
+});
