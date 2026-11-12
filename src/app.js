@@ -647,6 +647,7 @@ function renderJobMarkers(documentModel) {
 function drawJobMarkers(documentModel) {
   const layer = byId("job-markers");
   layer.replaceChildren();
+  layer.style.filter = "drop-shadow(0 0 0.6px #fff) drop-shadow(0 0 0.6px #fff) drop-shadow(0 0 0.3px #000)";
   if (!byId("show-job-markers").checked) return;
   let reference;
   try {
@@ -655,7 +656,7 @@ function drawJobMarkers(documentModel) {
     return;
   }
   if (!reference) return;
-  const size = Math.max(1.4, Math.max(documentModel.widthMm, documentModel.heightMm) / 90);
+  const size = Math.max(1.4, Math.max(documentModel.widthMm, documentModel.heightMm) / 75);
   const make = (name, attributes, text) => {
     const node = document.createElementNS(SVG_NS, name);
     for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
