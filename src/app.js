@@ -706,6 +706,7 @@ function drawJobMarkers(documentModel) {
   make("circle", { cx: origin.xMm, cy: origin.yMm, r: size * 0.35, fill: "#fff", stroke: "#8a5a00", "stroke-width": size * 0.12 });
   label(origin, "ui.canvas.markerOrigin", "#8a5a00", 0.6, xDirection === 1 && yDirection === 1 ? -0.6 : 1.4);
   if (start && end) {
+    make("line", { x1: origin.xMm, y1: origin.yMm, x2: start.xMm, y2: start.yMm, stroke: "#8a5a00", "stroke-width": size * 0.05, "stroke-dasharray": `${size * 0.3} ${size * 0.3}`, opacity: 0.5 });
     make("circle", { cx: start.xMm, cy: start.yMm, r: size * 0.3, fill: "#1f9d55", stroke: "#fff", "stroke-width": size * 0.12 });
     label(start, "ui.canvas.markerStart", "#1f9d55");
     make("rect", { x: end.xMm - size * 0.28, y: end.yMm - size * 0.28, width: size * 0.56, height: size * 0.56, fill: "#d64545", stroke: "#fff", "stroke-width": size * 0.12 });

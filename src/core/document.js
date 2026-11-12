@@ -723,6 +723,19 @@ function createElementWorkPaths(document, layer, element) {
   return workPaths;
 }
 
+// A closed contour can begin at any vertex; begin at the one nearest the head so the job starts at the chosen origin.
+function startClosedPathNear(points, head) {
+  const last = points.length - 1;
+  if (last < 3 || distanceBetween(points[0], points[last]) > 1e-9) return points;
+  let best = 0;
+  for (let index = 1; index < last; index += 1) {
+    if (distanceBetween(points[index], head) < distanceBetween(points[best], head) - 1e-9) best = index;
+  }
+  if (best === 0) return points;
+  const loop = points.slice(0, last);
+  return [...loop.slice(best), ...loop.slice(0, best), loop[best]];
+}
+
 function orderLayerElements(document, layer, elements, workByElement, startPoint) {
   if (layer.objectOrder === "document") return elements;
   const distanceFromCenter = (element) => {
@@ -755,7 +768,7 @@ function orderLayerElements(document, layer, elements, workByElement, startPoint
 
   const remaining = [...elements];
   const ordered = [];
-  let current = startPoint ?? mapDocumentPoint(document, 0, 0);
+  let current = startPoint ?? { xMm: 0, yMm: 0 };
   while (remaining.length > 0) {
     let nearestIndex = 0;
     let nearestDistance = Infinity;
@@ -918,9 +931,13 @@ function buildGrblJob(input, settings, offset) {
     if ([...workByElement.values()].every((workPaths) => workPaths.length === 0)) {
       throw new RangeError(`Layer ${layer.name} has no fillable paths at the selected spacing`);
     }
-    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint);
+    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint ?? { xMm: offset.xMm, yMm: offset.yMm });
     for (const element of orderedElements) {
-      for (const workPath of workByElement.get(element.id)) {
+      for (const sourceWorkPath of workByElement.get(element.id)) {
+        const head = previousPoint ?? { xMm: offset.xMm, yMm: offset.yMm };
+        const workPath = sourceWorkPath.operation === "fill"
+          ? sourceWorkPath
+          : { ...sourceWorkPath, points: startClosedPathNear(sourceWorkPath.points, head) };
         if (paths.length >= 100000) {
           throw new RangeError("O trabalho excede o limite seguro de 100.000 trajetórias GRBL; reduza objetos/passagens ou aumente o espaçamento do preenchimento.");
         }

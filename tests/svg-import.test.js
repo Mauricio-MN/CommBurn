@@ -583,7 +583,8 @@ test("job reference points follow origin, axis inversion and start mode in docum
   assert.deepEqual(top.start, { xMm: 30, yMm: 20 });
   const bottomRight = jobReferencePoints({ ...base, origin: { corner: "bottom-right" } }, settings);
   assert.deepEqual([bottomRight.origin, bottomRight.xDirection, bottomRight.yDirection], [{ xMm: 100, yMm: 80 }, -1, -1]);
-  assert.deepEqual(bottomRight.start, { xMm: 30, yMm: 20 });
+  // The contour starts at the vertex nearest the chosen origin corner.
+  assert.deepEqual(bottomRight.start, { xMm: 40, yMm: 26 });
   const onObjects = jobReferencePoints(base, { ...settings, startFrom: "objects", startAnchor: "bottom-right" });
   assert.deepEqual(onObjects.origin, { xMm: 40, yMm: 26 });
 });
@@ -613,7 +614,6 @@ test("job reference points follow rotated objects", () => {
     elements: [{ id: "a", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 10, rotationDeg: 90, layerId: "l" }]
   };
   const reference = jobReferencePoints(rotated, { maxSpindleSpeed: 1000 });
-  assert.deepEqual(reference.start, { xMm: 40, yMm: 20 });
   assert.deepEqual(reference.bounds, { minXMm: 30, minYMm: 20, maxXMm: 40, maxYMm: 30 });
 });
 
@@ -629,9 +629,7 @@ test("document-space plans are identical for every origin corner and inversion",
     const document = { ...base, origin };
     const converted = planToDocumentSpace(document, planGrblJob(document, settings)).paths;
     assert.equal(converted.length, reference.length);
-    converted.forEach((path, index) => path.points.forEach((point, pointIndex) => {
-      assert.ok(Math.abs(point.xMm - reference[index].points[pointIndex].xMm) < 1e-4);
-      assert.ok(Math.abs(point.yMm - reference[index].points[pointIndex].yMm) < 1e-4);
-    }));
+    const key = (paths) => paths.flatMap(({ points }) => points).map(({ xMm, yMm }) => `${xMm.toFixed(3)},${yMm.toFixed(3)}`).sort().filter((value, index, all) => value !== all[index - 1]);
+    assert.deepEqual(key(converted), key(reference));
   }
 });

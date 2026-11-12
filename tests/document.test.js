@@ -87,8 +87,9 @@ test("GRBL job output uses explicit millimetres, user coordinates, and laser-off
   }, { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 });
 
   assert.match(gcode, /^G21\nG90\nG94\nM5/m);
-  assert.match(gcode, /G0 X90 Y75\nM4 S100\nG1 F300/);
-  assert.match(gcode, /G1 X70 Y75\nG1 X70 Y60\nG1 X90 Y60\nG1 X90 Y75\nM5\nM5\n$/);
+  // The closed contour begins at the vertex nearest the machine zero, here the bottom-right corner of the table.
+  assert.match(gcode, /G0 X70 Y60\nM4 S100\nG1 F300/);
+  assert.match(gcode, /G1 X90 Y60\nG1 X90 Y75\nG1 X70 Y75\nG1 X70 Y60\nM5\nM5\n$/);
 });
 
 test("GRBL exports text and rejects out-of-area geometry and invalid machine settings", () => {
@@ -117,8 +118,8 @@ test("GRBL paths honor explicit axis inversions", () => {
     elements: [{ type: "rect", xMm: 5, yMm: 6, widthMm: 10, heightMm: 12 }]
   }, { feedMmPerMinute: 200, maxSpindleSpeed: 500, powerPercent: 5 });
 
-  assert.match(gcode, /G0 X45 Y34/);
-  assert.match(gcode, /G1 X35 Y34\nG1 X35 Y22\nG1 X45 Y22/);
+  assert.match(gcode, /G0 X35 Y22/);
+  assert.match(gcode, /G1 X45 Y22\nG1 X45 Y34\nG1 X35 Y34\nG1 X35 Y22/);
 });
 
 test("GRBL text stays upright when the selected origin inverts an axis", () => {
@@ -132,8 +133,11 @@ test("GRBL text stays upright when the selected origin inverts an axis", () => {
     .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
   const flippedPaths = planGrblJob({ ...documentModel, origin: { corner: "top-right" } }, settings).paths
     .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
-  const normalPoints = normalPaths.flatMap(({ points }) => points);
-  const flippedPoints = flippedPaths.flatMap(({ points }) => points);
+  const byPosition = (a, b) => a.yMm - b.yMm || a.xMm - b.xMm;
+  const unique = (points) => points.sort(byPosition)
+    .filter((point, index, all) => index === 0 || byPosition(point, all[index - 1]) !== 0);
+  const normalPoints = unique(normalPaths.flatMap(({ points }) => points));
+  const flippedPoints = unique(flippedPaths.flatMap(({ points }) => points));
 
   assert.equal(flippedPoints.length, normalPoints.length);
   assert.equal(new Set(normalPoints.map((point, index) => (flippedPoints[index].xMm - point.xMm).toFixed(6))).size, 1);
@@ -258,7 +262,7 @@ test("GRBL follows rotation and skew, and rejects non-rectangular primitives", (
     elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, rotationDeg: 90 }]
   }, settings);
   // A square rotated 90 degrees around its centre (15, 15) keeps the same corners, starting from the next one.
-  assert.deepEqual(rotated.paths[0].points.slice(0, 2).map(({ xMm, yMm }) => ({ xMm, yMm })), [{ xMm: 20, yMm: 10 }, { xMm: 20, yMm: 20 }]);
+  assert.deepEqual(rotated.paths[0].points.slice(0, 2).map(({ xMm, yMm }) => ({ xMm, yMm })), [{ xMm: 10, yMm: 10 }, { xMm: 20, yMm: 10 }]);
   const skewed = planGrblJob({
     widthMm: 100, heightMm: 100,
     elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, skewXDeg: 45 }]
