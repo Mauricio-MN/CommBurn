@@ -648,7 +648,20 @@ let jobMarkersTimer = null;
 // Planning the job is heavier than drawing, so markers are refreshed shortly after edits settle.
 function renderJobMarkers(documentModel) {
   clearTimeout(jobMarkersTimer);
-  jobMarkersTimer = setTimeout(() => drawJobMarkers(documentModel), 120);
+  jobMarkersTimer = setTimeout(() => keepScrollPositions(() => drawJobMarkers(documentModel)), 120);
+}
+
+// Redrawing the marker layer can make the browser re-anchor the page; restoring every scroll position keeps the view still.
+function keepScrollPositions(action) {
+  const containers = Array.from(document.querySelectorAll("*")).filter((element) => element.scrollTop || element.scrollLeft);
+  const { scrollX, scrollY } = window;
+  const positions = containers.map((element) => [element, element.scrollLeft, element.scrollTop]);
+  action();
+  if (window.scrollX !== scrollX || window.scrollY !== scrollY) window.scrollTo(scrollX, scrollY);
+  for (const [element, left, top] of positions) {
+    element.scrollLeft = left;
+    element.scrollTop = top;
+  }
 }
 
 // Rotated or skewed objects cannot be sent to GRBL yet, so only the visual extents and origin are shown.
@@ -2723,11 +2736,10 @@ disconnectButton.addEventListener("click", async () => {
 safetyCheckbox.addEventListener("change", updateMachineControls);
 // Placement options do not change the document, so only the markers are redrawn and the sidebar keeps its scroll.
 function refreshPlacement() {
-  const sidebar = document.querySelector(".sidebar");
-  const scrollTop = sidebar.scrollTop;
-  updateMachineControls();
-  drawJobMarkers(currentDocument);
-  sidebar.scrollTop = scrollTop;
+  keepScrollPositions(() => {
+    updateMachineControls();
+    drawJobMarkers(currentDocument);
+  });
 }
 for (const id of ["show-job-markers", "start-anchor", "work-system", "start-from"]) byId(id).addEventListener("change", refreshPlacement);
 byId("read-position").addEventListener("click", async () => {
