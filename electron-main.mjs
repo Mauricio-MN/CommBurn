@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, Menu, shell } from "electron";
 import { cp, mkdir, readdir, access, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { startServer } from "./server.mjs";
@@ -77,7 +77,7 @@ if (app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     try {
-      app.setApplicationMenu(null);
+      Menu.setApplicationMenu(null);
       const pluginDirectory = join(app.getPath("userData"), "plugins");
       await mkdir(pluginDirectory, { recursive: true });
       try {
