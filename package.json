@@ -10,7 +10,9 @@
     "start": "node server.mjs",
     "desktop": "electron .",
     "dist": "electron-builder --publish never",
-    "dist:msix": "electron-builder --win appx --publish never --config electron-builder.msix.cjs && node scripts/rename-msix.mjs"
+    "dist:msix": "electron-builder --win appx --publish never --config electron-builder.msix.cjs && node scripts/rename-msix.mjs",
+    "build:www": "node scripts/build-www.mjs",
+    "build:android": "node scripts/build-www.mjs && cap sync android"
   },
   "dependencies": {
     "@jodit/image-editor": "^0.2.5",
@@ -24,6 +26,9 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0"
   },
