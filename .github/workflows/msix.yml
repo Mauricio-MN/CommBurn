@@ -8,13 +8,12 @@ on:
         required: true
         type: string
       channel:
-        description: "store: publisher da Partner Center, para envio à loja. local: CN=CMBRN - Software, para assinatura local. unsigned: CN=Unknown, para instalar sem assinatura com Add-AppxPackage -AllowUnsigned"
+        description: "store: publisher da Partner Center, para envio à loja (sem assinatura local). local: CN=CMBRN - Software, assinado com certificado autoassinado gerado no CI"
         required: true
         type: choice
         options:
           - store
           - local
-          - unsigned
         default: store
 
 permissions:
@@ -48,9 +47,32 @@ jobs:
       - run: npm run dist:msix
         env:
           MSIX_CHANNEL: ${{ inputs.channel }}
+      - name: Sign local MSIX with self-signed certificate
+        if: inputs.channel == 'local'
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=CMBRN - Software" `
+            -KeyUsage DigitalSignature -KeySpec Signature -KeyExportPolicy Exportable `
+            -FriendlyName "CommBurn local" -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3")
+          $password = [guid]::NewGuid().ToString()
+          $securePassword = ConvertTo-SecureString -String $password -Force -AsPlainText
+          $pfx = Join-Path $env:RUNNER_TEMP "commburn-local.pfx"
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $securePassword | Out-Null
+          Export-Certificate -Cert $cert -FilePath "dist/commburn-local.cer" | Out-Null
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          $msix = Get-ChildItem dist -Filter *.msix | Select-Object -First 1
+          & $signtool.FullName sign /fd SHA256 /f $pfx /p $password $msix.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item $pfx -Force
       - uses: actions/upload-artifact@v4
         with:
           name: commburn-msix-v${{ inputs.version }}-${{ inputs.channel }}
-          path: dist/*.msix
+          path: |
+            dist/*.msix
+            dist/*.cer
           if-no-files-found: error
           retention-days: 90

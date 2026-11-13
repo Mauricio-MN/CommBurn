@@ -3,7 +3,6 @@ const { build } = require("./package.json");
 const publishers = {
   store: build.appx.publisher,
   local: "CN=CMBRN - Software",
-  unsigned: "CN=Unknown",
 };
 const channel = Object.hasOwn(publishers, process.env.MSIX_CHANNEL)
   ? process.env.MSIX_CHANNEL
