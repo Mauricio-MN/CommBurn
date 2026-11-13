@@ -8,12 +8,13 @@ on:
         required: true
         type: string
       channel:
-        description: "store: publisher da Partner Center, para envio à loja. local: publisher CN=CMBRN - Software, para assinatura local"
+        description: "store: publisher da Partner Center, para envio à loja. local: CN=CMBRN - Software, para assinatura local. unsigned: CN=Unknown, para instalar sem assinatura com Add-AppxPackage -AllowUnsigned"
         required: true
         type: choice
         options:
           - store
           - local
+          - unsigned
         default: store
 
 permissions:
