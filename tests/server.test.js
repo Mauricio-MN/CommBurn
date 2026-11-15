@@ -11,6 +11,16 @@ test("JSON request bodies must not be empty", async () => {
   assert.deepEqual(await readJson(Readable.from(['{"ok":true}'])), { ok: true });
 });
 
+test("JSON request bodies honor their size limit and keep multi-byte characters split across chunks", async () => {
+  const payload = Buffer.from(JSON.stringify({ text: "Ação" }));
+  const split = payload.indexOf(Buffer.from("ç")) + 1;
+  assert.deepEqual(await readJson(Readable.from([payload.subarray(0, split), payload.subarray(split)])), { text: "Ação" });
+
+  const large = Buffer.from(JSON.stringify({ data: "x".repeat(2_000_000) }));
+  await assert.rejects(readJson(Readable.from([large])), { message: "Request body is too large" });
+  assert.deepEqual(await readJson(Readable.from([large]), large.length), { data: "x".repeat(2_000_000) });
+});
+
 test("serial port discovery stays usable when Linux does not provide udevadm", async () => {
   const missingUdevadm = Object.assign(new Error("spawn udevadm ENOENT"), {
     code: "ENOENT",

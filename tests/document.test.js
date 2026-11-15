@@ -333,3 +333,41 @@ test("raster images engrave as scan lines with per-segment power", () => {
   assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000, rasters: { photo: { widthPx: 4, heightPx: 2, gray: "AA==" } } }), /does not match/);
   assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000 }), /GRBL supports/);
 });
+
+test("GRBL rotated text follows the rotated outline instead of the upright outline", () => {
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000 };
+  const bounds = (documentModel) => {
+    const points = planGrblJob(documentModel, settings).paths
+      .filter(({ kind, elementId }) => kind === "work" && elementId === "label")
+      .flatMap(({ points }) => points);
+    const xs = points.map(({ xMm }) => xMm);
+    const ys = points.map(({ yMm }) => yMm);
+    return { width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) };
+  };
+  const base = { widthMm: 100, heightMm: 80, elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "AB", fontSizeMm: 8 }] };
+  const upright = bounds(base);
+  const quarterTurn = bounds({ ...base, elements: [{ ...base.elements[0], rotationDeg: 90 }] });
+
+  assert.ok(upright.width > upright.height);
+  assert.ok(Math.abs(quarterTurn.width - upright.height) < 1e-3);
+  assert.ok(Math.abs(quarterTurn.height - upright.width) < 1e-3);
+});
+
+test("GRBL rotated raster images engrave instead of rejecting the transform", () => {
+  const image = {
+    widthMm: 100, heightMm: 100, origin: "top-left",
+    layers: [{ id: "L1", name: "Img", operation: "engrave", color: "#000000", feedMmPerMinute: 1000, powerPercent: 50, passes: 1, fillSpacingMm: 1, fillAlgorithm: "horizontal-serpentine", objectOrder: "document", enabled: true, visible: true, locked: false }],
+    elements: [{ id: "photo", type: "image", xMm: 10, yMm: 10, widthMm: 4, heightMm: 2, rotationDeg: 90, layerId: "L1",
+      imageDataUri: "data:image/png;base64,iVBORw0KGgo=" }]
+  };
+  const gray = Buffer.from([0, 128, 255, 0, 255, 255, 255, 255]).toString("base64");
+  const plan = planGrblJob(image, { maxSpindleSpeed: 1000, rasters: { photo: { widthPx: 4, heightPx: 2, gray } }, imageMode: "grayscale" });
+  const points = plan.paths.filter(({ kind }) => kind === "work").flatMap(({ points }) => points);
+  const xs = points.map(({ xMm }) => xMm);
+  const ys = points.map(({ yMm }) => yMm);
+
+  // A 90 degree turn about the image centre (12, 11) moves the 4 x 2 mm box to 2 x 4 mm.
+  assert.ok(Math.min(...xs) >= 11 - 1e-6 && Math.max(...xs) <= 13 + 1e-6);
+  assert.ok(Math.min(...ys) >= 9 - 1e-6 && Math.max(...ys) <= 13 + 1e-6);
+  assert.ok(Math.max(...ys) - Math.min(...ys) > 3);
+});

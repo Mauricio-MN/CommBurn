@@ -58,18 +58,76 @@ export function getMachinePlaybackSegments(entries, fromLine, toLine) {
       continue;
     }
 
-    const firstCompleted = Math.max(0, Math.min(entry.segmentCount, fromLine - entry.segmentStartLine));
-    const lastCompleted = Math.max(0, Math.min(entry.segmentCount, toLine - entry.segmentStartLine));
-    for (let index = firstCompleted; index < lastCompleted; index += 1) {
+    // Work segment `index` covers playback lines [start + index, start + index + 1]; draw only the part inside the window.
+    const drawnFrom = Math.max(0, Math.min(entry.segmentCount, fromLine - entry.segmentStartLine));
+    const drawnTo = Math.max(0, Math.min(entry.segmentCount, toLine - entry.segmentStartLine));
+    for (let index = Math.floor(drawnFrom); index < Math.ceil(drawnTo); index += 1) {
+      const start = Math.max(drawnFrom, index) - index;
+      const end = Math.min(drawnTo, index + 1) - index;
+      if (end <= start) continue;
       segments.push({
         kind: "work",
         layerId: entry.path.layerId,
         ...(entry.path.segmentPowerFractions ? { fraction: entry.path.segmentPowerFractions[index] } : {}),
-        points: [entry.path.points[index], entry.path.points[index + 1]]
+        points: [pointAlongSegment(entry.path.points, index, start), pointAlongSegment(entry.path.points, index, end)]
       });
     }
   }
   return segments;
+}
+
+function pointAlongSegment(points, index, fraction) {
+  if (fraction === 0) return points[index];
+  if (fraction === 1) return points[index + 1];
+  const from = points[index];
+  const to = points[index + 1];
+  return {
+    xMm: from.xMm + (to.xMm - from.xMm) * fraction,
+    yMm: from.yMm + (to.yMm - from.yMm) * fraction
+  };
+}
+
+// Work segments in G-code order, each with the playback line where it starts, in machine coordinates.
+export function createMachineTrack(machinePlan) {
+  const track = [];
+  for (const entry of createMachinePlayback(machinePlan).entries) {
+    if (entry.kind !== "work") continue;
+    for (let index = 0; index < entry.segmentCount; index += 1) {
+      track.push({
+        startLine: entry.segmentStartLine + index,
+        from: entry.path.points[index],
+        to: entry.path.points[index + 1]
+      });
+    }
+  }
+  return track;
+}
+
+// Finds the work segment nearest to a reported machine position, searching forward from `cursor` only.
+// Returns the segment index and fractional playback line, or null when the position is not on the plan.
+export function locateMachinePosition(track, position, cursor, { searchWindow = 2000, tolerance = 0.1 } = {}) {
+  let best = null;
+  const end = Math.min(track.length, cursor + searchWindow);
+  for (let index = cursor; index < end; index += 1) {
+    const { startLine, from, to } = track[index];
+    const { ratio, distance } = nearestOnSegment(position, from, to);
+    if (!best || distance < best.distance) best = { index, distance, line: startLine + ratio };
+  }
+  return best && best.distance <= tolerance ? best : null;
+}
+
+function nearestOnSegment(point, from, to) {
+  const dx = to.xMm - from.xMm;
+  const dy = to.yMm - from.yMm;
+  const lengthSquared = dx * dx + dy * dy;
+  const along = lengthSquared === 0
+    ? 0
+    : ((point.xMm - from.xMm) * dx + (point.yMm - from.yMm) * dy) / lengthSquared;
+  const ratio = Math.min(1, Math.max(0, along));
+  return {
+    ratio,
+    distance: Math.hypot(point.xMm - (from.xMm + dx * ratio), point.yMm - (from.yMm + dy * ratio))
+  };
 }
 
 function formatDuration(seconds) {

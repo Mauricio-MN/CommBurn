@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { SerialPort } from "serialport";
 import { renderGrblJob } from "./src/core/document.js";
 import { GrblConnection } from "./src/machine/grbl.js";
+import { MotionPlanner, createMotionBlock, createMotionLimits, distanceAlongBlock, interpretGcodeLine, simulatedMachineSettings } from "./src/machine/motion-model.js";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const host = "127.0.0.1";
@@ -14,26 +15,135 @@ let connection = null;
 let activeJob = false;
 let jobTask = null;
 let jobStatus = { state: "idle", completed: 0, total: 0, error: null };
+// Job bodies carry embedded raster data for fills, so they need more room than other requests.
+const jobBodySizeLimit = 64 * 1024 * 1024;
 let desktopPluginDirectory = null;
 
-class SimulatedSerialPort extends EventEmitter {
+const simulatedPlannerCapacity = 15;
+const clockSeconds = () => performance.now() / 1000;
+
+export class SimulatedSerialPort extends EventEmitter {
   isOpen = true;
-  status = "Idle";
   position = { xMm: 10, yMm: 20 };
   zero = { xMm: 0, yMm: 0 };
+  plannedPosition = { ...this.position };
+  modal = { motion: "G0", relative: false, feedMmPerMinute: undefined };
+  lines = [];
+  hold = false;
+  timer = null;
+  limits = createMotionLimits(simulatedMachineSettings);
+  planner = new MotionPlanner({ limits: this.limits, capacity: simulatedPlannerCapacity });
+
+  get status() {
+    if (this.hold) return "Hold:0";
+    return this.planner.size > 0 || this.lines.length > 0 ? "Run" : "Idle";
+  }
+
+  // Head position at `now`, interpolated along the running block so reports move smoothly.
+  livePosition(now) {
+    const active = this.planner.activeBlock(now);
+    if (!active) return this.position;
+    const { block, seconds } = active;
+    const ratio = distanceAlongBlock(block, seconds) / block.distanceMm;
+    return {
+      xMm: block.from.xMm + (block.to.xMm - block.from.xMm) * ratio,
+      yMm: block.from.yMm + (block.to.yMm - block.from.yMm) * ratio
+    };
+  }
 
   write(data) {
-    setTimeout(() => {
-      if (data === "?") {
-        this.emit("data", Buffer.from(`<${this.status}|MPos:${this.position.xMm},${this.position.yMm},0|WCO:${this.zero.xMm},${this.zero.yMm},0>\r\n`));
-      } else if (data === "!") {
-        this.status = "Hold:0";
-        this.emit("data", Buffer.from(`<${this.status}|MPos:0,0,0>\r\n`));
-      } else if (data.endsWith("\n")) {
-        if (/^G10 L20 P\d X0 Y0\n$/.test(data)) this.zero = { ...this.position };
-        this.emit("data", Buffer.from("ok\r\n"));
+    if (data === "?") {
+      const position = this.livePosition(clockSeconds());
+      this.reply(`<${this.status}|MPos:${position.xMm.toFixed(3)},${position.yMm.toFixed(3)},0|WCO:${this.zero.xMm},${this.zero.yMm},0>`);
+    } else if (data === "!") {
+      this.feedHold();
+    } else if (data === "~") {
+      this.cycleStart();
+    } else if (data === "\x18") {
+      this.softReset();
+    } else if (data.endsWith("\n")) {
+      this.lines.push(data.trim());
+      this.pump();
+    }
+  }
+
+  reply(text) {
+    setTimeout(() => this.emit("data", Buffer.from(`${text}\r\n`)), 2);
+  }
+
+  // Keeps buffered blocks and the unsent lines; the running block freezes where it is.
+  feedHold() {
+    if (this.hold) return;
+    this.hold = true;
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.planner.pause(clockSeconds());
+  }
+
+  cycleStart() {
+    if (!this.hold) return;
+    this.hold = false;
+    this.planner.resume(clockSeconds());
+    this.pump();
+  }
+
+  softReset() {
+    this.hold = false;
+    this.lines = [];
+    this.planner.clear();
+    clearTimeout(this.timer);
+    this.timer = null;
+    this.plannedPosition = { ...this.position };
+    this.modal = { motion: "G0", relative: false, feedMmPerMinute: undefined };
+    this.reply("Grbl 1.1h ['$' for help]");
+  }
+
+  // Accepts lines in order; a motion line waits while the planner buffer is full, like GRBL.
+  pump() {
+    while (!this.hold && this.lines.length > 0) {
+      const line = this.lines[0];
+      const { modal, motion, error } = interpretGcodeLine(line, this.modal);
+      if (motion && this.planner.full) break;
+      this.lines.shift();
+      this.modal = modal;
+      if (error) {
+        this.reply(`error:${error}`);
+        continue;
       }
-    }, 2);
+      if (motion) {
+        this.queueMotion(motion);
+      } else if (/^G10 L20 P\d X0 Y0$/i.test(line)) {
+        this.zero = { ...this.plannedPosition };
+      } else if (line === "$$") {
+        for (const [name, value] of Object.entries(simulatedMachineSettings)) this.reply(`${name}=${value}`);
+      }
+      this.reply("ok");
+    }
+    this.schedule();
+  }
+
+  queueMotion({ rapid, x, y }) {
+    const from = this.plannedPosition;
+    const relative = this.modal.relative;
+    const to = {
+      xMm: relative ? from.xMm + (x ?? 0) : (x === undefined ? from.xMm : x + this.zero.xMm),
+      yMm: relative ? from.yMm + (y ?? 0) : (y === undefined ? from.yMm : y + this.zero.yMm)
+    };
+    const block = createMotionBlock({ from, to, feedMmPerMinute: this.modal.feedMmPerMinute, rapid }, this.limits);
+    if (block.distanceMm === 0) return;
+    this.planner.add(block, clockSeconds());
+    this.plannedPosition = to;
+  }
+
+  schedule() {
+    if (this.timer || this.hold || (this.lines.length === 0 && this.planner.size === 0)) return;
+    this.timer = setTimeout(() => this.tick(), 5);
+  }
+
+  tick() {
+    this.timer = null;
+    for (const block of this.planner.update(clockSeconds())) this.position = { ...block.to };
+    this.pump();
   }
 
   drain(callback) {
@@ -42,6 +152,7 @@ class SimulatedSerialPort extends EventEmitter {
 
   close(callback) {
     this.isOpen = false;
+    clearTimeout(this.timer);
     callback(null);
   }
 }
@@ -203,12 +314,16 @@ function verifyLocalRequest(request, response) {
   return true;
 }
 
-export async function readJson(request) {
-  let body = "";
+export async function readJson(request, maxBytes = 1_000_000) {
+  const chunks = [];
+  let size = 0;
   for await (const chunk of request) {
-    body += chunk;
-    if (body.length > 1_000_000) throw new RangeError("Request body is too large");
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    size += buffer.length;
+    if (size > maxBytes) throw new RangeError("Request body is too large");
+    chunks.push(buffer);
   }
+  const body = Buffer.concat(chunks).toString("utf8");
   if (!body.trim()) throw new TypeError("Request body must contain JSON");
   return JSON.parse(body);
 }
@@ -313,10 +428,24 @@ async function handleApi(request, response, url) {
       sendJson(response, 200, { settings, settingsError });
       return;
     }
-    if (request.method === "POST" && url.pathname === "/api/hold") {
-      if (!connection) throw new Error("No controller is connected");
-      connection.feedHold();
-      sendJson(response, 200, { holdRequested: true });
+    if (request.method === "POST" && url.pathname === "/api/job-pause") {
+      if (!connection || !activeJob) throw new Error("No machine job is running");
+      connection.pauseJob();
+      jobStatus = { ...jobStatus, state: "paused" };
+      sendJson(response, 200, { paused: true });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/job-resume") {
+      if (!connection || !activeJob) throw new Error("No machine job is running");
+      connection.resumeJob();
+      jobStatus = { ...jobStatus, state: "running" };
+      sendJson(response, 200, { resumed: true });
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/job-stop") {
+      if (!connection || !activeJob) throw new Error("No machine job is running");
+      connection.stopJob();
+      sendJson(response, 200, { stopRequested: true });
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/position") {
@@ -344,13 +473,15 @@ async function handleApi(request, response, url) {
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/job-status") {
-      sendJson(response, 200, jobStatus);
+      // While a job runs, ask for a fresh status report so the reported position stays current.
+      if (activeJob) connection?.requestStatusReport();
+      sendJson(response, 200, { ...jobStatus, position: connection?.position?.work ?? null });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/job") {
       if (!connection) throw new Error("Connect to a GRBL-compatible controller first");
       if (activeJob) throw new Error("A machine job is already running");
-      const input = await readJson(request);
+      const input = await readJson(request, jobBodySizeLimit);
       if (!connection.isSimulation && input.safetyConfirmed !== true) {
         throw new Error("Confirm the laser safety checklist before sending a job");
       }
@@ -464,9 +595,9 @@ async function shutdown() {
   if (connection) {
     if (activeJob) {
       try {
-        connection.feedHold();
+        connection.stopJob();
       } catch (error) {
-        console.error(`Unable to request feed hold: ${error.message}`);
+        console.error(`Unable to stop the job: ${error.message}`);
       }
       await jobTask;
     }

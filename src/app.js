@@ -25,9 +25,11 @@ import { fitImportedToTable, importSvgTree, validateSvgSource } from "./core/svg
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 import {
   createMachinePlayback,
+  createMachineTrack,
   formatOperationTimeEstimates,
   getMachinePlaybackSegments,
-  groupMachinePreviewPaths
+  groupMachinePreviewPaths,
+  locateMachinePosition
 } from "./ui/machine-preview.js";
 import {
   createPresentationDocument,
@@ -135,7 +137,9 @@ const connectButton = byId("connect-machine");
 const disconnectButton = byId("disconnect-machine");
 const simulateMachineButton = byId("simulate-machine");
 const startMachineButton = byId("start-machine-job");
-const holdMachineButton = byId("hold-machine-job");
+const machineJobControlButtons = [...document.querySelectorAll("[data-machine-job-control]")];
+const MACHINE_POLL_INTERVAL_MS = 100;
+const JOB_STOPPED_MESSAGE = "Job stopped; controller was reset";
 const machineState = byId("machine-state");
 let machineStateParts = [() => i18n.t("ui.machine.disconnected")];
 const safetyCheckbox = byId("safety-confirmed");
@@ -166,6 +170,18 @@ let machineSimulationPlayback = [];
 let machineSimulationCompletedLines = 0;
 let machineSimulationCanvasSize = null;
 let statusPollTimer;
+let machineJobPaused = false;
+let machineJobStopRequested = false;
+let machineJobPollInFlight = false;
+let machineSimulationLive = false;
+let machineSimulationSimulated = true;
+let machineSimulationFollowing = true;
+let machineSimulationState = "running";
+let machineSimulationTotal = 0;
+let machineSimulationLiveLines = 0;
+let machineSimulationTrack = [];
+let machineSimulationCursor = 0;
+let machineSimulationMatchedLine = 0;
 let presentationActive = false;
 let presentationSnapshot = null;
 let presentationPaused = false;
@@ -513,7 +529,15 @@ function updateMachineControls() {
   byId("machine-safety-check").hidden = machineSimulation;
   startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy;
   startMachineButton.textContent = i18n.t(machineSimulation ? "ui.machine.simulateJob" : "ui.machine.sendJob");
-  holdMachineButton.disabled = !machineConnected || !machineBusy;
+  const jobActive = machineConnected && machineBusy;
+  const stopping = machineJobStopRequested;
+  const jobEnabled = {
+    pause: jobActive && !stopping && !machineJobPaused,
+    resume: jobActive && !stopping && machineJobPaused,
+    stop: jobActive && !stopping
+  };
+  for (const button of machineJobControlButtons) button.disabled = !jobEnabled[button.dataset.machineJobControl];
+  byId("preview-machine-job").disabled = machineBusy;
   for (const id of ["read-position", "set-zero", "home-machine"]) byId(id).disabled = !machineConnected || machineBusy;
   byId("start-anchor-field").hidden = byId("start-from").value !== "objects";
 }
@@ -568,7 +592,9 @@ async function restoreMachineConnection() {
         completed: state.jobStatus.completed,
         total: state.jobStatus.total
       });
-      statusPollTimer = setInterval(pollMachineJob, 500);
+      machineJobPaused = state.jobStatus.state === "paused";
+      machineJobStopRequested = false;
+      startMachinePolling();
       void pollMachineJob();
     } else if (machineConnected) {
       setMachineState(machineSimulation ? "ui.machine.simulatedConnected" : "ui.machine.connected");
@@ -603,26 +629,41 @@ async function refreshPorts() {
 }
 
 async function pollMachineJob() {
+  if (machineJobPollInFlight) return;
+  machineJobPollInFlight = true;
   try {
     const result = await machineApi("/api/job-status");
-    if (machineSimulation && machineSimulationPlan) {
-      renderMachineSimulationProgress(result.completed, result.total, result.state);
+    if (machineSimulationPlan) {
+      renderMachineSimulationProgress(result.completed, result.total, result.state, result.position);
     }
-    if (result.state === "running") {
-      setMachineState(machineSimulation ? "ui.machine.simulationRunning" : "ui.machine.jobRunning", {
-        completed: result.completed,
-        total: result.total
-      });
+    const paused = result.state === "paused";
+    if (paused !== machineJobPaused) {
+      machineJobPaused = paused;
+      updateMachineControls();
+    }
+    if (result.state === "running" || paused) {
+      const key = paused
+        ? "ui.machine.jobPaused"
+        : machineJobStopRequested
+          ? "ui.machine.jobStopping"
+          : machineSimulation ? "ui.machine.simulationRunning" : "ui.machine.jobRunning";
+      setMachineState(key, { completed: result.completed, total: result.total });
       return;
     }
     clearInterval(statusPollTimer);
     statusPollTimer = undefined;
     machineBusy = false;
+    const stopRequested = machineJobStopRequested;
+    machineJobPaused = false;
+    machineJobStopRequested = false;
     if (result.state === "complete") {
         setMachineState(machineSimulation ? "ui.machine.simulationComplete" : "ui.machine.jobComplete");
       showNotice(machineSimulation
         ? i18n.t("ui.machine.simulationComplete")
         : i18n.t("ui.machine.jobComplete"));
+    } else if (result.state === "stopped" && stopRequested && result.error === JOB_STOPPED_MESSAGE) {
+      setMachineState("ui.machine.jobStopped");
+      showNotice(i18n.t("ui.machine.jobStopped"));
     } else if (result.state === "stopped") {
       setMachineState("ui.machine.sendInterrupted", () => ({ error: formatError(new Error(result.error)) }));
       showNotice(machineState.textContent);
@@ -634,8 +675,35 @@ async function pollMachineJob() {
     clearInterval(statusPollTimer);
     statusPollTimer = undefined;
     machineBusy = false;
+    machineJobPaused = false;
+    machineJobStopRequested = false;
     setMachineState("ui.machine.controllerFailure", () => ({ error: formatError(error) }));
     updateMachineControls();
+  } finally {
+    machineJobPollInFlight = false;
+  }
+}
+
+function startMachinePolling() {
+  clearInterval(statusPollTimer);
+  statusPollTimer = setInterval(pollMachineJob, MACHINE_POLL_INTERVAL_MS);
+}
+
+async function controlMachineJob(action) {
+  try {
+    await machineApi(`/api/job-${action}`, "POST", {});
+    if (action === "pause") {
+      machineJobPaused = true;
+      showNotice(i18n.t("ui.machine.pauseWarning"));
+    } else if (action === "resume") {
+      machineJobPaused = false;
+    } else {
+      machineJobStopRequested = true;
+    }
+    updateMachineControls();
+    await pollMachineJob();
+  } catch (error) {
+    showNotice(error);
   }
 }
 
@@ -645,6 +713,16 @@ byId("machine-timeline-scrub").addEventListener("input", (event) => {
   setTimelinePosition(Number(event.target.value));
 });
 byId("machine-preview-dialog").addEventListener("close", stopTimelinePlayback);
+byId("machine-timeline-live").addEventListener("click", () => {
+  stopTimelinePlayback();
+  machineSimulationFollowing = true;
+  if (!prepareMachineSimulationCanvases()) return;
+  drawMachineSimulationTo(machineSimulationLiveLines);
+  renderMachineSimulationView();
+});
+for (const button of machineJobControlButtons) {
+  button.addEventListener("click", () => controlMachineJob(button.dataset.machineJobControl));
+}
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -1110,10 +1188,10 @@ function drawMachineSimulationSegments(segments) {
   context.restore();
 }
 
-function renderMachineSimulationProgress(completed, total, state) {
-  if (!machineSimulationPlan || !prepareMachineSimulationCanvases()) return;
-  const completedLines = Math.max(0, Math.min(completed, total));
-  if (completedLines < machineSimulationCompletedLines) {
+// Draws the playback layer up to a line. Rewinding clears the layer and redraws from the start.
+function drawMachineSimulationTo(target) {
+  const lines = Math.max(0, Math.min(target, machineSimulationTotal));
+  if (lines < machineSimulationCompletedLines) {
     byId("machine-simulation-playback").width = machineSimulationCanvasSize.pixelWidth;
     byId("machine-simulation-playback").height = machineSimulationCanvasSize.pixelHeight;
     machineSimulationCompletedLines = 0;
@@ -1121,38 +1199,82 @@ function renderMachineSimulationProgress(completed, total, state) {
   const segments = getMachinePlaybackSegments(
     machineSimulationPlayback,
     machineSimulationCompletedLines,
-    completedLines
+    lines
   );
   drawMachineSimulationSegments(segments);
-  machineSimulationCompletedLines = completedLines;
+  machineSimulationCompletedLines = lines;
+}
+
+// Live job progress: the view follows it unless the operator is reviewing earlier commands.
+// Acknowledged lines run ahead of motion, so when the head position is known the drawing stops at the head.
+function renderMachineSimulationProgress(completed, total, state, position = null) {
+  if (!machineSimulationPlan || !prepareMachineSimulationCanvases()) return;
+  machineSimulationTotal = Math.max(0, total);
+  machineSimulationState = state;
+  machineSimulationLiveLines = Math.max(0, Math.min(completed, machineSimulationTotal));
+  if (position && state !== "complete" && machineSimulationTrack.length > 0) {
+    const match = locateMachinePosition(machineSimulationTrack, position, machineSimulationCursor);
+    if (match) {
+      machineSimulationCursor = match.index;
+      machineSimulationMatchedLine = Math.max(machineSimulationMatchedLine, match.line);
+    }
+    machineSimulationLiveLines = Math.min(machineSimulationLiveLines, machineSimulationMatchedLine);
+  }
+  if (machineSimulationFollowing) drawMachineSimulationTo(machineSimulationLiveLines);
+  renderMachineSimulationView();
+}
+
+function renderMachineSimulationView() {
+  const completedLines = Math.floor(machineSimulationCompletedLines);
+  const percent = machineSimulationTotal > 0 ? Math.floor(completedLines / machineSimulationTotal * 100) : 0;
   const progress = byId("machine-simulation-progress");
-  progress.max = Math.max(1, total);
+  progress.max = Math.max(1, machineSimulationTotal);
   progress.value = completedLines;
-  const percent = total > 0 ? Math.floor(completedLines / total * 100) : 0;
-  const statusKey = state === "complete"
-    ? "ui.dialogs.simulationCompleteStatus"
-    : state === "stopped"
-      ? "ui.dialogs.simulationStoppedStatus"
-      : "ui.dialogs.simulationProgressStatus";
+  const scrub = byId("machine-timeline-scrub");
+  scrub.max = String(Math.max(1, machineSimulationTotal));
+  scrub.value = String(completedLines);
+  byId("machine-timeline-live").hidden = !machineSimulationLive || machineSimulationFollowing;
+  let statusKey;
+  if (machineSimulationLive && !machineSimulationFollowing) {
+    statusKey = "ui.dialogs.reviewStatus";
+  } else if (machineSimulationState === "paused") {
+    statusKey = "ui.dialogs.pausedStatus";
+  } else if (!machineSimulationSimulated) {
+    statusKey = "ui.dialogs.jobProgressStatus";
+  } else if (machineSimulationState === "complete") {
+    statusKey = "ui.dialogs.simulationCompleteStatus";
+  } else if (machineSimulationState === "stopped") {
+    statusKey = "ui.dialogs.simulationStoppedStatus";
+  } else {
+    statusKey = "ui.dialogs.simulationProgressStatus";
+  }
   byId("machine-simulation-status").textContent = i18n.t(statusKey, {
     completed: completedLines,
-    total,
-    percent
+    total: machineSimulationTotal,
+    percent,
+    live: Math.floor(machineSimulationLiveLines)
   });
 }
 
-function showMachineSimulation(machinePlan, documentModel, totalLines) {
+function showMachineSimulation(machinePlan, documentModel, totalLines, { live = false, simulated = true } = {}) {
   const plan = planToDocumentSpace(documentModel, machinePlan);
   machineSimulationPlan = plan;
   machineSimulationDocument = documentModel;
   machineSimulationPlayback = createMachinePlayback(plan).entries;
+  machineSimulationTrack = createMachineTrack(machinePlan);
+  machineSimulationCursor = 0;
+  machineSimulationMatchedLine = 0;
   machineSimulationCompletedLines = 0;
   machineSimulationCanvasSize = null;
+  machineSimulationLive = live;
+  machineSimulationSimulated = simulated;
+  machineSimulationFollowing = true;
   const dialog = byId("machine-preview-dialog");
-  byId("machine-preview-title").textContent = i18n.t("ui.dialogs.machineSimulationTitle");
-  byId("machine-preview-description").textContent = i18n.t("ui.dialogs.machineSimulationDescription");
+  byId("machine-preview-title").textContent = i18n.t(simulated ? "ui.dialogs.machineSimulationTitle" : "ui.dialogs.machineJobTitle");
+  byId("machine-preview-description").textContent = i18n.t(simulated ? "ui.dialogs.machineSimulationDescription" : "ui.dialogs.machineJobDescription");
   byId("machine-simulation-panel").hidden = false;
-  byId("machine-timeline").hidden = true;
+  byId("machine-timeline").hidden = !live;
+  byId("machine-simulation-job-controls").hidden = !live;
   stopTimelinePlayback();
   byId("machine-path-preview").toggleAttribute("hidden", true);
   updateMachinePreviewStats(plan);
@@ -1169,9 +1291,10 @@ function stopTimelinePlayback() {
 }
 
 function setTimelinePosition(value) {
-  const scrub = byId("machine-timeline-scrub");
-  scrub.value = String(value);
-  renderMachineSimulationProgress(value, Number(scrub.max), "running");
+  if (!prepareMachineSimulationCanvases()) return;
+  machineSimulationFollowing = false;
+  drawMachineSimulationTo(value);
+  renderMachineSimulationView();
 }
 
 function toggleTimelinePlayback() {
@@ -2819,31 +2942,22 @@ startMachineButton.addEventListener("click", async () => {
     const documentModel = readDocument();
     await prepareRasters(documentModel);
     const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), ...readJobPlacement() };
-    const simulationPlan = machineSimulation
-      ? planGrblJob(documentModel, settings)
-      : null;
+    const plan = planGrblJob(documentModel, settings);
     const result = await machineApi("/api/job", "POST", {
       safetyConfirmed: safetyCheckbox.checked,
       document: documentModel,
       settings
     });
     machineBusy = true;
+    machineJobPaused = false;
+    machineJobStopRequested = false;
     setMachineState(machineSimulation ? "ui.machine.simulationAccepted" : "ui.machine.jobAccepted", { lines: result.lines });
-    if (simulationPlan) showMachineSimulation(simulationPlan, documentModel, result.lines);
+    showMachineSimulation(plan, documentModel, result.lines, { live: true, simulated: machineSimulation });
     updateMachineControls();
-    statusPollTimer = setInterval(pollMachineJob, 500);
+    startMachinePolling();
     await pollMachineJob();
   } catch (error) {
     setMachineState("ui.machine.rejected", () => ({ error: formatError(error) }));
-    showNotice(error);
-  }
-});
-holdMachineButton.addEventListener("click", async () => {
-  try {
-    await machineApi("/api/hold", "POST", {});
-    setMachineState("ui.machine.pauseWarning");
-    showNotice(i18n.t("ui.machine.pauseRequested"));
-  } catch (error) {
     showNotice(error);
   }
 });

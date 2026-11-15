@@ -409,16 +409,19 @@ function mapPoints(document, points) {
   return points.map(([xMm, yMm]) => mapDocumentPoint(document, xMm, yMm));
 }
 
-function mapTextOutlines(document, paths, bounds) {
-  const minX = bounds.xMm;
-  const maxX = bounds.xMm + bounds.widthMm;
-  const minY = bounds.yMm;
-  const maxY = bounds.yMm + bounds.heightMm;
+// Keeps glyphs upright when the origin inverts an axis: each glyph point is mirrored inside the (already transformed) text box before mapping.
+function mapTextOutlines(document, paths, box) {
   const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
   return paths.map((path) => mapPoints(document, path.map(([x, y]) => [
-    flipX ? minX + maxX - x : x,
-    flipY ? minY + maxY - y : y
+    flipX ? box.minX + box.maxX - x : x,
+    flipY ? box.minY + box.maxY - y : y
   ])));
+}
+
+function pointBounds(points) {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
 
 function flattenVectorPath(element) {
@@ -674,9 +677,6 @@ function transformDocumentPoints(element, points) {
 }
 
 function createImageWorkPaths(document, layer, element, raster, mode) {
-  if (element.rotationDeg || element.skewXDeg || element.skewYDeg || element.flipX || element.flipY) {
-    throw new CommBurnRangeError("grbl.unsupportedGeometry", {}, { message: "Image engraving supports only untransformed images" });
-  }
   const decoded = decodeRaster(element.id, raster);
   const { levels, maxLevel } = rasterLevels(decoded, mode);
   const pixelWidth = element.widthMm / decoded.widthPx;
@@ -698,7 +698,7 @@ function createImageWorkPaths(document, layer, element, raster, mode) {
         pass,
         powerPercent: 0,
         segmentPowerFractions: ordered.map(({ level }) => level / maxLevel),
-        points: mapPoints(document, xs.map((xMm) => [xMm, yMm]))
+        points: mapPoints(document, transformDocumentPoints(element, xs.map((xMm) => [xMm, yMm])))
       });
     }
   }
@@ -737,10 +737,14 @@ function createElementWorkPaths(document, layer, element) {
     : geometryElement.type === "path"
       ? flattenVectorPath(geometryElement)
       : [outline];
+  // Rotation and skew happen in document space first, so the machine output matches the rendered object.
+  const transformedPaths = sourcePaths.map((points) => transformDocumentPoints(element, points));
+  const mappedPaths = element.type === "text"
+    ? mapTextOutlines(document, transformedPaths, pointBounds(transformDocumentPoints(element, outline)))
+    : transformedPaths.map((points) => mapPoints(document, points));
   const workPaths = [];
-  const mappedTextPaths = element.type === "text" ? mapTextOutlines(document, sourcePaths, geometryElement) : null;
   for (let pass = 1; pass <= layer.passes; pass += 1) {
-    for (const [sourceIndex, points] of sourcePaths.entries()) {
+    for (const points of mappedPaths) {
       workPaths.push({
         kind: "work",
         elementId: element.id,
@@ -749,7 +753,7 @@ function createElementWorkPaths(document, layer, element) {
         algorithm: layer.operation === "fill" ? layer.fillAlgorithm : "outline",
         pass,
         ...(element.powerPercent === undefined ? {} : { powerPercent: element.powerPercent }),
-        points: mappedTextPaths?.[sourceIndex] ?? mapPoints(document, transformDocumentPoints(element, points))
+        points
       });
     }
   }

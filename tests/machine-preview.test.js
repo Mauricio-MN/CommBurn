@@ -3,9 +3,11 @@ import test from "node:test";
 import { planGrblJob } from "../src/core/document.js";
 import {
   createMachinePlayback,
+  createMachineTrack,
   formatOperationTimeEstimates,
   getMachinePlaybackSegments,
-  groupMachinePreviewPaths
+  groupMachinePreviewPaths,
+  locateMachinePosition
 } from "../src/ui/machine-preview.js";
 
 test("machine preview groups many work and travel paths into one SVG path per layer and kind", () => {
@@ -67,4 +69,36 @@ test("machine simulation playback returns only segments acknowledged in the curr
     points: [path.points[0], path.points[1]]
   }]);
   assert.equal(getMachinePlaybackSegments(playback.entries, 9, 10)[0].points[0].xMm, 1);
+});
+
+test("machine simulation playback draws a segment up to a fractional line without repeating it", () => {
+  const playback = createMachinePlayback({
+    paths: [{ kind: "work", layerId: "engrave", points: [{ xMm: 0, yMm: 0 }, { xMm: 10, yMm: 0 }], operation: "engrave" }]
+  });
+
+  const [first] = getMachinePlaybackSegments(playback.entries, 8, 8.25);
+  assert.deepEqual(first.points.map((point) => point.xMm), [0, 2.5]);
+  const [next] = getMachinePlaybackSegments(playback.entries, 8.25, 8.5);
+  assert.deepEqual(next.points.map((point) => point.xMm), [2.5, 5]);
+});
+
+test("machine position locates the playback line on the plan and only searches forward", () => {
+  const track = createMachineTrack({
+    paths: [{
+      kind: "work",
+      layerId: "engrave",
+      points: [{ xMm: 0, yMm: 0 }, { xMm: 10, yMm: 0 }, { xMm: 10, yMm: 10 }],
+      operation: "engrave"
+    }]
+  });
+
+  assert.equal(track.length, 2);
+  const onFirst = locateMachinePosition(track, { xMm: 2.5, yMm: 0 }, 0);
+  assert.equal(onFirst.index, 0);
+  assert.ok(Math.abs(onFirst.line - 8.25) < 1e-9);
+  const onSecond = locateMachinePosition(track, { xMm: 10, yMm: 5 }, onFirst.index);
+  assert.equal(onSecond.index, 1);
+  assert.ok(Math.abs(onSecond.line - 9.5) < 1e-9);
+  assert.equal(locateMachinePosition(track, { xMm: 2.5, yMm: 0 }, 1), null);
+  assert.equal(locateMachinePosition(track, { xMm: 50, yMm: 50 }, 0), null);
 });

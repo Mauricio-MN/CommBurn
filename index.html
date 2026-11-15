@@ -193,8 +193,12 @@
           <p class="machine-state" id="machine-state" role="status" data-i18n="ui.machine.disconnected">Desconectado</p>
           <label class="safety-check" id="machine-safety-check"><input id="safety-confirmed" type="checkbox"><span data-i18n="ui.machine.safety">Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
           <button class="button button-primary full-width" id="start-machine-job" type="button" disabled data-i18n="ui.machine.sendJob">Enviar contornos à máquina</button>
-          <button class="button button-danger full-width" id="hold-machine-job" type="button" disabled data-i18n="ui.machine.hold">Parar envio e solicitar pausa</button>
-          <p class="help-text" data-i18n="ui.machine.limits">O GRBL grava texto com fontes de traço único integradas e envia retângulos e paths vetoriais editáveis sem transformação. Imagens raster precisam ser vetorizadas; elipses, linhas, texto preenchido e formas transformadas não são compatíveis. A pausa solicita feed hold e não substitui a parada de emergência.</p>
+          <div class="machine-job-controls" role="group" aria-label="Controle do trabalho" data-i18n-aria-label="ui.machine.jobControls">
+            <button class="button button-secondary full-width" id="pause-machine-job" type="button" data-machine-job-control="pause" disabled data-i18n="ui.machine.pause">Pausar trabalho</button>
+            <button class="button button-secondary full-width" id="resume-machine-job" type="button" data-machine-job-control="resume" disabled data-i18n="ui.machine.resume">Retomar trabalho</button>
+            <button class="button button-danger full-width" id="stop-machine-job" type="button" data-machine-job-control="stop" disabled data-i18n="ui.machine.stop">Parar trabalho</button>
+          </div>
+          <p class="help-text" data-i18n="ui.machine.limits">O GRBL grava texto com fontes de traço único integradas e envia retângulos e paths vetoriais editáveis. Imagens raster precisam ser vetorizadas; elipses, linhas e texto preenchido não são compatíveis. A pausa solicita feed hold e não substitui a parada de emergência.</p>
         </section>
       </aside>
 
@@ -206,9 +210,8 @@
             <div class="ruler ruler-left" id="ruler-y" aria-hidden="true"></div>
             <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial" data-i18n-aria-label="ui.canvas.artboard"><g id="objects"></g><g id="job-markers" pointer-events="none"></g><rect id="selection-marquee" class="selection-marquee" visibility="hidden" pointer-events="none"/></svg>
           </div>
-          <div class="stage-note"><span class="status-dot"></span> <span data-i18n="ui.canvas.scale">Escala e medidas em milímetros</span></div>
         </div>
-        <footer class="statusbar"><span id="selection-status" data-i18n="ui.canvas.noSelection">Nenhum objeto selecionado</span><span id="active-tool-status">Selecionar · V</span><span>CommBurn</span></footer>
+        <footer class="statusbar"><span id="selection-status" data-i18n="ui.canvas.noSelection">Nenhum objeto selecionado</span><span id="active-tool-status">Selecionar · V</span><span class="stage-note"><span class="status-dot"></span> <span data-i18n="ui.canvas.scale">Escala e medidas em milímetros</span></span><span>CommBurn</span></footer>
         <div id="notice" class="notice" role="status" aria-live="polite"></div>
       </section>
     </main>
@@ -254,9 +257,15 @@
       <div id="machine-simulation-panel" class="machine-simulation-panel" hidden>
         <p id="machine-simulation-status" class="machine-preview-stats" role="status" data-i18n="ui.dialogs.simulationReady">Simulação visual pronta; nenhum hardware ou laser será acionado.</p>
         <progress id="machine-simulation-progress" class="machine-simulation-progress" max="1" value="0" aria-label="Progresso da simulação" data-i18n-aria-label="ui.dialogs.simulationProgress"></progress>
+        <div id="machine-simulation-job-controls" class="machine-job-controls machine-job-controls-inline" role="group" aria-label="Controle do trabalho" data-i18n-aria-label="ui.machine.jobControls" hidden>
+          <button class="button button-secondary" type="button" data-machine-job-control="pause" disabled data-i18n="ui.machine.pause">Pausar trabalho</button>
+          <button class="button button-secondary" type="button" data-machine-job-control="resume" disabled data-i18n="ui.machine.resume">Retomar trabalho</button>
+          <button class="button button-danger" type="button" data-machine-job-control="stop" disabled data-i18n="ui.machine.stop">Parar trabalho</button>
+        </div>
         <div id="machine-timeline" class="machine-timeline" hidden>
           <button id="machine-timeline-play" class="button button-secondary" type="button" data-i18n="ui.dialogs.timelinePlay">Reproduzir</button>
           <input id="machine-timeline-scrub" type="range" min="0" max="1" step="1" value="0" aria-label="Posição na trajetória" data-i18n-aria-label="ui.dialogs.timelineScrub">
+          <button id="machine-timeline-live" class="button button-secondary" type="button" hidden data-i18n="ui.dialogs.timelineLive">Ao vivo</button>
         </div>
         <div id="machine-simulation-visual" class="machine-simulation-visual">
           <canvas id="machine-simulation-plan" role="img" aria-label="Plano completo do trabalho simulado" data-i18n-aria-label="ui.dialogs.simulatedJobPlan"></canvas>

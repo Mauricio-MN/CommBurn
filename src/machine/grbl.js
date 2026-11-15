@@ -1,3 +1,9 @@
+export const jobStoppedMessage = "Job stopped; controller was reset";
+
+function watchdogIntervalMs(timeoutMs) {
+  return Math.min(250, Math.max(5, Math.floor(timeoutMs / 4)));
+}
+
 export class GrblConnection {
   constructor(serialPort, { acknowledgementTimeoutMs = 10000, onProgress = () => {} } = {}) {
     this.serialPort = serialPort;
@@ -6,6 +12,8 @@ export class GrblConnection {
     this.buffer = "";
     this.pending = null;
     this.busy = false;
+    this.paused = false;
+    this.resumeWaiter = null;
     this.cancelRequested = false;
     this.status = null;
     this.statusWaiter = null;
@@ -31,6 +39,7 @@ export class GrblConnection {
       if (status) {
         this.status = status[1];
         this.updatePosition(response);
+        if (this.pending && /^(Run|Hold|Jog|Home)/.test(this.status)) this.pending.lastProgressAt = Date.now();
         this.statusWaiter?.resolve(this.status);
       } else if (/^ALARM:/i.test(response)) {
         this.rejectPending(new Error(`Controller alarm: ${response}`));
@@ -72,6 +81,11 @@ export class GrblConnection {
           : null
       };
     }
+  }
+
+  // Asks for a status report without waiting; the reply updates `position` and `status`.
+  requestStatusReport() {
+    if (this.busy && this.serialPort.isOpen) this.serialPort.write("?");
   }
 
   // Reads the head position without moving the machine; null when the controller does not answer.
@@ -166,25 +180,34 @@ export class GrblConnection {
     if (this.serialError) throw this.serialError;
     if (this.pending) throw new Error("A GRBL command is already awaiting acknowledgement");
     const result = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.pending?.timer === timer) {
-          this.pending = null;
-          reject(new Error(`Timed out waiting for controller acknowledgement: ${line}`));
-        }
-      }, timeoutMs);
-      this.pending = {
+      // Counts time without progress: a full planner or a feed hold delays "ok" on purpose.
+      const pending = {
+        lastProgressAt: Date.now(),
         resolve: () => {
-          clearTimeout(timer);
+          clearInterval(pending.timer);
           this.pending = null;
           resolve();
         },
         reject: (error) => {
-          clearTimeout(timer);
+          clearInterval(pending.timer);
           this.pending = null;
           reject(error);
         },
-        timer
+        timer: null
       };
+      pending.timer = setInterval(() => {
+        if (this.pending !== pending) return;
+        if (Date.now() - pending.lastProgressAt > timeoutMs) {
+          pending.reject(new Error(`Timed out waiting for controller acknowledgement: ${line}`));
+          return;
+        }
+        try {
+          this.serialPort.write("?");
+        } catch (error) {
+          pending.reject(error);
+        }
+      }, watchdogIntervalMs(timeoutMs));
+      this.pending = pending;
     });
     try {
       this.serialPort.write(`${line}\n`);
@@ -200,15 +223,25 @@ export class GrblConnection {
     if (this.busy) throw new Error("A machine job is already running");
     this.busy = true;
     this.cancelRequested = false;
+    this.paused = false;
     const lines = gcode.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     try {
       for (const [index, line] of lines.entries()) {
-        if (this.cancelRequested) throw new Error("Job stopped; controller is in feed hold");
+        await this.waitWhilePaused();
+        if (this.cancelRequested) throw new Error(jobStoppedMessage);
         await this.sendLine(line);
         this.onProgress({ completed: index + 1, total: lines.length });
       }
       await this.waitForIdle();
     } catch (error) {
+      if (this.cancelRequested) {
+        try {
+          await this.resetAfterStop();
+        } catch (resetError) {
+          throw new AggregateError([error, resetError], "Job stopped and the controller reset failed");
+        }
+        throw error;
+      }
       try {
         this.serialPort.write("!");
       } catch (stopError) {
@@ -224,7 +257,7 @@ export class GrblConnection {
     const startedAt = Date.now();
     let idleReports = 0;
     while (Date.now() - startedAt < timeoutMs) {
-      if (this.cancelRequested) throw new Error("Job stopped; controller is in feed hold");
+      if (this.cancelRequested) throw new Error(jobStoppedMessage);
       if (this.serialError) throw this.serialError;
       this.serialPort.write("?");
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
@@ -241,11 +274,58 @@ export class GrblConnection {
     throw new Error("Timed out waiting for the controller to become idle");
   }
 
-  feedHold() {
+  async waitWhilePaused() {
+    while (this.paused && !this.cancelRequested) {
+      await new Promise((resolve) => {
+        this.resumeWaiter = resolve;
+      });
+    }
+  }
+
+  wakeJob() {
+    const wake = this.resumeWaiter;
+    this.resumeWaiter = null;
+    wake?.();
+  }
+
+  // Feed hold: the controller decelerates and keeps its buffered moves until resumed.
+  pauseJob() {
     if (!this.busy) throw new Error("No machine job is currently running");
-    this.cancelRequested = true;
+    if (this.paused || this.cancelRequested) return;
+    this.paused = true;
     this.serialPort.write("!");
-    this.pending?.reject(new Error("Job stopped; controller is in feed hold"));
+  }
+
+  resumeJob() {
+    if (!this.busy) throw new Error("No machine job is currently running");
+    if (!this.paused) return;
+    this.paused = false;
+    this.serialPort.write("~");
+    this.wakeJob();
+  }
+
+  stopJob() {
+    if (!this.busy) throw new Error("No machine job is currently running");
+    if (this.cancelRequested) return;
+    this.cancelRequested = true;
+    this.paused = false;
+    this.serialPort.write("!");
+    this.pending?.reject(new Error(jobStoppedMessage));
+    this.wakeJob();
+  }
+
+  // Soft reset flushes the controller's buffer; it is sent only once the machine reports hold or idle.
+  async resetAfterStop({ timeoutMs = 5000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const status = await this.queryStatus({ timeoutMs: 250 });
+      if (status && /^(Idle|Hold)/.test(status)) {
+        this.serialPort.write("\x18");
+        await new Promise((resolve, reject) => this.serialPort.drain((error) => error ? reject(error) : resolve()));
+        return;
+      }
+    }
+    throw new Error("The controller did not reach feed hold; soft reset was not sent");
   }
 
   async close() {

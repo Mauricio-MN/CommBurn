@@ -36,7 +36,7 @@ test("copy and paste shortcuts are documented for cross-layer object transfer", 
   assert.ok(SHORTCUTS.some(({ keys }) => keys === "Ctrl+V"));
 });
 
-test("presentation simulation includes editable text and keeps only untransformed GRBL geometry", () => {
+test("presentation simulation includes editable text and only GRBL-supported geometry", () => {
   const source = createPresentationDocument();
   const documentModel = {
     ...source,
