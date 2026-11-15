@@ -17,6 +17,13 @@ A partir da versão `0.1.2`, o núcleo do CommBurn é licenciado sob GNU AGPL-3.
 - Execute `npm test` para rodar os testes do núcleo e da CLI.
 - Exporte um documento JSON para SVG com `node cli/commburn.mjs entrada.json saida.svg`.
 
+## Desenvolvimento local no Windows
+
+- Execute `scripts/setup-local.cmd` uma vez para baixar o Node.js portátil e instalar as dependências do lockfile.
+- Execute `scripts/dev-shell.cmd` para abrir um PowerShell com Node.js e as variáveis de ambiente locais configuradas.
+- As ferramentas e o cache ficam em `.tools/`, e as dependências do projeto em `node_modules/`; essas pastas são ignoradas pelo Git. Nada é adicionado ao PATH permanente nem instalado globalmente.
+- No terminal aberto, use `npm test`, `npm start` ou os demais scripts do projeto.
+
 ## Compatibilidade de projetos editáveis
 
 **TABU:** nunca descartar, reinterpretar, arredondar ou rasterizar dados de um projeto editável para fazê-lo carregar. Mudanças no schema exigem nova versão, conversões explícitas e fixtures de regressão que provem preservação do modelo e da aparência. SVG visual é preservado como referência; para obter vetores, reimporte o SVG pelo modo editável. Consulte o [contrato do formato e das conversões](docs/PROJECT_FORMAT.md).
