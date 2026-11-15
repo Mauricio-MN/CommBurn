@@ -13,6 +13,7 @@ import { PathEditor } from "./ui/path-editor.js";
 import { getInspectorSections } from "./ui/inspector-state.js";
 import { loadDesktopPlugins } from "./ui/plugins.js";
 import { translateDom } from "./ui/dom-i18n.js";
+import { clampZoom, scrollDeltaToKeepAnchor, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, zoomByFactor, zoomPercent } from "./ui/zoom.js";
 import {
   clearNumberFieldError,
   showNumberFieldError,
@@ -119,6 +120,9 @@ const fontSizeInput = byId("font-size");
 const artboard = byId("artboard");
 const boardFrame = byId("board-frame");
 const stage = boardFrame.parentElement;
+const zoomOutButton = byId("zoom-out");
+const zoomInButton = byId("zoom-in");
+const zoomResetButton = byId("zoom-reset");
 const objects = byId("objects");
 const removeButton = byId("remove-selection");
 const selectionStatus = byId("selection-status");
@@ -167,6 +171,7 @@ let presentationSnapshot = null;
 let presentationPaused = false;
 let presentationRun = 0;
 let presentationTarget = null;
+let viewZoom = ZOOM_DEFAULT;
 
 function applyInterfaceLocale() {
   document.documentElement.lang = i18n.locale;
@@ -251,7 +256,7 @@ function resizeBoard(widthMm = currentDocument.widthMm, heightMm = currentDocume
   const stageVerticalPadding = 10 + 24;
   const topRulerHeight = 27;
   const availableHeight = Math.max(0, stage.clientHeight - stageVerticalPadding - topRulerHeight);
-  const drawingWidth = Math.min(1100, availableWidth - 42, availableHeight * ratio);
+  const drawingWidth = Math.min(1100, availableWidth - 42, availableHeight * ratio) * viewZoom;
   boardFrame.style.width = `${Math.max(0, drawingWidth) + 42}px`;
   boardFrame.style.setProperty("--doc-ratio", `${widthMm} / ${heightMm}`);
 }
@@ -2614,6 +2619,42 @@ languageSelect.addEventListener("change", () => {
 });
 applyInterfaceLocale();
 new ResizeObserver(() => resizeBoard()).observe(stage);
+
+function renderZoomControls() {
+  zoomResetButton.textContent = zoomPercent(viewZoom);
+  zoomOutButton.disabled = viewZoom <= ZOOM_MIN;
+  zoomInButton.disabled = viewZoom >= ZOOM_MAX;
+}
+
+// Changes the view zoom only; the project and its millimetre values are untouched.
+// The content point under `anchor` (client coordinates) stays in place; by default that is the visible centre.
+function setViewZoom(level, anchor = null) {
+  const nextZoom = clampZoom(level);
+  if (nextZoom === viewZoom) return;
+  const stageBox = stage.getBoundingClientRect();
+  const before = artboard.getBoundingClientRect();
+  const point = anchor ?? {
+    x: stageBox.left + stage.clientLeft + stage.clientWidth / 2,
+    y: stageBox.top + stage.clientTop + stage.clientHeight / 2
+  };
+  viewZoom = nextZoom;
+  resizeBoard();
+  renderZoomControls();
+  const after = artboard.getBoundingClientRect();
+  stage.scrollLeft += scrollDeltaToKeepAnchor(point.x, { start: before.left, size: before.width }, { start: after.left, size: after.width });
+  stage.scrollTop += scrollDeltaToKeepAnchor(point.y, { start: before.top, size: before.height }, { start: after.top, size: after.height });
+}
+
+zoomOutButton.addEventListener("click", () => setViewZoom(zoomByFactor(viewZoom, 1 / ZOOM_STEP)));
+zoomInButton.addEventListener("click", () => setViewZoom(zoomByFactor(viewZoom, ZOOM_STEP)));
+zoomResetButton.addEventListener("click", () => setViewZoom(ZOOM_DEFAULT));
+// Ctrl/Cmd + wheel (and trackpad pinch, which browsers report the same way) zooms the stage around the pointer.
+stage.addEventListener("wheel", (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  setViewZoom(zoomByFactor(viewZoom, Math.exp(-event.deltaY * 0.002)), { x: event.clientX, y: event.clientY });
+}, { passive: false });
+renderZoomControls();
 
 for (const button of document.querySelectorAll('[data-action="new"]')) button.addEventListener("click", newDocument);
 for (const button of document.querySelectorAll('[data-action="import-svg"]')) {
