@@ -12,7 +12,7 @@ Editor vetorial em desenvolvimento para preparar trabalhos a laser, com milímet
 
 A licença AGPL-3.0-only do núcleo, adotada a partir da versão `0.1.2`, é uma escolha intencional para manter as obrigações de copyleft também quando uma versão modificada é oferecida como serviço pela rede. Isso não altera as versões já publicadas: até `0.1.1` continuam sob MIT; `0.1.2` em diante usa AGPL-3.0-only.
 
-Plugins independentes podem ter licenças próprias; consulte [LICENSE-PLUGINS](LICENSE-PLUGINS) e o [contrato de CLI e plugins](docs/PLUGIN_CLI_CONTRACT.md). A licença de um plugin não relicencia o núcleo, e a licença aplicável a uma distribuição combinada depende da relação entre os componentes. O plugin de tema escuro em `plugins-proprietary/editor-theme` é uma exceção: tem licença PolyForm Noncommercial 1.0.0, que proíbe distribuição comercial, e é incluído somente no pacote MSIX oficial.
+Plugins independentes podem ter licenças próprias; consulte [LICENSE-PLUGINS](LICENSE-PLUGINS) e o [contrato de CLI e plugins](docs/PLUGIN_CLI_CONTRACT.md). A licença de um plugin não relicencia o núcleo, e a licença aplicável a uma distribuição combinada depende da relação entre os componentes. O plugin de tema escuro em `plugins-proprietary/editor-theme` é uma exceção: tem licença proprietária do titular (todos os direitos reservados), que permite uso gratuito apenas em distribuições oficiais do CommBurn e proíbe venda ou distribuição comercial por terceiros. Ele é incluído somente no pacote MSIX oficial.
 
 ## Experimentar
 
