@@ -2,13 +2,17 @@
 
 ![CommBurn — editor vetorial para trabalhos a laser](commburn.png)
 
-Rascunho de um editor vetorial simples para trabalhos a laser, com milímetros como unidade canônica e origem/eixos controlados explicitamente pelo usuário.
+Editor vetorial em desenvolvimento para preparar trabalhos a laser, com milímetros como unidade canônica e origem/eixos controlados explicitamente pelo usuário. O mesmo núcleo de documentos atende ao editor no navegador, ao app desktop e à CLI; o foco é um fluxo aberto e automatizável, não substituir o controle de segurança da máquina.
+
+> **Atenção:** o envio por serial para controladores GRBL é experimental. Confira origem, área de trabalho e parâmetros da máquina; faça o primeiro ensaio sem material e com o laser desativado. O CommBurn não substitui proteções físicas, intertravamentos nem parada de emergência. O botão de pausa envia *feed hold* e não é uma parada de emergência.
 
 [Política de privacidade](PRIVACY.md)
 
 ## Licenças
 
-A partir da versão `0.1.2`, o núcleo do CommBurn é licenciado sob GNU AGPL-3.0-only. As versões até `0.1.1` permanecem sob a licença MIT com que foram publicadas. Plugins independentes podem manter uma licença permissiva, como MIT; consulte [LICENSE-PLUGINS](LICENSE-PLUGINS). A licença de um plugin não altera a licença do núcleo.
+A licença AGPL-3.0-only do núcleo, adotada a partir da versão `0.1.2`, é uma escolha intencional para manter as obrigações de copyleft também quando uma versão modificada é oferecida como serviço pela rede. Isso não altera as versões já publicadas: até `0.1.1` continuam sob MIT; `0.1.2` em diante usa AGPL-3.0-only.
+
+Plugins independentes podem ter licenças próprias; consulte [LICENSE-PLUGINS](LICENSE-PLUGINS) e o [contrato de CLI e plugins](docs/PLUGIN_CLI_CONTRACT.md). A licença de um plugin não relicencia o núcleo, e a licença aplicável a uma distribuição combinada depende da relação entre os componentes. O plugin de tema escuro em `plugins-proprietary/editor-theme` é uma exceção: tem licença PolyForm Noncommercial 1.0.0, que proíbe distribuição comercial, e é incluído somente no pacote MSIX oficial.
 
 ## Experimentar
 
@@ -16,6 +20,7 @@ A partir da versão `0.1.2`, o núcleo do CommBurn é licenciado sob GNU AGPL-3.
 - Execute `npm install` e `npm start`; acesse `http://127.0.0.1:4173` para habilitar a conexão serial experimental com controladores compatíveis com GRBL.
 - Execute `npm test` para rodar os testes do núcleo e da CLI.
 - Exporte um documento JSON para SVG com `node cli/commburn.mjs entrada.json saida.svg`.
+- Baixe os pacotes publicados em [Releases](https://github.com/Mauricio-MN/CommBurn/releases).
 
 ## Desenvolvimento local no Windows
 
