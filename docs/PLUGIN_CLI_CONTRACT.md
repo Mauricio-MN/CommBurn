@@ -51,7 +51,7 @@ O comando `node cli/commburn.mjs entrada.json saida.svg` lê UTF-8 JSON com este
 }
 ```
 
-`origin.corner` aceita `top-left`, `top-right`, `bottom-left` ou `bottom-right`. A origem e as inversões são informadas pelo usuário; não há leitura de sensores. Medidas e coordenadas são milímetros. A CLI retorna erro não-zero e mensagem clara para JSON ou documentos inválidos.
+`origin.corner` aceita `top-left`, `top-right`, `bottom-left` ou `bottom-right`. A origem e as inversões são informadas pelo usuário; não há leitura de sensores. Para trajetórias GRBL, Y de máquina cresce para cima: `top-left` e `bottom-left` produzem a mesma orientação Y por padrão, e `flipY` a inverte. Essa convenção afeta o G-code e a prévia da máquina, não a geometria do documento nem a exportação SVG. Medidas e coordenadas são milímetros. A CLI retorna erro não-zero e mensagem clara para JSON ou documentos inválidos.
 
 ### Idioma da CLI
 

@@ -267,6 +267,19 @@ export function mapDocumentPoint(document, xMm, yMm) {
   };
 }
 
+// G-code mapping: machine Y grows up the stage (away from the operator) for every corner, so top-left
+// and bottom-left produce the same job. Stage/SVG output keeps using mapDocumentPoint.
+export function mapMachinePoint(document, xMm, yMm) {
+  const flipX = document.origin.corner.endsWith("right") !== document.origin.flipX;
+  const flipY = !document.origin.flipY;
+  return {
+    xMm: flipX ? document.widthMm - xMm : xMm,
+    yMm: flipY ? document.heightMm - yMm : yMm,
+    flipX,
+    flipY
+  };
+}
+
 function transformAttribute(element, centerX, centerY) {
   const { rotationDeg, skewXDeg, skewYDeg } = element;
   if (rotationDeg === 0 && skewXDeg === 0 && skewYDeg === 0) return "";
@@ -406,12 +419,12 @@ function distanceBetween(start, end) {
 }
 
 function mapPoints(document, points) {
-  return points.map(([xMm, yMm]) => mapDocumentPoint(document, xMm, yMm));
+  return points.map(([xMm, yMm]) => mapMachinePoint(document, xMm, yMm));
 }
 
 // Keeps glyphs upright when the origin inverts an axis: each glyph point is mirrored inside the (already transformed) text box before mapping.
 function mapTextOutlines(document, paths, box) {
-  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  const { flipX, flipY } = mapMachinePoint(document, 0, 0);
   return paths.map((path) => mapPoints(document, path.map(([x, y]) => [
     flipX ? box.minX + box.maxX - x : x,
     flipY ? box.minY + box.maxY - y : y
@@ -863,7 +876,7 @@ export function planGrblJob(input, settings) {
   const xs = points.map((point) => point.xMm);
   const ys = points.map((point) => point.yMm);
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const { flipX, flipY } = mapDocumentPoint(createDocument(input), 0, 0);
+  const { flipX, flipY } = mapMachinePoint(createDocument(input), 0, 0);
   const horizontal = anchor.endsWith("left") ? "left" : anchor.endsWith("right") ? "right" : "center";
   const vertical = anchor.startsWith("top") ? "top" : anchor.startsWith("bottom") ? "bottom" : "center";
   const offset = {
@@ -879,13 +892,20 @@ export function planGrblJob(input, settings) {
 // whatever the origin corner, axis inversions or start offset are. G-code itself stays in machine space.
 export function planToDocumentSpace(input, plan) {
   const document = createDocument(input);
-  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  const { flipX, flipY } = mapMachinePoint(document, 0, 0);
   const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm ?? { xMm: 0, yMm: 0 };
   const toDocument = (point) => ({
     xMm: flipX ? document.widthMm - (point.xMm + offsetX) : point.xMm + offsetX,
     yMm: flipY ? document.heightMm - (point.yMm + offsetY) : point.yMm + offsetY
   });
   return { ...plan, paths: plan.paths.map((path) => ({ ...path, points: path.points.map(toDocument) })) };
+}
+
+// Axis inversions change the G-code and preview only; the start marker stays where the job begins on the stage.
+function unflippedStart(input, settings) {
+  const plain = { ...input, origin: { corner: input.origin?.corner ?? "top-left", flipX: false, flipY: false } };
+  const work = planToDocumentSpace(plain, planGrblJob(plain, settings)).paths.filter(({ kind }) => kind === "work");
+  return work[0]?.points[0] ?? null;
 }
 
 // Where the job starts, ends and where machine X0 Y0 sits, in document (STAGE) millimetres,
@@ -895,7 +915,7 @@ export function jobReferencePoints(input, settings) {
   const work = planToDocumentSpace(input, plan).paths.filter(({ kind }) => kind === "work");
   if (work.length === 0) return null;
   const document = createDocument(input);
-  const { flipX, flipY } = mapDocumentPoint(document, 0, 0);
+  const { flipX, flipY } = mapMachinePoint(document, 0, 0);
   const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm;
   const corners = work.flatMap(({ points }) => points);
   const xs = corners.map(({ xMm }) => xMm);
@@ -906,7 +926,7 @@ export function jobReferencePoints(input, settings) {
       xMm: flipX ? document.widthMm - offsetX : offsetX,
       yMm: flipY ? document.heightMm - offsetY : offsetY
     },
-    start: work[0].points[0],
+    start: unflippedStart(input, settings) ?? work[0].points[0],
     end: work.at(-1).points.at(-1),
     xDirection: flipX ? -1 : 1,
     yDirection: flipY ? -1 : 1

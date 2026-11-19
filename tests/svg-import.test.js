@@ -530,7 +530,7 @@ test("diagonal and vertical-unidirectional fills stay inside the shape and follo
       const paths = run(algorithm, el);
       assert.ok(paths.length > 5, `${algorithm} ${el.id}`);
       for (const { points } of paths) for (const { xMm, yMm } of points) {
-        assert.ok(xMm >= 1.99 && xMm <= 12.01 && yMm >= 1.99 && yMm <= 12.01, `${algorithm} ${el.id} stays inside`);
+        assert.ok(xMm >= 1.99 && xMm <= 12.01 && yMm >= 7.99 && yMm <= 18.01, `${algorithm} ${el.id} stays inside`);
       }
       const [{ points: [first, second] }] = paths;
       assert.ok(Math.abs(Math.abs(second.xMm - first.xMm) - Math.abs(second.yMm - first.yMm)) < 1e-6, "45 degrees");
@@ -559,14 +559,14 @@ test("starting from the objects shifts the job so the chosen anchor becomes X0 Y
     const left = bounds(planGrblJob(document(origin), settings({ startFrom: "objects", startAnchor: "top-left" })));
     const right = bounds(planGrblJob(document(origin), settings({ startFrom: "objects", startAnchor: "bottom-right" })));
     const flipX = (origin.corner?.endsWith("right") ?? false) !== (origin.flipX ?? false);
-    const flipY = (origin.corner?.startsWith("bottom") ?? false) !== (origin.flipY ?? false);
+    const flipY = !(origin.flipY ?? false);
     // The anchor point lands on 0 and the rest of the drawing extends away from it in machine axes.
     assert.deepEqual([left[flipX ? 2 : 0], left[flipY ? 3 : 1]], [0, 0]);
     assert.deepEqual([right[flipX ? 0 : 2], right[flipY ? 1 : 3]], [0, 0]);
     assert.ok(Math.abs(left[2] - left[0] - 10) < 1e-9 && Math.abs(left[3] - left[1] - 6) < 1e-9);
   }
   const centered = planGrblJob(document({}), settings({ startFrom: "objects", startAnchor: "center" }));
-  assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: 23 });
+  assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: 57 });
   assert.match(planGrblJob(document({}), settings({ workCoordinateSystem: "G55" })).gcode, /^G21\nG55\nG90/);
   assert.throws(() => planGrblJob(document({}), settings({ startFrom: "nowhere" })), /start mode/);
 });
@@ -579,8 +579,8 @@ test("job reference points follow origin, axis inversion and start mode in docum
   };
   const settings = { maxSpindleSpeed: 1000 };
   const top = jobReferencePoints(base, settings);
-  assert.deepEqual([top.origin, top.xDirection, top.yDirection], [{ xMm: 0, yMm: 0 }, 1, 1]);
-  assert.deepEqual(top.start, { xMm: 30, yMm: 20 });
+  assert.deepEqual([top.origin, top.xDirection, top.yDirection], [{ xMm: 0, yMm: 80 }, 1, -1]);
+  assert.deepEqual(top.start, { xMm: 30, yMm: 26 });
   const bottomRight = jobReferencePoints({ ...base, origin: { corner: "bottom-right" } }, settings);
   assert.deepEqual([bottomRight.origin, bottomRight.xDirection, bottomRight.yDirection], [{ xMm: 100, yMm: 80 }, -1, -1]);
   // The contour starts at the vertex nearest the chosen origin corner.

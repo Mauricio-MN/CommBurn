@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, planGrblJob, renderGrblJob, renderSvg } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, planGrblJob, renderGrblJob, renderSvg } from "../src/core/document.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
 const embeddedSvg = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><circle cx="5" cy="5" r="4"/></svg>').toString("base64")}`;
@@ -118,8 +118,8 @@ test("GRBL paths honor explicit axis inversions", () => {
     elements: [{ type: "rect", xMm: 5, yMm: 6, widthMm: 10, heightMm: 12 }]
   }, { feedMmPerMinute: 200, maxSpindleSpeed: 500, powerPercent: 5 });
 
-  assert.match(gcode, /G0 X35 Y22/);
-  assert.match(gcode, /G1 X45 Y22\nG1 X45 Y34\nG1 X35 Y34\nG1 X35 Y22/);
+  assert.match(gcode, /G0 X35 Y6/);
+  assert.match(gcode, /G1 X35 Y18\nG1 X45 Y18\nG1 X45 Y6\nG1 X35 Y6/);
 });
 
 test("GRBL text stays upright when the selected origin inverts an axis", () => {
@@ -262,12 +262,12 @@ test("GRBL follows rotation and skew, and rejects non-rectangular primitives", (
     elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, rotationDeg: 90 }]
   }, settings);
   // A square rotated 90 degrees around its centre (15, 15) keeps the same corners, starting from the next one.
-  assert.deepEqual(rotated.paths[0].points.slice(0, 2).map(({ xMm, yMm }) => ({ xMm, yMm })), [{ xMm: 10, yMm: 10 }, { xMm: 20, yMm: 10 }]);
+  assert.deepEqual(rotated.paths[0].points.slice(0, 2).map(({ xMm, yMm }) => ({ xMm, yMm })), [{ xMm: 10, yMm: 80 }, { xMm: 10, yMm: 90 }]);
   const skewed = planGrblJob({
     widthMm: 100, heightMm: 100,
     elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, skewXDeg: 45 }]
   }, settings);
-  assert.deepEqual([skewed.paths[0].points[0].xMm, skewed.paths[0].points[0].yMm], [5, 10]);
+  assert.deepEqual([skewed.paths[0].points[0].xMm, skewed.paths[0].points[0].yMm], [15, 80]);
   assert.throws(() => renderGrblJob({
     elements: [{ type: "ellipse", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10 }]
   }, settings), /editable vector paths/);
@@ -291,8 +291,8 @@ test("GRBL traces editable SVG paths and applies each vector's engraving power",
     }]
   }, { maxSpindleSpeed: 1000 });
 
-  assert.match(gcode, /G0 X2 Y3\nM4 S350/);
-  assert.match(gcode, /G1 X6 Y3/);
+  assert.match(gcode, /G0 X2 Y17\nM4 S350/);
+  assert.match(gcode, /G1 X6 Y17/);
 });
 
 test("GRBL flattens cubic SVG path curves into metric line segments", () => {
@@ -310,7 +310,7 @@ test("GRBL flattens cubic SVG path curves into metric line segments", () => {
   }, { maxSpindleSpeed: 1000 });
 
   assert.ok((gcode.match(/G1 X/g) ?? []).length > 8);
-  assert.match(gcode, /G0 X2 Y3/);
+  assert.match(gcode, /G0 X2 Y17/);
 });
 
 test("raster images engrave as scan lines with per-segment power", () => {
@@ -326,8 +326,8 @@ test("raster images engrave as scan lines with per-segment power", () => {
   const rows = plan.paths.filter(({ kind }) => kind === "work");
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].points.map(({ xMm }) => xMm), [10, 11, 12, 13, 14]);
-  assert.match(plan.gcode, /G1 X11 Y10\.5 S500/);
-  assert.match(plan.gcode, /G1 X12 Y10\.5 S\d{3}/);
+  assert.match(plan.gcode, /G1 X11 Y89\.5 S500/);
+  assert.match(plan.gcode, /G1 X12 Y89\.5 S\d{3}/);
   const dither = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, imageMode: "threshold" });
   assert.doesNotMatch(dither.gcode, /S2\d\d/);
   assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000, rasters: { photo: { widthPx: 4, heightPx: 2, gray: "AA==" } } }), /does not match/);
@@ -368,6 +368,15 @@ test("GRBL rotated raster images engrave instead of rejecting the transform", ()
 
   // A 90 degree turn about the image centre (12, 11) moves the 4 x 2 mm box to 2 x 4 mm.
   assert.ok(Math.min(...xs) >= 11 - 1e-6 && Math.max(...xs) <= 13 + 1e-6);
-  assert.ok(Math.min(...ys) >= 9 - 1e-6 && Math.max(...ys) <= 13 + 1e-6);
+  assert.ok(Math.min(...ys) >= 87 - 1e-6 && Math.max(...ys) <= 91 + 1e-6);
   assert.ok(Math.max(...ys) - Math.min(...ys) > 3);
+});
+
+test("axis inversion does not move the job start marker on the stage", () => {
+  const elements = [{ id: "box", type: "rect", xMm: 10, yMm: 10, widthMm: 20, heightMm: 10 }];
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000 };
+  const startOn = (origin) => jobReferencePoints({ widthMm: 100, heightMm: 80, elements, origin }, settings).start;
+
+  assert.deepEqual(startOn({ corner: "top-left", flipY: true }), startOn({ corner: "top-left" }));
+  assert.deepEqual(startOn({ corner: "top-left", flipX: true, flipY: true }), startOn({ corner: "top-left" }));
 });
