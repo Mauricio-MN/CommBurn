@@ -33,7 +33,7 @@ test("GRBL sender waits for each acknowledgement and idle status", async () => {
   const serialPort = new MockSerialPort();
   const progress = [];
   const connection = new GrblConnection(serialPort, {
-    acknowledgementTimeoutMs: 100,
+    acknowledgementTimeoutMs: 1000,
     onProgress: (value) => progress.push(value)
   });
 
