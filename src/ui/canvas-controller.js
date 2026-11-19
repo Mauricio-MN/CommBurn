@@ -1,5 +1,3 @@
-import { mapDocumentPoint } from "../core/document.js";
-
 function toCanvasPoint(svg, event) {
   const screenPoint = svg.createSVGPoint();
   screenPoint.x = event.clientX;
@@ -7,16 +5,9 @@ function toCanvasPoint(svg, event) {
   return screenPoint.matrixTransform(svg.getScreenCTM().inverse());
 }
 
-function getCenter(document, element) {
-  const start = mapDocumentPoint(document, element.xMm, element.yMm);
-  if (element.type === "text") return { xMm: start.xMm, yMm: start.yMm };
-  if (element.type === "line") {
-    const end = mapDocumentPoint(document, element.xMm + element.widthMm, element.yMm + element.heightMm);
-    return { xMm: (start.xMm + end.xMm) / 2, yMm: (start.yMm + end.yMm) / 2 };
-  }
-  const xMm = start.flipX ? start.xMm - element.widthMm : start.xMm;
-  const yMm = start.flipY ? start.yMm - element.heightMm : start.yMm;
-  return { xMm: xMm + element.widthMm / 2, yMm: yMm + element.heightMm / 2 };
+function getCenter(element) {
+  if (element.type === "text") return { xMm: element.xMm, yMm: element.yMm };
+  return { xMm: element.xMm + element.widthMm / 2, yMm: element.yMm + element.heightMm / 2 };
 }
 
 function getSelectionBounds(elements) {
@@ -107,7 +98,7 @@ export class CanvasController {
     const bounds = getSelectionBounds(selected);
     const center = tool === "size"
       ? { xMm: (bounds.left + bounds.right) / 2, yMm: (bounds.top + bounds.bottom) / 2 }
-      : getCenter(document, element);
+      : getCenter(element);
     const startDistance = Math.hypot(point.x - center.xMm, point.y - center.yMm);
     this.interaction = {
       type: "transform",
@@ -125,9 +116,7 @@ export class CanvasController {
       startSkewX: element.skewXDeg,
       startSkewY: element.skewYDeg,
       startAngle: angleBetween(center, point),
-      scaleMm: Math.max(element.widthMm ?? element.fontSizeMm, element.heightMm ?? element.fontSizeMm, 1),
-      flipX: mapDocumentPoint(document, element.xMm, element.yMm).flipX,
-      flipY: mapDocumentPoint(document, element.xMm, element.yMm).flipY
+      scaleMm: Math.max(element.widthMm ?? element.fontSizeMm, element.heightMm ?? element.fontSizeMm, 1)
     };
     this.svg.setPointerCapture(event.pointerId);
     event.preventDefault();
@@ -159,8 +148,8 @@ export class CanvasController {
       this.callbacks.updateMany(action.selected.map((element) => ({
         id: element.id,
         patch: {
-          xMm: element.xMm + deltaX * (action.flipX ? -1 : 1),
-          yMm: element.yMm + deltaY * (action.flipY ? -1 : 1)
+          xMm: element.xMm + deltaX,
+          yMm: element.yMm + deltaY
         }
       })), false);
     } else if (action.tool === "size") {

@@ -520,17 +520,21 @@ test("STAGE preview: every vector type looks the same way per operation (fill so
 test("diagonal and vertical-unidirectional fills stay inside the shape and follow the right direction", () => {
   const element = { id: "tri", type: "path", xMm: 2, yMm: 2, widthMm: 10, heightMm: 10, pathData: "M0 0L10 0L10 10Z", layerId: "f" };
   const rect = { id: "box", type: "rect", xMm: 2, yMm: 2, widthMm: 10, heightMm: 10, layerId: "f" };
-  const run = (algorithm, el) => planGrblJob({
-    widthMm: 20, heightMm: 20,
-    layers: [{ ...DEFAULT_LAYER, id: "f", operation: "fill", fillAlgorithm: algorithm, fillSpacingMm: 1 }],
-    elements: [el]
-  }, { maxSpindleSpeed: 1000 }).paths.filter(({ kind }) => kind === "work");
+  const run = (algorithm, el) => {
+    const document = {
+      widthMm: 20, heightMm: 20,
+      layers: [{ ...DEFAULT_LAYER, id: "f", operation: "fill", fillAlgorithm: algorithm, fillSpacingMm: 1 }],
+      elements: [el]
+    };
+    return planToDocumentSpace(document, planGrblJob(document, { maxSpindleSpeed: 1000 }))
+      .paths.filter(({ kind }) => kind === "work");
+  };
   for (const el of [element, rect]) {
     for (const algorithm of ["diagonal-serpentine", "diagonal-crosshatch"]) {
       const paths = run(algorithm, el);
       assert.ok(paths.length > 5, `${algorithm} ${el.id}`);
       for (const { points } of paths) for (const { xMm, yMm } of points) {
-        assert.ok(xMm >= 1.99 && xMm <= 12.01 && yMm >= 7.99 && yMm <= 18.01, `${algorithm} ${el.id} stays inside`);
+        assert.ok(xMm >= 1.99 && xMm <= 12.01 && yMm >= 1.99 && yMm <= 12.01, `${algorithm} ${el.id} stays inside`);
       }
       const [{ points: [first, second] }] = paths;
       assert.ok(Math.abs(Math.abs(second.xMm - first.xMm) - Math.abs(second.yMm - first.yMm)) < 1e-6, "45 degrees");
@@ -566,7 +570,7 @@ test("starting from the objects shifts the job so the chosen anchor becomes X0 Y
     assert.ok(Math.abs(left[2] - left[0] - 10) < 1e-9 && Math.abs(left[3] - left[1] - 6) < 1e-9);
   }
   const centered = planGrblJob(document({}), settings({ startFrom: "objects", startAnchor: "center" }));
-  assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: 57 });
+  assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: -23 });
   assert.match(planGrblJob(document({}), settings({ workCoordinateSystem: "G55" })).gcode, /^G21\nG55\nG90/);
   assert.throws(() => planGrblJob(document({}), settings({ startFrom: "nowhere" })), /start mode/);
 });
@@ -579,8 +583,8 @@ test("job reference points follow origin, axis inversion and start mode in docum
   };
   const settings = { maxSpindleSpeed: 1000 };
   const top = jobReferencePoints(base, settings);
-  assert.deepEqual([top.origin, top.xDirection, top.yDirection], [{ xMm: 0, yMm: 80 }, 1, -1]);
-  assert.deepEqual(top.start, { xMm: 30, yMm: 26 });
+  assert.deepEqual([top.origin, top.xDirection, top.yDirection], [{ xMm: 0, yMm: 0 }, 1, -1]);
+  assert.deepEqual(top.start, { xMm: 30, yMm: 20 });
   const bottomRight = jobReferencePoints({ ...base, origin: { corner: "bottom-right" } }, settings);
   assert.deepEqual([bottomRight.origin, bottomRight.xDirection, bottomRight.yDirection], [{ xMm: 100, yMm: 80 }, -1, -1]);
   // The contour starts at the vertex nearest the chosen origin corner.
@@ -617,7 +621,7 @@ test("job reference points follow rotated objects", () => {
   assert.deepEqual(reference.bounds, { minXMm: 30, minYMm: 20, maxXMm: 40, maxYMm: 30 });
 });
 
-test("document-space plans are identical for every origin corner and inversion", () => {
+test("origin corners preserve stage geometry while axis inversions change the machine preview", () => {
   const base = {
     widthMm: 100, heightMm: 80,
     layers: [{ ...DEFAULT_LAYER, id: "l" }],
@@ -625,11 +629,20 @@ test("document-space plans are identical for every origin corner and inversion",
   };
   const settings = { maxSpindleSpeed: 1000 };
   const reference = planToDocumentSpace(base, planGrblJob(base, settings)).paths;
-  for (const origin of [{ corner: "bottom-right" }, { corner: "top-left", flipX: true }, { corner: "bottom-left", flipY: true }]) {
-    const document = { ...base, origin };
-    const converted = planToDocumentSpace(document, planGrblJob(document, settings)).paths;
-    assert.equal(converted.length, reference.length);
-    const key = (paths) => paths.flatMap(({ points }) => points).map(({ xMm, yMm }) => `${xMm.toFixed(3)},${yMm.toFixed(3)}`).sort().filter((value, index, all) => value !== all[index - 1]);
-    assert.deepEqual(key(converted), key(reference));
-  }
+  const key = (paths) => paths.flatMap(({ points }) => points).map(({ xMm, yMm }) => `${xMm.toFixed(3)},${yMm.toFixed(3)}`).sort().filter((value, index, all) => value !== all[index - 1]);
+  const bottomRight = { ...base, origin: { corner: "bottom-right" } };
+  assert.deepEqual(key(planToDocumentSpace(bottomRight, planGrblJob(bottomRight, settings)).paths), key(reference));
+
+  const inverted = { ...base, origin: { corner: "top-left", flipX: true, flipY: true } };
+  const converted = planToDocumentSpace(inverted, planGrblJob(inverted, settings)).paths;
+  assert.notDeepEqual(key(converted), key(reference));
+  const dimensions = (paths) => {
+    const points = paths.filter(({ kind }) => kind === "work").flatMap(({ points: list }) => list);
+    const xs = points.map(({ xMm }) => xMm);
+    const ys = points.map(({ yMm }) => yMm);
+    return [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+  };
+  dimensions(converted).forEach((value, index) => {
+    assert.ok(Math.abs(value - dimensions(reference)[index]) < 1e-9);
+  });
 });

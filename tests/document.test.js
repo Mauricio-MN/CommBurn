@@ -111,15 +111,30 @@ test("GRBL exports text and rejects out-of-area geometry and invalid machine set
 });
 
 test("GRBL paths honor explicit axis inversions", () => {
-  const gcode = renderGrblJob({
+  const document = {
     widthMm: 50,
     heightMm: 40,
-    origin: { corner: "top-left", flipX: true, flipY: true },
     elements: [{ type: "rect", xMm: 5, yMm: 6, widthMm: 10, heightMm: 12 }]
-  }, { feedMmPerMinute: 200, maxSpindleSpeed: 500, powerPercent: 5 });
+  };
+  const settings = { feedMmPerMinute: 200, maxSpindleSpeed: 500, powerPercent: 5 };
+  const normal = renderGrblJob({ ...document, origin: { corner: "top-left" } }, settings);
+  const bottomLeft = renderGrblJob({ ...document, origin: { corner: "bottom-left" } }, settings);
+  const normalStart = normal.match(/G0 X[^\n]+/)[0];
+  const normalWork = normal.match(/G1 X[^\n]*/g).join("\n");
 
-  assert.match(gcode, /G0 X35 Y6/);
-  assert.match(gcode, /G1 X35 Y18\nG1 X45 Y18\nG1 X45 Y6\nG1 X35 Y6/);
+  assert.match(normal, /G0 X5 Y-6/);
+  assert.notEqual(bottomLeft.match(/G0 X[^\n]+/)[0], normalStart);
+  for (const origin of [
+    { corner: "top-left", flipX: true },
+    { corner: "top-left", flipY: true },
+    { corner: "top-left", flipX: true, flipY: true }
+  ]) {
+    const inverted = renderGrblJob({ ...document, origin }, settings);
+    assert.equal(inverted.match(/G0 X[^\n]+/)[0], normalStart);
+    assert.notEqual(inverted.match(/G1 X[^\n]*/g).join("\n"), normalWork);
+  }
+  const gcode = renderGrblJob({ ...document, origin: { corner: "top-left", flipX: true, flipY: true } }, settings);
+  assert.match(gcode, /G1 X-5 Y-6\nG1 X-5 Y6\nG1 X5 Y6\nG1 X5 Y-6/);
 });
 
 test("GRBL text stays upright when the selected origin inverts an axis", () => {
@@ -262,12 +277,12 @@ test("GRBL follows rotation and skew, and rejects non-rectangular primitives", (
     elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, rotationDeg: 90 }]
   }, settings);
   // A square rotated 90 degrees around its centre (15, 15) keeps the same corners, starting from the next one.
-  assert.deepEqual(rotated.paths[0].points.slice(0, 2).map(({ xMm, yMm }) => ({ xMm, yMm })), [{ xMm: 10, yMm: 80 }, { xMm: 10, yMm: 90 }]);
+  assert.deepEqual(rotated.paths[0].points.slice(0, 2).map(({ xMm, yMm }) => ({ xMm, yMm })), [{ xMm: 10, yMm: -10 }, { xMm: 20, yMm: -10 }]);
   const skewed = planGrblJob({
     widthMm: 100, heightMm: 100,
     elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 10, heightMm: 10, skewXDeg: 45 }]
   }, settings);
-  assert.deepEqual([skewed.paths[0].points[0].xMm, skewed.paths[0].points[0].yMm], [15, 80]);
+  assert.deepEqual([skewed.paths[0].points[0].xMm, skewed.paths[0].points[0].yMm], [5, -10]);
   assert.throws(() => renderGrblJob({
     elements: [{ type: "ellipse", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10 }]
   }, settings), /editable vector paths/);
@@ -291,8 +306,8 @@ test("GRBL traces editable SVG paths and applies each vector's engraving power",
     }]
   }, { maxSpindleSpeed: 1000 });
 
-  assert.match(gcode, /G0 X2 Y17\nM4 S350/);
-  assert.match(gcode, /G1 X6 Y17/);
+  assert.match(gcode, /G0 X2 Y-3\nM4 S350/);
+  assert.match(gcode, /G1 X6 Y-3/);
 });
 
 test("GRBL flattens cubic SVG path curves into metric line segments", () => {
@@ -310,7 +325,7 @@ test("GRBL flattens cubic SVG path curves into metric line segments", () => {
   }, { maxSpindleSpeed: 1000 });
 
   assert.ok((gcode.match(/G1 X/g) ?? []).length > 8);
-  assert.match(gcode, /G0 X2 Y17/);
+  assert.match(gcode, /G0 X2 Y-3/);
 });
 
 test("raster images engrave as scan lines with per-segment power", () => {
@@ -326,8 +341,8 @@ test("raster images engrave as scan lines with per-segment power", () => {
   const rows = plan.paths.filter(({ kind }) => kind === "work");
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].points.map(({ xMm }) => xMm), [10, 11, 12, 13, 14]);
-  assert.match(plan.gcode, /G1 X11 Y89\.5 S500/);
-  assert.match(plan.gcode, /G1 X12 Y89\.5 S\d{3}/);
+  assert.match(plan.gcode, /G1 X11 Y-10\.5 S500/);
+  assert.match(plan.gcode, /G1 X12 Y-10\.5 S\d{3}/);
   const dither = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, imageMode: "threshold" });
   assert.doesNotMatch(dither.gcode, /S2\d\d/);
   assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000, rasters: { photo: { widthPx: 4, heightPx: 2, gray: "AA==" } } }), /does not match/);
@@ -368,7 +383,7 @@ test("GRBL rotated raster images engrave instead of rejecting the transform", ()
 
   // A 90 degree turn about the image centre (12, 11) moves the 4 x 2 mm box to 2 x 4 mm.
   assert.ok(Math.min(...xs) >= 11 - 1e-6 && Math.max(...xs) <= 13 + 1e-6);
-  assert.ok(Math.min(...ys) >= 87 - 1e-6 && Math.max(...ys) <= 91 + 1e-6);
+  assert.ok(Math.min(...ys) >= -13 - 1e-6 && Math.max(...ys) <= -9 + 1e-6);
   assert.ok(Math.max(...ys) - Math.min(...ys) > 3);
 });
 

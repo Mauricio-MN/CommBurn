@@ -267,16 +267,34 @@ export function mapDocumentPoint(document, xMm, yMm) {
   };
 }
 
-// G-code mapping: machine Y grows up the stage (away from the operator) for every corner, so top-left
-// and bottom-left produce the same job. Stage/SVG output keeps using mapDocumentPoint.
+function normalizeZero(value) {
+  return Object.is(value, -0) ? 0 : value;
+}
+
+// Machine coordinates are measured from the selected corner; top-left's default Y is corrected for GRBL.
 export function mapMachinePoint(document, xMm, yMm) {
-  const flipX = document.origin.corner.endsWith("right") !== document.origin.flipX;
+  const originAtRight = document.origin.corner.endsWith("right");
+  const originAtBottom = document.origin.corner.startsWith("bottom");
+  const flipX = originAtRight !== document.origin.flipX;
   const flipY = !document.origin.flipY;
+  const xFromOrigin = originAtRight ? document.widthMm - xMm : xMm;
+  const yFromOrigin = originAtBottom ? document.heightMm - yMm : yMm;
   return {
-    xMm: flipX ? document.widthMm - xMm : xMm,
-    yMm: flipY ? document.heightMm - yMm : yMm,
+    xMm: normalizeZero(document.origin.flipX ? -xFromOrigin : xFromOrigin),
+    yMm: normalizeZero((originAtBottom ? 1 : -1) * (document.origin.flipY ? -yFromOrigin : yFromOrigin)),
     flipX,
     flipY
+  };
+}
+
+function unmapMachinePoint(document, xMm, yMm) {
+  const originAtRight = document.origin.corner.endsWith("right");
+  const originAtBottom = document.origin.corner.startsWith("bottom");
+  const xFromOrigin = document.origin.flipX ? -xMm : xMm;
+  const yFromOrigin = (originAtBottom ? 1 : -1) * (document.origin.flipY ? -yMm : yMm);
+  return {
+    xMm: normalizeZero(originAtRight ? document.widthMm - xFromOrigin : xFromOrigin),
+    yMm: normalizeZero(originAtBottom ? document.heightMm - yFromOrigin : yFromOrigin)
   };
 }
 
@@ -861,7 +879,7 @@ export const WORK_COORDINATE_SYSTEMS = Object.freeze(["G54", "G55", "G56", "G57"
 
 // "absolute" keeps machine coordinates from the chosen origin; "objects" makes the job start at the
 // chosen anchor of the objects' bounding box, so the head position set by the user becomes X0 Y0.
-export function planGrblJob(input, settings) {
+function planGrblJobBase(input, settings, startReference = null) {
   const startFrom = settings.startFrom ?? "absolute";
   if (!START_FROM_MODES.includes(startFrom)) {
     throw new CommBurnRangeError("grbl.invalidStartFrom", { startFrom }, { message: `Unsupported start mode: ${startFrom}` });
@@ -870,7 +888,7 @@ export function planGrblJob(input, settings) {
   if (!START_ANCHORS.includes(anchor)) {
     throw new CommBurnRangeError("grbl.invalidStartAnchor", { anchor }, { message: `Unsupported start anchor: ${anchor}` });
   }
-  const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 });
+  const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 }, startReference);
   if (startFrom === "absolute") return absolute;
   const points = absolute.paths.filter(({ kind }) => kind === "work").flatMap((path) => path.points);
   const xs = points.map((point) => point.xMm);
@@ -883,21 +901,60 @@ export function planGrblJob(input, settings) {
     xMm: horizontal === "center" ? (minX + maxX) / 2 : (horizontal === "left") !== flipX ? minX : maxX,
     yMm: vertical === "center" ? (minY + maxY) / 2 : (vertical === "top") !== flipY ? minY : maxY
   };
-  return buildGrblJob(input, settings, offset);
+  return buildGrblJob(input, settings, offset, startReference);
 }
 
-// Where the job starts, ends and where machine X0 Y0 sits, in document (STAGE) millimetres,
-// plus the document direction of +X and +Y, so the editor can draw the same reference the G-code uses.
-// Machine-space plan points back in document (STAGE) millimetres, so previews match what the editor shows
-// whatever the origin corner, axis inversions or start offset are. G-code itself stays in machine space.
+function translateMachinePlan(plan, delta) {
+  const round = (value) => Number(value.toFixed(6));
+  const translate = (value, by) => by === 0 ? value : round(value + by);
+  const movePoint = (point) => ({
+    ...point,
+    xMm: translate(point.xMm, delta.xMm),
+    yMm: translate(point.yMm, delta.yMm)
+  });
+  const gcode = plan.gcode.replace(/^(G[01]\b.*)$/gm, (line) => line.replace(
+    /([XY])(-?(?:\d+(?:\.\d*)?|\.\d+))/g,
+    (match, axis, value) => {
+      const by = delta[axis === "X" ? "xMm" : "yMm"];
+      return by === 0 ? match : `${axis}${round(Number(value) + by)}`;
+    }
+  ));
+  return {
+    ...plan,
+    gcode,
+    paths: plan.paths.map((path) => ({ ...path, points: path.points.map(movePoint) }))
+  };
+}
+
+export function planGrblJob(input, settings) {
+  const document = createDocument(input);
+  if (!document.origin.flipX && !document.origin.flipY) return planGrblJobBase(input, settings);
+
+  const baseDocument = {
+    ...document,
+    origin: { ...document.origin, flipX: false, flipY: false }
+  };
+  const basePlan = planGrblJobBase(baseDocument, settings);
+  const baseStart = basePlan.paths.find(({ kind }) => kind === "work")?.points[0];
+  if (!baseStart) return basePlan;
+  const baseOffset = basePlan.stats.startOffsetMm;
+  const stageStart = unmapMachinePoint(baseDocument, baseStart.xMm + baseOffset.xMm, baseStart.yMm + baseOffset.yMm);
+  const startReference = mapMachinePoint(document, stageStart.xMm, stageStart.yMm);
+  const plan = planGrblJobBase(input, settings, startReference);
+  const actualStart = plan.paths.find(({ kind }) => kind === "work")?.points[0];
+  if (!actualStart) return plan;
+  // Reflect machining coordinates around the first work point without relocating the initial head position.
+  return translateMachinePlan(plan, {
+    xMm: baseStart.xMm - actualStart.xMm,
+    yMm: baseStart.yMm - actualStart.yMm
+  });
+}
+
+// Converts machine-space coordinates to stage millimetres for the machine preview.
 export function planToDocumentSpace(input, plan) {
   const document = createDocument(input);
-  const { flipX, flipY } = mapMachinePoint(document, 0, 0);
   const { xMm: offsetX, yMm: offsetY } = plan.stats.startOffsetMm ?? { xMm: 0, yMm: 0 };
-  const toDocument = (point) => ({
-    xMm: flipX ? document.widthMm - (point.xMm + offsetX) : point.xMm + offsetX,
-    yMm: flipY ? document.heightMm - (point.yMm + offsetY) : point.yMm + offsetY
-  });
+  const toDocument = (point) => unmapMachinePoint(document, point.xMm + offsetX, point.yMm + offsetY);
   return { ...plan, paths: plan.paths.map((path) => ({ ...path, points: path.points.map(toDocument) })) };
 }
 
@@ -922,10 +979,7 @@ export function jobReferencePoints(input, settings) {
   const ys = corners.map(({ yMm }) => yMm);
   return {
     bounds: { minXMm: Math.min(...xs), minYMm: Math.min(...ys), maxXMm: Math.max(...xs), maxYMm: Math.max(...ys) },
-    origin: {
-      xMm: flipX ? document.widthMm - offsetX : offsetX,
-      yMm: flipY ? document.heightMm - offsetY : offsetY
-    },
+    origin: unmapMachinePoint(document, offsetX, offsetY),
     start: unflippedStart(input, settings) ?? work[0].points[0],
     end: work.at(-1).points.at(-1),
     xDirection: flipX ? -1 : 1,
@@ -933,7 +987,7 @@ export function jobReferencePoints(input, settings) {
   };
 }
 
-function buildGrblJob(input, settings, offset) {
+function buildGrblJob(input, settings, offset, startReference = null) {
   const document = createDocument(input);
   const rasters = settings.rasters ?? {};
   const rasterMode = settings.imageMode ?? "grayscale";
@@ -985,7 +1039,9 @@ function buildGrblJob(input, settings, offset) {
     for (const element of layerElements) {
       const points = workByElement.get(element.id).flatMap(({ points: pathPoints }) => pathPoints);
       for (const point of points) {
-        if (point.xMm < 0 || point.xMm > document.widthMm || point.yMm < 0 || point.yMm > document.heightMm) {
+        const documentPoint = unmapMachinePoint(document, point.xMm, point.yMm);
+        if (documentPoint.xMm < 0 || documentPoint.xMm > document.widthMm
+          || documentPoint.yMm < 0 || documentPoint.yMm > document.heightMm) {
           throw new CommBurnRangeError("grbl.outsideWorkArea", { id: element.id }, { message: `Element ${element.id} extends outside the document work area` });
         }
       }
@@ -993,10 +1049,11 @@ function buildGrblJob(input, settings, offset) {
     if ([...workByElement.values()].every((workPaths) => workPaths.length === 0)) {
       throw new RangeError(`Layer ${layer.name} has no fillable paths at the selected spacing`);
     }
-    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint ?? { xMm: offset.xMm, yMm: offset.yMm });
+    const initialHead = startReference ?? { xMm: offset.xMm, yMm: offset.yMm };
+    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint ?? initialHead);
     for (const element of orderedElements) {
       for (const sourceWorkPath of workByElement.get(element.id)) {
-        const head = previousPoint ?? { xMm: offset.xMm, yMm: offset.yMm };
+        const head = previousPoint ?? initialHead;
         const workPath = sourceWorkPath.operation === "fill"
           ? sourceWorkPath
           : { ...sourceWorkPath, points: startClosedPathNear(sourceWorkPath.points, head) };
