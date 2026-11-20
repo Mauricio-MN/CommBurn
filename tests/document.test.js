@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, jobReferencePoints, planGrblJob, renderGrblJob, renderSvg } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, machineFrame, planGrblJob, renderGrblJob, renderSvg, stageToMachine } from "../src/core/document.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
 const embeddedSvg = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><circle cx="5" cy="5" r="4"/></svg>').toString("base64")}`;
@@ -394,4 +394,23 @@ test("axis inversion does not move the job start marker on the stage", () => {
 
   assert.deepEqual(startOn({ corner: "top-left", flipY: true }), startOn({ corner: "top-left" }));
   assert.deepEqual(startOn({ corner: "top-left", flipX: true, flipY: true }), startOn({ corner: "top-left" }));
+});
+
+test("machine zero sits on the chosen edge and the bed always maps to [0, W] x [0, H]", () => {
+  const base = { widthMm: 100, heightMm: 80, layers: [], elements: [] };
+  for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
+    for (const flipX of [false, true]) {
+      for (const flipY of [false, true]) {
+        const frame = machineFrame({ ...base, origin: { corner, flipX, flipY } });
+        const corners = [[0, 0], [100, 0], [0, 80], [100, 80]].map(([x, y]) => stageToMachine(frame, x, y));
+        const xs = corners.map(({ xMm }) => xMm);
+        const ys = corners.map(({ yMm }) => yMm);
+        assert.equal(Math.min(...xs), 0, `${corner} flipX=${flipX} flipY=${flipY}`);
+        assert.equal(Math.max(...xs), 100);
+        assert.equal(Math.min(...ys), 0);
+        assert.equal(Math.max(...ys), 80);
+        assert.equal(stageToMachine(frame, frame.originMm.xMm, frame.originMm.yMm).xMm, 0);
+      }
+    }
+  }
 });

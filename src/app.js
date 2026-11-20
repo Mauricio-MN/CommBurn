@@ -1,4 +1,4 @@
-import { createDocument, jobReferencePoints, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
+import { createDocument, jobReferencePoints, machineFrame, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { parseProject, serializeProject } from "./core/project.js";
@@ -255,12 +255,14 @@ function formatMm(value) {
   return `${Number(value.toFixed(1))}`;
 }
 
-function renderRuler(container, lengthMm, vertical = false) {
+// Labels read machine coordinates: when machine zero sits on the far edge, the ruler counts back from it.
+function renderRuler(container, lengthMm, vertical = false, zeroAtEnd = false) {
   container.replaceChildren();
   for (let index = 0; index <= 4; index += 1) {
     const mark = document.createElement("span");
     mark.className = "ruler-mark";
-    mark.textContent = formatMm(lengthMm * index / 4) + (index === 4 ? " mm" : "");
+    const valueMm = zeroAtEnd ? lengthMm * (4 - index) / 4 : lengthMm * index / 4;
+    mark.textContent = formatMm(valueMm) + (index === 4 ? " mm" : "");
     mark.style[vertical ? "top" : "left"] = `${index * 25}%`;
     container.append(mark);
   }
@@ -753,17 +755,15 @@ function visualReference(documentModel) {
   if (!objectsLayer.hasChildNodes()) return null;
   const box = objectsLayer.getBBox();
   if (box.width <= 0 && box.height <= 0) return null;
-  const { corner = "top-left", flipX = false, flipY = false } = documentModel.origin ?? {};
-  const atRight = corner.endsWith("right") !== flipX;
-  const atBottom = corner.startsWith("bottom") !== flipY;
+  const frame = machineFrame(documentModel);
   return {
     bounds: {
       minXMm: Math.max(0, box.x), minYMm: Math.max(0, box.y),
       maxXMm: Math.min(documentModel.widthMm, box.x + box.width), maxYMm: Math.min(documentModel.heightMm, box.y + box.height)
     },
-    origin: { xMm: atRight ? documentModel.widthMm : 0, yMm: atBottom ? documentModel.heightMm : 0 },
-    xDirection: atRight ? -1 : 1,
-    yDirection: atBottom ? -1 : 1,
+    origin: frame.originMm,
+    xDirection: frame.xDirection,
+    yDirection: frame.yDirection,
     start: null,
     end: null
   };
@@ -819,8 +819,9 @@ function renderPreview() {
     const { widthMm, heightMm } = currentDocument;
     artboard.setAttribute("viewBox", `0 0 ${widthMm} ${heightMm}`);
     artboard.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    renderRuler(byId("ruler-x"), widthMm);
-    renderRuler(byId("ruler-y"), heightMm, true);
+    const frame = machineFrame(currentDocument);
+    renderRuler(byId("ruler-x"), widthMm, false, frame.originMm.xMm !== 0);
+    renderRuler(byId("ruler-y"), heightMm, true, frame.originMm.yMm !== 0);
     resizeBoard(widthMm, heightMm);
     byId("canvas-size").textContent = `${widthMm} × ${heightMm} mm`;
 
