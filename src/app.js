@@ -991,7 +991,7 @@ function readJobPlacement() {
   return {
     rasters: currentRasters,
     imageMode: byId("image-mode").value,
-    ...jobStartSettings(byId("start-anchor").value),
+    ...jobStartSettings(byId("start-mode").value, byId("start-anchor").value),
     ...(workCoordinateSystem ? { workCoordinateSystem } : {})
   };
 }
@@ -2904,6 +2904,11 @@ function refreshPlacement() {
     drawJobMarkers(currentDocument);
   });
 }
+byId("start-mode").addEventListener("change", () => {
+  byId("start-anchor-field").hidden = byId("start-mode").value !== "head";
+  refreshPlacement();
+});
+byId("start-anchor-field").hidden = byId("start-mode").value !== "head";
 for (const id of ["show-job-markers", "start-anchor", "work-system"]) byId(id).addEventListener("change", refreshPlacement);
 byId("read-position").addEventListener("click", async () => {
   try {

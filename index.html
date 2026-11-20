@@ -66,8 +66,11 @@
             <option value="dither" data-i18n="ui.document.imageDither">Pontilhado (preto e branco com meios-tons)</option>
             <option value="threshold" data-i18n="ui.document.imageThreshold">Preto e branco simples</option>
           </select></label>
-          <label class="field" data-i18n="ui.document.startAnchor">Ponto do desenho sob a cabeça<select id="start-anchor">
-            <option value="table" data-i18n="ui.document.startTable">Nenhum: começar na origem da mesa</option>
+          <label class="field" data-i18n="ui.document.startMode">Posição inicial<select id="start-mode">
+            <option value="absolute" data-i18n="ui.document.startAbsolute">Coordenadas absolutas</option>
+            <option value="head" data-i18n="ui.document.startHead">Posição atual do laser</option>
+          </select></label>
+          <label class="field" id="start-anchor-field" data-i18n="ui.document.startAnchor">Ponto do desenho sob a cabeça<select id="start-anchor">
             <option value="top-left" data-i18n="ui.document.topLeft">Canto superior esquerdo</option><option value="top-right" data-i18n="ui.document.topRight">Canto superior direito</option>
             <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
             <option value="center" data-i18n="ui.document.center">Centro</option>
