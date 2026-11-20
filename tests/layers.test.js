@@ -69,10 +69,10 @@ test("GRBL uses each layer operation, feed, power, pass count, fill spacing, and
   assert.match(gcode, /M4 S50\nG1 F200/);
   assert.match(gcode, /M4 S400\nG1 F80/);
   assert.match(gcode, /M4 S200\nG1 F150/);
-  assert.equal((gcode.match(/G0 X10 Y-1/g) ?? []).length, 2);
+  assert.equal((gcode.match(/G0 X10 Y1/g) ?? []).length, 2);
   assert.equal((gcode.match(/G1 F150/g) ?? []).length, 3);
-  assert.match(gcode, /G0 X20 Y-1\nM4 S200\nG1 F150\nG1 X24 Y-1/);
-  assert.doesNotMatch(gcode, /X30 Y-1/);
+  assert.match(gcode, /G0 X20 Y1\nM4 S200\nG1 F150\nG1 X24 Y1/);
+  assert.doesNotMatch(gcode, /X30 Y1/);
 });
 
 test("GRBL plan estimates work time per operation using configured feed and passes", () => {
@@ -139,7 +139,7 @@ test("GRBL fills a 180 by 120 mm rectangle at 0.05 mm spacing", () => {
 
   assert.equal(plan.stats.workPathCount, 2401);
   assert.equal(plan.paths.find((path) => path.kind === "work").points[0].yMm, 0);
-  assert.equal(plan.paths.filter((path) => path.kind === "work").at(-1).points[0].yMm, -120);
+  assert.equal(plan.paths.filter((path) => path.kind === "work").at(-1).points[0].yMm, 120);
 });
 
 test("GRBL fills complex vector geometry at 0.05 mm spacing without a segment-count false rejection", () => {
@@ -188,8 +188,8 @@ test("GRBL fills closed vector paths and leaves holes unfilled", () => {
   const trianglePaths = triangle.paths.filter((path) => path.kind === "work");
   assert.equal(trianglePaths.length, 5);
   assert.deepEqual(trianglePaths.slice(0, 2).map((path) => path.points.map(({ xMm, yMm }) => [xMm, yMm])), [
-    [[4, -5], [14, -5]],
-    [[13, -7], [5, -7]]
+    [[4, 5], [14, 5]],
+    [[13, 7], [5, 7]]
   ]);
 
   const ring = planGrblJob({
@@ -207,10 +207,10 @@ test("GRBL fills closed vector paths and leaves holes unfilled", () => {
       layerId: "fill"
     }]
   }, machineSettings);
-  const y6Segments = ring.paths.filter((path) => path.kind === "work" && path.points[0].yMm === -6);
+  const y6Segments = ring.paths.filter((path) => path.kind === "work" && path.points[0].yMm === 6);
   assert.deepEqual(y6Segments.map((path) => path.points.map(({ xMm, yMm }) => [xMm, yMm])), [
-    [[12, -6], [9, -6]],
-    [[5, -6], [2, -6]]
+    [[12, 6], [9, 6]],
+    [[5, 6], [2, 6]]
   ]);
 });
 
@@ -249,8 +249,8 @@ test("GRBL fill algorithms create horizontal, vertical, crosshatch, and unidirec
   assert.deepEqual(horizontal.paths.filter((path) => path.kind === "work").map((path) =>
     path.points.map(({ xMm, yMm }) => [xMm, yMm])
   ), [
-    [[10, -10], [14, -10]],
-    [[14, -12], [10, -12]]
+    [[10, 10], [14, 10]],
+    [[14, 12], [10, 12]]
   ]);
   const vertical = planFor("vertical-serpentine");
   assert.equal(vertical.paths.filter((path) => path.kind === "work").length, 3);

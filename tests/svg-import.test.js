@@ -562,15 +562,15 @@ test("starting from the objects shifts the job so the chosen anchor becomes X0 Y
     assert.ok(bounds(absolute)[0] >= 20, "absolute keeps table coordinates");
     const left = bounds(planGrblJob(document(origin), settings({ startFrom: "objects", startAnchor: "top-left" })));
     const right = bounds(planGrblJob(document(origin), settings({ startFrom: "objects", startAnchor: "bottom-right" })));
-    const flipX = (origin.corner?.endsWith("right") ?? false) !== (origin.flipX ?? false);
-    const flipY = !(origin.flipY ?? false);
+    const reversedX = (origin.corner?.endsWith("right") ?? false) !== (origin.flipX ?? false);
+    const reversedY = (origin.corner?.startsWith("bottom") ?? false) !== (origin.flipY ?? false);
     // The anchor point lands on 0 and the rest of the drawing extends away from it in machine axes.
-    assert.deepEqual([left[flipX ? 2 : 0], left[flipY ? 3 : 1]], [0, 0]);
-    assert.deepEqual([right[flipX ? 0 : 2], right[flipY ? 1 : 3]], [0, 0]);
+    assert.deepEqual([left[reversedX ? 2 : 0], left[reversedY ? 3 : 1]], [0, 0]);
+    assert.deepEqual([right[reversedX ? 0 : 2], right[reversedY ? 1 : 3]], [0, 0]);
     assert.ok(Math.abs(left[2] - left[0] - 10) < 1e-9 && Math.abs(left[3] - left[1] - 6) < 1e-9);
   }
   const centered = planGrblJob(document({}), settings({ startFrom: "objects", startAnchor: "center" }));
-  assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: -23 });
+  assert.deepEqual(centered.stats.startOffsetMm, { xMm: 35, yMm: 23 });
   assert.match(planGrblJob(document({}), settings({ workCoordinateSystem: "G55" })).gcode, /^G21\nG55\nG90/);
   assert.throws(() => planGrblJob(document({}), settings({ startFrom: "nowhere" })), /start mode/);
 });
@@ -583,7 +583,7 @@ test("job reference points follow origin, axis inversion and start mode in docum
   };
   const settings = { maxSpindleSpeed: 1000 };
   const top = jobReferencePoints(base, settings);
-  assert.deepEqual([top.origin, top.xDirection, top.yDirection], [{ xMm: 0, yMm: 0 }, 1, -1]);
+  assert.deepEqual([top.origin, top.xDirection, top.yDirection], [{ xMm: 0, yMm: 0 }, 1, 1]);
   assert.deepEqual(top.start, { xMm: 30, yMm: 20 });
   const bottomRight = jobReferencePoints({ ...base, origin: { corner: "bottom-right" } }, settings);
   assert.deepEqual([bottomRight.origin, bottomRight.xDirection, bottomRight.yDirection], [{ xMm: 100, yMm: 80 }, -1, -1]);
@@ -633,9 +633,10 @@ test("origin corners preserve stage geometry while axis inversions change the ma
   const bottomRight = { ...base, origin: { corner: "bottom-right" } };
   assert.deepEqual(key(planToDocumentSpace(bottomRight, planGrblJob(bottomRight, settings)).paths), key(reference));
 
+  // Flipping both axes from top-left is the bottom-right origin, so the stage geometry is unchanged.
   const inverted = { ...base, origin: { corner: "top-left", flipX: true, flipY: true } };
   const converted = planToDocumentSpace(inverted, planGrblJob(inverted, settings)).paths;
-  assert.notDeepEqual(key(converted), key(reference));
+  assert.deepEqual(key(converted), key(reference));
   const dimensions = (paths) => {
     const points = paths.filter(({ kind }) => kind === "work").flatMap(({ points: list }) => list);
     const xs = points.map(({ xMm }) => xMm);

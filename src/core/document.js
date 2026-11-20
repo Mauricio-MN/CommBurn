@@ -255,10 +255,9 @@ export function createDocument(input = {}) {
 }
 
 export function mapDocumentPoint(document, xMm, yMm) {
-  const originAtRight = document.origin.corner.endsWith("right");
-  const originAtBottom = document.origin.corner.startsWith("bottom");
-  const flipX = originAtRight !== document.origin.flipX;
-  const flipY = originAtBottom !== document.origin.flipY;
+  const frame = machineFrame(document);
+  const flipX = frame.xDirection < 0;
+  const flipY = frame.yDirection < 0;
   return {
     xMm: flipX ? document.widthMm - xMm : xMm,
     yMm: flipY ? document.heightMm - yMm : yMm,
@@ -271,31 +270,40 @@ function normalizeZero(value) {
   return Object.is(value, -0) ? 0 : value;
 }
 
-// Machine coordinates are measured from the selected corner; top-left's default Y is corrected for GRBL.
-export function mapMachinePoint(document, xMm, yMm) {
-  const originAtRight = document.origin.corner.endsWith("right");
-  const originAtBottom = document.origin.corner.startsWith("bottom");
-  const flipX = originAtRight !== document.origin.flipX;
-  const flipY = !document.origin.flipY;
-  const xFromOrigin = originAtRight ? document.widthMm - xMm : xMm;
-  const yFromOrigin = originAtBottom ? document.heightMm - yMm : yMm;
+// The single machine reference. Its origin is the chosen corner of the stage; +X and +Y point into the bed
+// (away from that corner), so every job lies in positive coordinates. flipX/flipY reverse an axis only.
+export function machineFrame(document) {
+  // A reversed axis puts machine zero on the opposite edge, so the bed always spans [0, width] x [0, height].
+  const originAtRight = document.origin.corner.endsWith("right") !== Boolean(document.origin.flipX);
+  const originAtBottom = document.origin.corner.startsWith("bottom") !== Boolean(document.origin.flipY);
   return {
-    xMm: normalizeZero(document.origin.flipX ? -xFromOrigin : xFromOrigin),
-    yMm: normalizeZero((originAtBottom ? 1 : -1) * (document.origin.flipY ? -yFromOrigin : yFromOrigin)),
-    flipX,
-    flipY
+    originMm: { xMm: originAtRight ? document.widthMm : 0, yMm: originAtBottom ? document.heightMm : 0 },
+    xDirection: originAtRight ? -1 : 1,
+    yDirection: originAtBottom ? -1 : 1
   };
 }
 
-function unmapMachinePoint(document, xMm, yMm) {
-  const originAtRight = document.origin.corner.endsWith("right");
-  const originAtBottom = document.origin.corner.startsWith("bottom");
-  const xFromOrigin = document.origin.flipX ? -xMm : xMm;
-  const yFromOrigin = (originAtBottom ? 1 : -1) * (document.origin.flipY ? -yMm : yMm);
+export function stageToMachine(frame, xMm, yMm) {
   return {
-    xMm: normalizeZero(originAtRight ? document.widthMm - xFromOrigin : xFromOrigin),
-    yMm: normalizeZero(originAtBottom ? document.heightMm - yFromOrigin : yFromOrigin)
+    xMm: normalizeZero(frame.xDirection * (xMm - frame.originMm.xMm)),
+    yMm: normalizeZero(frame.yDirection * (yMm - frame.originMm.yMm))
   };
+}
+
+export function machineToStage(frame, xMm, yMm) {
+  return {
+    xMm: normalizeZero(frame.originMm.xMm + frame.xDirection * xMm),
+    yMm: normalizeZero(frame.originMm.yMm + frame.yDirection * yMm)
+  };
+}
+
+export function mapMachinePoint(document, xMm, yMm) {
+  const frame = machineFrame(document);
+  return { ...stageToMachine(frame, xMm, yMm), flipX: frame.xDirection < 0, flipY: frame.yDirection < 0 };
+}
+
+function unmapMachinePoint(document, xMm, yMm) {
+  return machineToStage(machineFrame(document), xMm, yMm);
 }
 
 function transformAttribute(element, centerX, centerY) {
@@ -890,64 +898,32 @@ function planGrblJobBase(input, settings, startReference = null) {
   }
   const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 }, startReference);
   if (startFrom === "absolute") return absolute;
-  const points = absolute.paths.filter(({ kind }) => kind === "work").flatMap((path) => path.points);
-  const xs = points.map((point) => point.xMm);
-  const ys = points.map((point) => point.yMm);
+  const frame = machineFrame(createDocument(input));
+  const stagePoints = absolute.paths.filter(({ kind }) => kind === "work")
+    .flatMap((path) => path.points.map((point) => machineToStage(frame, point.xMm, point.yMm)));
+  const xs = stagePoints.map((point) => point.xMm);
+  const ys = stagePoints.map((point) => point.yMm);
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const { flipX, flipY } = mapMachinePoint(createDocument(input), 0, 0);
   const horizontal = anchor.endsWith("left") ? "left" : anchor.endsWith("right") ? "right" : "center";
   const vertical = anchor.startsWith("top") ? "top" : anchor.startsWith("bottom") ? "bottom" : "center";
-  const offset = {
-    xMm: horizontal === "center" ? (minX + maxX) / 2 : (horizontal === "left") !== flipX ? minX : maxX,
-    yMm: vertical === "center" ? (minY + maxY) / 2 : (vertical === "top") !== flipY ? minY : maxY
+  const anchorStage = {
+    xMm: horizontal === "center" ? (minX + maxX) / 2 : horizontal === "left" ? minX : maxX,
+    yMm: vertical === "center" ? (minY + maxY) / 2 : vertical === "top" ? minY : maxY
   };
+  const offset = stageToMachine(frame, anchorStage.xMm, anchorStage.yMm);
   return buildGrblJob(input, settings, offset, startReference);
-}
-
-function translateMachinePlan(plan, delta) {
-  const round = (value) => Number(value.toFixed(6));
-  const translate = (value, by) => by === 0 ? value : round(value + by);
-  const movePoint = (point) => ({
-    ...point,
-    xMm: translate(point.xMm, delta.xMm),
-    yMm: translate(point.yMm, delta.yMm)
-  });
-  const gcode = plan.gcode.replace(/^(G[01]\b.*)$/gm, (line) => line.replace(
-    /([XY])(-?(?:\d+(?:\.\d*)?|\.\d+))/g,
-    (match, axis, value) => {
-      const by = delta[axis === "X" ? "xMm" : "yMm"];
-      return by === 0 ? match : `${axis}${round(Number(value) + by)}`;
-    }
-  ));
-  return {
-    ...plan,
-    gcode,
-    paths: plan.paths.map((path) => ({ ...path, points: path.points.map(movePoint) }))
-  };
 }
 
 export function planGrblJob(input, settings) {
   const document = createDocument(input);
-  if (!document.origin.flipX && !document.origin.flipY) return planGrblJobBase(input, settings);
-
-  const baseDocument = {
-    ...document,
-    origin: { ...document.origin, flipX: false, flipY: false }
-  };
-  const basePlan = planGrblJobBase(baseDocument, settings);
-  const baseStart = basePlan.paths.find(({ kind }) => kind === "work")?.points[0];
-  if (!baseStart) return basePlan;
-  const baseOffset = basePlan.stats.startOffsetMm;
-  const stageStart = unmapMachinePoint(baseDocument, baseStart.xMm + baseOffset.xMm, baseStart.yMm + baseOffset.yMm);
-  const startReference = mapMachinePoint(document, stageStart.xMm, stageStart.yMm);
-  const plan = planGrblJobBase(input, settings, startReference);
-  const actualStart = plan.paths.find(({ kind }) => kind === "work")?.points[0];
-  if (!actualStart) return plan;
-  // Reflect machining coordinates around the first work point without relocating the initial head position.
-  return translateMachinePlan(plan, {
-    xMm: baseStart.xMm - actualStart.xMm,
-    yMm: baseStart.yMm - actualStart.yMm
-  });
+  // Physical head positions are absolute machine coordinates; "objects" mode only re-zeroes the work coordinates.
+  const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 });
+  const outside = absolute.paths.some(({ points }) => points.some(({ xMm, yMm }) =>
+    xMm < -1e-6 || yMm < -1e-6 || xMm > document.widthMm + 1e-6 || yMm > document.heightMm + 1e-6));
+  if (outside) {
+    throw new CommBurnRangeError("grbl.outsideMachineArea", {}, { message: "The job would move the head outside the machine bed" });
+  }
+  return planGrblJobBase(input, settings);
 }
 
 // Converts machine-space coordinates to stage millimetres for the machine preview.

@@ -422,6 +422,7 @@ export default Object.freeze({
       noObjects: "The job has no objects in enabled layers.",
       unsupportedGeometry: "GRBL supports rectangles, editable vector paths, and text from the bundled OpenType fonts. Raster images can be vectorized locally; visual SVG objects must be reimported in editable mode to create paths.",
       outsideWorkArea: "Element {id} extends outside the document work area.",
+      outsideMachineArea: "The job would move the head outside the machine bed. Nothing was exported.",
       unsupportedTextGlyph: "The bundled vector fonts do not support character '{character}'.",
       unsupportedTextFont: "The bundled vector fonts do not support font family '{fontFamily}'.",
       textTooLong: "Text exceeds the {limit}-character vector limit.",
