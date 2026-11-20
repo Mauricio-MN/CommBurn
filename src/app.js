@@ -1,4 +1,4 @@
-import { createDocument, jobReferencePoints, machineFrame, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
+import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { parseProject, serializeProject } from "./core/project.js";
@@ -541,7 +541,6 @@ function updateMachineControls() {
   for (const button of machineJobControlButtons) button.disabled = !jobEnabled[button.dataset.machineJobControl];
   byId("preview-machine-job").disabled = machineBusy;
   for (const id of ["read-position", "set-zero", "home-machine"]) byId(id).disabled = !machineConnected || machineBusy;
-  byId("start-anchor-field").hidden = byId("start-from").value !== "objects";
 }
 
 function renderSelectionStatus() {
@@ -992,8 +991,7 @@ function readJobPlacement() {
   return {
     rasters: currentRasters,
     imageMode: byId("image-mode").value,
-    startFrom: byId("start-from").value,
-    startAnchor: byId("start-anchor").value,
+    ...jobStartSettings(byId("start-anchor").value),
     ...(workCoordinateSystem ? { workCoordinateSystem } : {})
   };
 }
@@ -2906,7 +2904,7 @@ function refreshPlacement() {
     drawJobMarkers(currentDocument);
   });
 }
-for (const id of ["show-job-markers", "start-anchor", "work-system", "start-from"]) byId(id).addEventListener("change", refreshPlacement);
+for (const id of ["show-job-markers", "start-anchor", "work-system"]) byId(id).addEventListener("change", refreshPlacement);
 byId("read-position").addEventListener("click", async () => {
   try {
     const { position } = await machineApi("/api/position");

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, jobReferencePoints, machineFrame, planGrblJob, renderGrblJob, renderSvg, stageToMachine } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, renderGrblJob, renderSvg, stageToMachine } from "../src/core/document.js";
+import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
 const embeddedSvg = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm"><circle cx="5" cy="5" r="4"/></svg>').toString("base64")}`;
@@ -411,6 +412,27 @@ test("machine zero sits on the chosen edge and the bed always maps to [0, W] x [
         assert.equal(Math.max(...ys), 80);
         assert.equal(stageToMachine(frame, frame.originMm.xMm, frame.originMm.yMm).xMm, 0);
       }
+    }
+  }
+});
+
+test("the start choice maps to one job mode and the head marker sits on the chosen point for every machine corner", () => {
+  assert.deepEqual(jobStartSettings("table"), { startFrom: "absolute", startAnchor: "top-left" });
+  assert.deepEqual(jobStartSettings("center"), { startFrom: "objects", startAnchor: "center" });
+  const base = {
+    widthMm: 100, heightMm: 80,
+    layers: [{ ...DEFAULT_LAYER, id: "l" }],
+    elements: [{ id: "r", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, layerId: "l" }]
+  };
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 };
+  const headAt = { "top-left": { xMm: 30, yMm: 20 }, "bottom-right": { xMm: 40, yMm: 26 }, center: { xMm: 35, yMm: 23 } };
+  for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
+    const table = jobReferencePoints({ ...base, origin: { corner } }, { ...settings, ...jobStartSettings("table") });
+    const zero = { "top-left": { xMm: 0, yMm: 0 }, "top-right": { xMm: 100, yMm: 0 }, "bottom-left": { xMm: 0, yMm: 80 }, "bottom-right": { xMm: 100, yMm: 80 } }[corner];
+    assert.deepEqual(table.origin, zero, `table origin ${corner}`);
+    for (const anchor of Object.keys(headAt)) {
+      const ref = jobReferencePoints({ ...base, origin: { corner } }, { ...settings, ...jobStartSettings(anchor) });
+      assert.deepEqual(ref.origin, headAt[anchor], `head on ${anchor} with origin ${corner}`);
     }
   }
 });

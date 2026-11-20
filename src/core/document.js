@@ -883,6 +883,12 @@ function withoutShadowedPaintParts(layerElements, layer) {
 
 export const START_FROM_MODES = Object.freeze(["absolute", "objects"]);
 export const START_ANCHORS = Object.freeze(["top-left", "top-right", "bottom-left", "bottom-right", "center"]);
+
+// One user choice drives both settings: "table" starts at the machine origin, any other anchor puts that drawing point under the head.
+export function jobStartSettings(choice) {
+  if (choice === "table") return { startFrom: "absolute", startAnchor: "top-left" };
+  return { startFrom: "objects", startAnchor: choice };
+}
 export const WORK_COORDINATE_SYSTEMS = Object.freeze(["G54", "G55", "G56", "G57", "G58", "G59"]);
 
 // "absolute" keeps machine coordinates from the chosen origin; "objects" makes the job start at the
