@@ -57,10 +57,14 @@
 
         <section class="panel" data-ui-module="coordinate-settings" data-extension-slot="coordinate-settings">
           <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">⌖</span><div><h2 data-i18n="ui.document.coordinates">Posição e sentido</h2><p data-i18n="ui.document.coordinatesDescription">Método manual: você escolhe a origem e os eixos; nenhum sensor é lido</p></div></div>
-          <label class="field" data-i18n="ui.document.origin">Origem das coordenadas<select id="origin">
-            <option value="top-left" data-i18n="ui.document.topLeft">Canto superior esquerdo</option><option value="top-right" data-i18n="ui.document.topRight">Canto superior direito</option>
-            <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
-          </select></label>
+          <div class="field"><span id="origin-label" data-i18n="ui.document.origin">Origem do trabalho (ponto zero)</span>
+            <div class="origin-grid" role="radiogroup" aria-labelledby="origin-label">
+              <button type="button" class="origin-dot" data-origin-corner="top-left" role="radio" aria-checked="true" aria-label="Canto superior esquerdo" data-i18n-aria-label="ui.document.topLeft"></button><span class="origin-dot" aria-hidden="true"></span><button type="button" class="origin-dot" data-origin-corner="top-right" role="radio" aria-checked="false" aria-label="Canto superior direito" data-i18n-aria-label="ui.document.topRight"></button>
+              <span class="origin-dot" aria-hidden="true"></span><span class="origin-dot" aria-hidden="true"></span><span class="origin-dot" aria-hidden="true"></span>
+              <button type="button" class="origin-dot" data-origin-corner="bottom-left" role="radio" aria-checked="false" aria-label="Canto inferior esquerdo" data-i18n-aria-label="ui.document.bottomLeft"></button><span class="origin-dot" aria-hidden="true"></span><button type="button" class="origin-dot" data-origin-corner="bottom-right" role="radio" aria-checked="false" aria-label="Canto inferior direito" data-i18n-aria-label="ui.document.bottomRight"></button>
+            </div>
+            <input id="origin" type="hidden" value="top-left">
+          </div>
           <label class="field" data-i18n="ui.document.imageMode">Imagens na gravação<select id="image-mode">
             <option value="grayscale" data-i18n="ui.document.imageGrayscale">Tons de cinza (intensidade do laser)</option>
             <option value="dither" data-i18n="ui.document.imageDither">Pontilhado (preto e branco com meios-tons)</option>
@@ -76,11 +80,7 @@
             <option value="center" data-i18n="ui.document.center">Centro</option>
           </select></label>
           <details class="advanced-details"><summary data-i18n="ui.document.advanced">Avançado</summary>
-          <div class="toggle-row">
-            <label class="toggle"><input id="flip-x" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipX">Inverter eixo X</span></label>
-            <label class="toggle"><input id="flip-y" type="checkbox"><span class="toggle-track"></span> <span data-i18n="ui.document.flipY">Inverter eixo Y</span></label>
-          </div>
-<label class="field" data-i18n="ui.document.workSystem">Sistema de coordenadas do controlador<select id="work-system">
+          <label class="field" data-i18n="ui.document.workSystem">Sistema de coordenadas do controlador<select id="work-system">
             <option value="" data-i18n="ui.document.workSystemDefault">Atual do controlador (não enviar)</option>
             <option value="G54">G54</option><option value="G55">G55</option><option value="G56">G56</option>
             <option value="G57">G57</option><option value="G58">G58</option><option value="G59">G59</option>

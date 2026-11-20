@@ -114,8 +114,19 @@ const IMAGE_EDITOR_PT_BR = {
 const widthInput = byId("width");
 const heightInput = byId("height");
 const originInput = byId("origin");
-const flipXInput = byId("flip-x");
-const flipYInput = byId("flip-y");
+const originButtons = [...document.querySelectorAll("[data-origin-corner]")];
+function setOriginCorner(corner) {
+  originInput.value = corner;
+  for (const button of originButtons) {
+    button.setAttribute("aria-checked", String(button.dataset.originCorner === corner));
+  }
+}
+for (const button of originButtons) {
+  button.addEventListener("click", () => {
+    setOriginCorner(button.dataset.originCorner);
+    originInput.dispatchEvent(new Event("change"));
+  });
+}
 const textInput = byId("text-content");
 const fontFamilyInput = byId("font-family");
 const fontSizeInput = byId("font-size");
@@ -212,7 +223,7 @@ function readDocument() {
   return createDocument({
     widthMm: Number(widthInput.value),
     heightMm: Number(heightInput.value),
-    origin: { corner: originInput.value, flipX: flipXInput.checked, flipY: flipYInput.checked },
+    origin: { corner: originInput.value },
     layers: currentDocument.layers,
     elements: currentDocument.elements
   });
@@ -1430,8 +1441,6 @@ function savePresentationState() {
       width: widthInput.value,
       height: heightInput.value,
       origin: originInput.value,
-      flipX: flipXInput.checked,
-      flipY: flipYInput.checked,
       text: textInput.value,
       fontFamily: fontFamilyInput.value,
       fontSize: fontSizeInput.value,
@@ -1465,9 +1474,7 @@ function restorePresentationState() {
   nextId = saved.nextId;
   widthInput.value = saved.values.width;
   heightInput.value = saved.values.height;
-  originInput.value = saved.values.origin;
-  flipXInput.checked = saved.values.flipX;
-  flipYInput.checked = saved.values.flipY;
+  setOriginCorner(saved.values.origin);
   textInput.value = saved.values.text;
   fontFamilyInput.value = saved.values.fontFamily;
   fontSizeInput.value = saved.values.fontSize;
@@ -1536,9 +1543,7 @@ function resetPresentationDemo() {
   toolbar.setTool("select");
   widthInput.value = String(currentDocument.widthMm);
   heightInput.value = String(currentDocument.heightMm);
-  originInput.value = currentDocument.origin.corner;
-  flipXInput.checked = currentDocument.origin.flipX;
-  flipYInput.checked = currentDocument.origin.flipY;
+  setOriginCorner(currentDocument.origin.corner);
   syncInspector();
   renderPreview();
 }
@@ -1758,9 +1763,7 @@ async function importProjectFile(file) {
   selectedId = null;
   widthInput.value = imported.widthMm;
   heightInput.value = imported.heightMm;
-  originInput.value = imported.origin.corner;
-  flipXInput.checked = imported.origin.flipX;
-  flipYInput.checked = imported.origin.flipY;
+  setOriginCorner(imported.origin.corner);
   history.reset(imported);
   syncInspector();
   renderPreview();
@@ -2288,9 +2291,7 @@ function newDocument() {
   activeLayerId = currentDocument.layers[0].id;
   widthInput.value = "180";
   heightInput.value = "120";
-  originInput.value = "top-left";
-  flipXInput.checked = false;
-  flipYInput.checked = false;
+  setOriginCorner("top-left");
   selectedId = null;
   selectedIds = [];
   textInput.value = "";
@@ -2319,13 +2320,10 @@ for (const input of [widthInput, heightInput]) {
   input.addEventListener("input", () => renderDocumentFields());
   input.addEventListener("change", () => renderDocumentFields(true));
 }
-for (const input of [originInput, flipXInput, flipYInput]) {
-  input.addEventListener("input", renderPreview);
-  input.addEventListener("change", () => {
-    renderPreview();
-    commitHistory();
-  });
-}
+originInput.addEventListener("change", () => {
+  renderPreview();
+  commitHistory();
+});
 
 function updateSelectedFromInput(input) {
   const numericProperties = {
@@ -2532,9 +2530,7 @@ function restoreDocument(snapshot) {
   currentDocument = createDocument(snapshot);
   widthInput.value = currentDocument.widthMm;
   heightInput.value = currentDocument.heightMm;
-  originInput.value = currentDocument.origin.corner;
-  flipXInput.checked = currentDocument.origin.flipX;
-  flipYInput.checked = currentDocument.origin.flipY;
+  setOriginCorner(currentDocument.origin.corner);
   if (!currentDocument.layers.some((layer) => layer.id === activeLayerId)) activeLayerId = currentDocument.layers[0].id;
   selectedIds = selectedIds.filter((id) => currentDocument.elements.some((element) => element.id === id));
   selectedId = selectedIds.at(-1) ?? null;

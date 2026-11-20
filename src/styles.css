@@ -99,6 +99,11 @@ button, summary, select { cursor: pointer; }
 .field-row .field { margin: 0; }
 .field input, .field textarea, .field select { width: 100%; min-width: 0; color: #28354b; background: #fff; border: 1px solid #e4e9f0; border-radius: 7px; outline: none; font-size: 12px; font-weight: 450; }
 .field input, .field select { height: 35px; padding: 0 9px; }
+.origin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; width: 96px; margin: 2px 0 0; }
+.origin-dot { width: 26px; height: 26px; justify-self: center; align-self: center; padding: 0; border: 1px solid #c3ccd9; border-radius: 50%; background: #fff; cursor: pointer; }
+span.origin-dot { display: block; width: 8px; height: 8px; border: 0; background: #c3ccd9; cursor: default; }
+.origin-dot[aria-checked="true"] { background: #3b6fd8; border-color: #3b6fd8; box-shadow: inset 0 0 0 5px #fff; }
+.origin-dot:focus-visible { outline: 2px solid #3b6fd8; outline-offset: 2px; }
 .field input[type="color"] { padding: 3px; }
 .field textarea { min-height: 64px; padding: 9px; resize: vertical; line-height: 1.45; }
 .field input:focus, .field textarea:focus, .field select:focus { border-color: #74a0f4; box-shadow: 0 0 0 3px #3978eb18; }
