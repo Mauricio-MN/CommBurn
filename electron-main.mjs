@@ -61,6 +61,8 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== trustedOrigin) event.preventDefault();
   });
+  // Blob downloads make Chromium replace the window title with the blob URL.
+  mainWindow.on("page-title-updated", (event) => event.preventDefault());
   mainWindow.on("closed", () => {
     mainWindow = null;
   });

@@ -33,7 +33,7 @@ export default Object.freeze({
       new: "Novo trabalho",
       import: "Importar arquivo",
       export: "Exportar",
-      saveProject: "Baixar projeto editável",
+      saveProject: "Salvar projeto editável",
       svg: "Exportar SVG",
       machine: "Máquina",
       previewGrbl: "Pré-visualizar processamento GRBL",
