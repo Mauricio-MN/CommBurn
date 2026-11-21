@@ -25,6 +25,8 @@ jobs:
         run: |
           npm run build:www
           npx cap add android
+          sed -i 's/mavenCentral()/mavenCentral()\n        maven { url "https:\/\/jitpack.io" }/' android/build.gradle
+          grep -q "jitpack.io" android/build.gradle
           VERSION=$(node -p "require('./package.json').version")
           sed -i "s/versionName \"1.0\"/versionName \"${VERSION}\"/" android/app/build.gradle
           grep -q "versionName \"${VERSION}\"" android/app/build.gradle
