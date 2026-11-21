@@ -1,6 +1,6 @@
 import { DEFAULT_LAYER, normalizeLayers } from "./layers.js";
 import { CommBurnRangeError, CommBurnTypeError } from "./i18n.js";
-import { createTextOutlinePathData, getTextFontAsset, getTextSvgFamily } from "./text-to-path.js";
+import { createTextOutlinePathData } from "./text-to-path.js";
 import { decodeRaster, rasterLevels, rasterRowRuns } from "./raster-engrave.js";
 import { SVGPathData } from "../../node_modules/svg-pathdata/lib/SVGPathData.module.js";
 
@@ -335,33 +335,20 @@ function operationLook(layer, widthMm = 0.2) {
   return `fill="none" stroke="${layer.color}" stroke-width="${widthMm}"${dash}`;
 }
 
-export function renderSvg(input, { embedFonts = true } = {}) {
+export function renderSvg(input) {
   const document = createDocument(input);
   const nodesByLayer = new Map(document.layers.map((layer) => [layer.id, []]));
-  const textFamilies = new Set(document.elements
-    .filter((element) => element.type === "text")
-    .map((element) => element.fontFamily ?? "sans-serif"));
-  const fontStyle = embedFonts && textFamilies.size > 0
-    ? `<style>${[...textFamilies].map((family) => {
-      const asset = getTextFontAsset(family);
-      if (!asset) return "";
-      const { family: svgFamily, bytes } = asset;
-      const base64 = btoa(Array.from(new Uint8Array(bytes), (byte) => String.fromCharCode(byte)).join(""));
-      return `@font-face{font-family:"${svgFamily}";src:url(data:font/woff;base64,${base64}) format("woff");font-style:normal;font-weight:400}`;
-    }).join("")}</style>`
-    : "";
   for (const element of document.elements) {
     const layer = document.layers.find((candidate) => candidate.id === element.layerId);
     if (!layer.visible) continue;
     const point = mapDocumentPoint(document, element.xMm, element.yMm);
     const fill = layer.operation === "fill" ? layer.color : "none";
     if (element.type === "text") {
-      const svgFamily = getTextSvgFamily(element.fontFamily);
       const transform = transformAttribute(element, point.xMm, point.yMm);
       const lines = element.text.normalize("NFC").replace(/\r\n?/g, "\n").replaceAll("\t", "    ").split("\n");
       const lineHeight = element.fontSizeMm * 1.2;
       const spans = lines.map((line, index) => `<tspan x="${point.xMm}" y="${point.yMm + index * lineHeight}">${escapeXml(line)}</tspan>`).join("");
-      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" font-family="${escapeXml(svgFamily)}" font-size="${element.fontSizeMm}" font-kerning="none" font-variant-ligatures="none" xml:space="preserve" ${operationLook(layer)}${transform}>${spans}</text>`);
+      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" font-family="${escapeXml(element.fontFamily ?? "sans-serif")}" font-size="${element.fontSizeMm}" font-kerning="none" font-variant-ligatures="none" xml:space="preserve" ${operationLook(layer)}${transform}>${spans}</text>`);
       continue;
     }
     const xMm = point.flipX ? point.xMm - element.widthMm : point.xMm;
@@ -444,7 +431,6 @@ export function renderSvg(input, { embedFonts = true } = {}) {
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<svg xmlns="http://www.w3.org/2000/svg" data-commburn-version="1" width="${document.widthMm}mm" height="${document.heightMm}mm" viewBox="0 0 ${document.widthMm} ${document.heightMm}">`,
-    fontStyle,
     `<g fill="#172033" stroke-linecap="round" stroke-linejoin="round">`,
     ...layerGroups,
     `</g>`,

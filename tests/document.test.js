@@ -14,7 +14,7 @@ test("document dimensions, positions, and SVG output use millimetres", () => {
   assert.equal(document.widthMm, 180);
   assert.equal(document.elements[0].xMm, 10.5);
   assert.match(renderSvg(document), /width="180mm" height="120mm"/);
-  assert.match(renderSvg(document), /<text id="label" font-family="CommBurn Sans"/);
+  assert.match(renderSvg(document), /<text id="label" font-family="sans-serif"/);
 });
 
 test("origin corner maps rectangle coordinates without sensor input", () => {
@@ -31,7 +31,7 @@ test("SVG text uses native font text and identifiers are escaped", () => {
     elements: [{ id: 'label"&', type: "text", xMm: 1, yMm: 12, text: "<&>", fontSizeMm: 4, fontFamily: "sans-serif" }]
   });
   assert.match(svg, /id="label&quot;&amp;"/);
-  assert.match(svg, /font-family="CommBurn Sans"/);
+  assert.match(svg, /font-family="sans-serif"/);
   assert.match(svg, /<tspan x="1" y="12">&lt;&amp;&gt;<\/tspan>/);
 });
 
@@ -41,6 +41,7 @@ test("SVG text preserves external font names while GRBL rejects missing outlines
   };
 
   assert.match(renderSvg(documentModel), /font-family="Liberation Serif"/);
+  assert.doesNotMatch(renderSvg(documentModel), /<style|data:font/);
   assert.throws(
     () => planGrblJob(documentModel, { maxSpindleSpeed: 1000 }),
     (error) => error.code === "grbl.unsupportedTextFont"
@@ -57,9 +58,9 @@ test("text SVG keeps native text and embeds the selected font with inverted coor
   };
   const svg = renderSvg(documentModel);
 
-  assert.match(svg, /<text id="label" font-family="CommBurn Sans" font-size="8" font-kerning="none"/);
+  assert.match(svg, /<text id="label" font-family="sans-serif" font-size="8" font-kerning="none"/);
   assert.match(svg, /<tspan x="90" y="55">AB<\/tspan>/);
-  assert.match(svg, /@font-face\{font-family:"CommBurn Sans"/);
+  assert.doesNotMatch(svg, /@font-face|data:font/);
   assert.equal(documentModel.elements[0].type, "text");
 });
 

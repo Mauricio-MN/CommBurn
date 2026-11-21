@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createTextOutlinePathData, getTextSvgFamily } from "../src/core/text-to-path.js";
+import { createTextOutlinePathData } from "../src/core/text-to-path.js";
 import { SVGPathData } from "../node_modules/svg-pathdata/lib/SVGPathData.module.js";
 
 test("OpenType text conversion creates filled vector outlines for each editor font family", () => {
@@ -16,7 +16,6 @@ test("OpenType text conversion creates filled vector outlines for each editor fo
     assert.ok(pathData.length > 0, `${fontFamily} should create an outline`);
     assert.ok(outline.commands.some(({ type }) => type === SVGPathData.QUAD_TO || type === SVGPathData.CURVE_TO));
     assert.ok(outline.commands.some(({ type }) => type === SVGPathData.CLOSE_PATH));
-    assert.ok(getTextSvgFamily(fontFamily).startsWith("CommBurn "));
   }
 });
 

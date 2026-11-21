@@ -458,7 +458,7 @@ export default Object.freeze({
       outsideWorkArea: "Element {id} extends outside the document work area.",
       outsideMachineArea: "The job would move the head outside the machine bed. Nothing was exported.",
       unsupportedTextGlyph: "The bundled vector fonts do not support character '{character}'.",
-      unsupportedTextFont: "The bundled vector fonts do not support font family '{fontFamily}'.",
+      unsupportedTextFont: "Laser text needs a bundled outline font. '{fontFamily}' is a system font: use sans-serif, serif, or monospace for G-code.",
       textTooLong: "Text exceeds the {limit}-character vector limit.",
       textTooComplex: "Text exceeds the {limit}-segment vector limit.",
     },

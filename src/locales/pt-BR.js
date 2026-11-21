@@ -459,7 +459,7 @@ export default Object.freeze({
       outsideWorkArea: "O elemento {id} está fora da área de trabalho do documento.",
       outsideMachineArea: "O trabalho moveria a cabeça para fora do leito da máquina. Nada foi exportado.",
       unsupportedTextGlyph: "As fontes vetoriais incorporadas não oferecem o caractere '{character}'.",
-      unsupportedTextFont: "As fontes vetoriais incorporadas não oferecem a família '{fontFamily}'.",
+      unsupportedTextFont: "O texto do laser precisa de uma fonte de contorno incluída. '{fontFamily}' é fonte do sistema: use sem serifa, com serifa ou monoespaçada para o G-code.",
       textTooLong: "O texto excede o limite vetorial de {limit} caracteres.",
       textTooComplex: "O texto excede o limite vetorial de {limit} segmentos.",
     },

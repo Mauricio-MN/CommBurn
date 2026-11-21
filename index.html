@@ -111,7 +111,7 @@
         <section class="panel" data-ui-module="text-creation" data-extension-slot="object-creation">
           <div class="panel-heading"><span class="section-icon icon-pink" aria-hidden="true">T</span><div><h2 data-i18n="ui.creation.textTitle">Criar texto</h2><p data-i18n="ui.creation.textDescription">Escreva e posicione sua mensagem</p></div></div>
           <label class="field" data-i18n="ui.creation.textLabel">Texto<textarea id="text-content" rows="3" placeholder="Digite seu texto..." data-i18n-placeholder="ui.creation.textPlaceholder"></textarea></label>
-          <label class="field" data-i18n="ui.creation.font">Fonte<select id="font-family"><option value="sans-serif" data-i18n="ui.creation.sansSerif">Sem serifa</option><option value="serif" data-i18n="ui.creation.serif">Com serifa</option><option value="monospace" data-i18n="ui.creation.monospace">Monoespaçada</option></select></label>
+          <label class="field" data-i18n="ui.creation.font">Fonte<input id="font-family" type="text" list="font-family-options" value="sans-serif" autocomplete="off" spellcheck="false"></label>
           <label class="field" data-i18n="ui.creation.textSize">Tamanho do texto<span class="input-with-unit"><input id="font-size" type="number" min="0.1" step="0.1" value="8"><span>mm</span></span></label>
           <button class="button button-secondary full-width" id="add-text" type="button" data-tooltip="Criar um novo objeto de texto. Atalho Ctrl+Enter." data-i18n-title="ui.creation.addTextTooltip" data-i18n="ui.creation.addText">Adicionar texto</button>
         </section>
@@ -133,7 +133,7 @@
           <div id="single-selection-fields">
           <div id="text-inspector-fields">
             <label class="field" data-i18n="ui.inspector.text">Texto<textarea id="object-text" rows="2"></textarea></label>
-            <label class="field" data-i18n="ui.inspector.font">Fonte<select id="object-font"><option value="sans-serif" data-i18n="ui.creation.sansSerif">Sem serifa</option><option value="serif" data-i18n="ui.creation.serif">Com serifa</option><option value="monospace" data-i18n="ui.creation.monospace">Monoespaçada</option></select></label>
+            <label class="field" data-i18n="ui.inspector.font">Fonte<input id="object-font" type="text" list="font-family-options" autocomplete="off" spellcheck="false"></label>
           </div>
           <div id="path-inspector-fields" hidden>
             <p class="help-text" data-i18n="ui.inspector.pathHelp">Edite nós e alças em uma janela visual dedicada.</p>
@@ -359,6 +359,20 @@
       </div>
       <button class="context-menu-item context-menu-danger" type="button" role="menuitem" data-context-action="remove" data-i18n="ui.inspector.remove">Remover</button>
     </div>
+    <datalist id="font-family-options">
+      <option value="sans-serif" data-i18n="ui.creation.sansSerif">Sem serifa</option>
+      <option value="serif" data-i18n="ui.creation.serif">Com serifa</option>
+      <option value="monospace" data-i18n="ui.creation.monospace">Monoespaçada</option>
+      <option value="Arial"></option>
+      <option value="Helvetica"></option>
+      <option value="Times New Roman"></option>
+      <option value="Georgia"></option>
+      <option value="Verdana"></option>
+      <option value="Courier New"></option>
+      <option value="Segoe UI"></option>
+      <option value="Roboto"></option>
+      <option value="DejaVu Sans"></option>
+    </datalist>
     <script src="./vendor/svgson.js"></script>
     <script type="module" src="./src/app.js"></script>
   </body>

@@ -1,16 +1,21 @@
 import { CommBurnRangeError } from "./i18n.js";
 import * as opentype from "../../node_modules/opentype.js/dist/opentype.mjs";
 
-const FONT_BY_FAMILY = Object.freeze({
-  "sans-serif": { file: "DejaVuSans.woff", svgFamily: "CommBurn Sans" },
-  serif: { file: "DejaVuSerif.woff", svgFamily: "CommBurn Serif" },
-  monospace: { file: "DejaVuSansMono.woff", svgFamily: "CommBurn Mono" }
+// Only these bundled OpenType files produce laser outlines. Other font names (system fonts) are
+// stored and drawn by name, but cannot be converted into G-code geometry.
+const OUTLINE_FILE_BY_NAME = Object.freeze({
+  "sans-serif": "DejaVuSans.woff",
+  serif: "DejaVuSerif.woff",
+  monospace: "DejaVuSansMono.woff",
+  "CommBurn Sans": "DejaVuSans.woff",
+  "CommBurn Serif": "DejaVuSerif.woff",
+  "CommBurn Mono": "DejaVuSansMono.woff"
 });
 const MAX_TEXT_CHARACTERS = 5000;
 const MAX_TEXT_SEGMENTS = 100000;
 
-const loadedFonts = new Map(await Promise.all(Object.entries(FONT_BY_FAMILY).map(async ([family, definition]) => {
-  const url = new URL(`./fonts/${definition.file}`, import.meta.url);
+const loadedFiles = new Map(await Promise.all([...new Set(Object.values(OUTLINE_FILE_BY_NAME))].map(async (file) => {
+  const url = new URL(`./fonts/${file}`, import.meta.url);
   let bytes;
   if (import.meta.url.startsWith("file:")) {
     const { readFile } = await import("node:fs/promises");
@@ -18,11 +23,18 @@ const loadedFonts = new Map(await Promise.all(Object.entries(FONT_BY_FAMILY).map
     bytes = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
   } else {
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Unable to load bundled font: ${definition.file}`);
+    if (!response.ok) throw new Error(`Unable to load bundled font: ${file}`);
     bytes = await response.arrayBuffer();
   }
-  return [family, { ...definition, bytes, font: opentype.parse(bytes) }];
+  return [file, opentype.parse(bytes)];
 })));
+
+function resolveOutlineFont(fontFamily = "sans-serif") {
+  // A single bundled name only: a font list such as "Arial, sans-serif" would silently
+  // outline with a different face than the one shown on screen.
+  const name = String(fontFamily).trim().replace(/^(["'])(.*)\1$/, "$2");
+  return Object.hasOwn(OUTLINE_FILE_BY_NAME, name) ? loadedFiles.get(OUTLINE_FILE_BY_NAME[name]) : null;
+}
 
 function unsupportedGlyph(character) {
   return new CommBurnRangeError(
@@ -32,18 +44,8 @@ function unsupportedGlyph(character) {
   );
 }
 
-export function getTextSvgFamily(fontFamily = "sans-serif") {
-  return FONT_BY_FAMILY[fontFamily]?.svgFamily ?? fontFamily;
-}
-
-export function getTextFontAsset(fontFamily = "sans-serif") {
-  const font = loadedFonts.get(fontFamily);
-  if (!font) return null;
-  return { family: font.svgFamily, bytes: font.bytes };
-}
-
 export function createTextOutlinePathData(element) {
-  const font = loadedFonts.get(element.fontFamily ?? "sans-serif")?.font;
+  const font = resolveOutlineFont(element.fontFamily ?? "sans-serif");
   if (!font) throw new CommBurnRangeError("grbl.unsupportedTextFont", { fontFamily: element.fontFamily });
   if (typeof element.text !== "string") throw new TypeError("Text element must contain a string");
   if (element.text.length > MAX_TEXT_CHARACTERS) {

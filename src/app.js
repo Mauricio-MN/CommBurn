@@ -147,6 +147,33 @@ const textInput = byId("text-content");
 const fontFamilyInput = byId("font-family");
 const fontSizeInput = byId("font-size");
 const artboard = byId("artboard");
+const fontOptionsList = byId("font-family-options");
+let localFontsRequested = false;
+
+// Blank input falls back to the generic sans-serif family, matching the default in new projects.
+function normalizeFontFamily(value) {
+  return String(value ?? "").trim() || "sans-serif";
+}
+
+// Local Font Access exposes installed fonts where the browser supports it (Chromium/Electron).
+// Other platforms keep the typed-name flow: the browser resolves whatever is installed.
+async function suggestLocalFonts() {
+  if (localFontsRequested || typeof window.queryLocalFonts !== "function") return;
+  localFontsRequested = true;
+  try {
+    const families = [...new Set((await window.queryLocalFonts()).map((font) => font.family))].sort();
+    for (const family of families) {
+      const option = document.createElement("option");
+      option.value = family;
+      fontOptionsList.append(option);
+    }
+  } catch {
+    // Permission denied or unsupported: the typed-name flow still works.
+  }
+}
+for (const input of [fontFamilyInput, byId("object-font")]) {
+  input.addEventListener("focus", suggestLocalFonts);
+}
 const boardFrame = byId("board-frame");
 const stage = boardFrame.parentElement;
 const zoomOutButton = byId("zoom-out");
@@ -906,7 +933,7 @@ function renderPreview() {
     resizeBoard(widthMm, heightMm);
     byId("canvas-size").textContent = `${widthMm} × ${heightMm} mm`;
 
-    const svgDocument = new DOMParser().parseFromString(renderSvg({ ...currentDocument, origin: STAGE_ORIGIN }, { embedFonts: false }), "image/svg+xml");
+    const svgDocument = new DOMParser().parseFromString(renderSvg({ ...currentDocument, origin: STAGE_ORIGIN }), "image/svg+xml");
     if (svgDocument.querySelector("parsererror")) throw new Error("Não foi possível desenhar este documento.");
     const selection = new Set(selectedIds);
     const nodes = Array.from(svgDocument.querySelectorAll("[id]"), (node) => {
@@ -942,7 +969,7 @@ function addText() {
     id: `texto-${nextId++}`,
     type: "text",
     text: textInput.value || "Seu texto",
-    fontFamily: fontFamilyInput.value,
+    fontFamily: normalizeFontFamily(fontFamilyInput.value),
     xMm: numberFrom(byId("new-x"), "Posição X"),
     yMm: numberFrom(byId("new-y"), "Posição Y"),
     fontSizeMm: numberFrom(fontSizeInput, "Tamanho do texto", Number.MIN_VALUE),
@@ -1547,7 +1574,7 @@ function savePresentationState() {
       height: heightInput.value,
       origin: originInput.value,
       text: textInput.value,
-      fontFamily: fontFamilyInput.value,
+      fontFamily: normalizeFontFamily(fontFamilyInput.value),
       fontSize: fontSizeInput.value,
       newX: byId("new-x").value,
       newY: byId("new-y").value,
@@ -2461,7 +2488,7 @@ function updateSelectedFromInput(input) {
   } else if (input.id === "object-text") {
     updateSelected({ text: input.value }, true, false);
   } else if (input.id === "object-font") {
-    updateSelected({ fontFamily: input.value });
+    updateSelected({ fontFamily: normalizeFontFamily(input.value) });
   }
 }
 
