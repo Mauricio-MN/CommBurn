@@ -85,7 +85,7 @@ export function activate(context) {
   button.addEventListener("click", () => apply(!enabled));
   apply(readEnabled());
 
-  const removeButton = context.registerExtension("topbar-end", button);
+  const removeButton = context.registerExtension("menu-bar", button);
 
   return () => {
     document.documentElement.classList.remove("editor-theme");
