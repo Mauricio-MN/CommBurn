@@ -1,9 +1,3 @@
-ext {
-    compileSdkVersion = project.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
-    minSdkVersion = project.hasProperty('minSdkVersion') ? rootProject.ext.minSdkVersion : 24
-    targetSdkVersion = project.hasProperty('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 36
-}
-
 buildscript {
     repositories {
         google()
@@ -15,10 +9,10 @@ apply plugin: 'com.android.library'
 
 android {
     namespace 'org.commburn.usbserial'
-    compileSdk compileSdkVersion
+    compileSdk 36
     defaultConfig {
-        minSdkVersion minSdkVersion
-        targetSdkVersion targetSdkVersion
+        minSdk 24
+        targetSdk 36
         versionCode 1
         versionName '0.1.0'
     }
