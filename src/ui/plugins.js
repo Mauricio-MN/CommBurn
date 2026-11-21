@@ -12,6 +12,7 @@ const defaultI18n = createI18n({
 
 const extensionSlots = new Set([
   "toolbar-tools",
+  "menu-bar",
   "topbar-end",
   "document-settings",
   "coordinate-settings",

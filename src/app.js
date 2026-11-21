@@ -2895,13 +2895,8 @@ function addLayer() {
 }
 
 function flashActiveLayer() {
-  const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
-  if (!layer) return;
   const nodes = [...objects.querySelectorAll(`[data-layer-id="${CSS.escape(activeLayerId)}"]`)];
-  for (const node of nodes) {
-    node.classList.remove("layer-glow");
-    node.style.setProperty("--layer-glow", layer.color);
-  }
+  for (const node of nodes) node.classList.remove("layer-glow");
   // Forces a reflow so the animation restarts when the same layer is selected again.
   void objects.getBoundingClientRect();
   for (const node of nodes) node.classList.add("layer-glow");
