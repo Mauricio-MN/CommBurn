@@ -335,8 +335,11 @@ function operationLook(layer, widthMm = 0.2) {
   return `fill="none" stroke="${layer.color}" stroke-width="${widthMm}"${dash}`;
 }
 
+// The SVG export mirrors the stage (top-left, no flips), so origin and axis settings only affect G-code.
+const STAGE_ORIGIN = { corner: "top-left", flipX: false, flipY: false };
+
 export function renderSvg(input) {
-  const document = createDocument(input);
+  const document = createDocument({ ...input, origin: STAGE_ORIGIN });
   const nodesByLayer = new Map(document.layers.map((layer) => [layer.id, []]));
   for (const element of document.elements) {
     const layer = document.layers.find((candidate) => candidate.id === element.layerId);

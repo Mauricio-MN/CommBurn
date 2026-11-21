@@ -17,13 +17,13 @@ test("document dimensions, positions, and SVG output use millimetres", () => {
   assert.match(renderSvg(document), /<text id="label" font-family="sans-serif"/);
 });
 
-test("origin corner maps rectangle coordinates without sensor input", () => {
+test("origin corner does not change SVG export, which matches the stage", () => {
   const svg = renderSvg({
     widthMm: 100, heightMm: 80,
     origin: { corner: "bottom-right" },
     elements: [{ id: "box", type: "rect", xMm: 10, yMm: 5, widthMm: 20, heightMm: 15 }]
   });
-  assert.match(svg, /<rect id="box" x="70" y="60" width="20" height="15"/);
+  assert.match(svg, /<rect id="box" x="10" y="5" width="20" height="15"/);
 });
 
 test("SVG text uses native font text and identifiers are escaped", () => {
@@ -48,7 +48,7 @@ test("SVG text preserves external font names while GRBL rejects missing outlines
   );
 });
 
-test("text SVG keeps native text and embeds the selected font with inverted coordinates", () => {
+test("text SVG keeps native text and embeds the selected font at stage coordinates", () => {
   const documentModel = {
     widthMm: 100,
     heightMm: 80,
@@ -59,7 +59,7 @@ test("text SVG keeps native text and embeds the selected font with inverted coor
   const svg = renderSvg(documentModel);
 
   assert.match(svg, /<text id="label" font-family="sans-serif" font-size="8" font-kerning="none"/);
-  assert.match(svg, /<tspan x="90" y="55">AB<\/tspan>/);
+  assert.match(svg, /<tspan x="10" y="25">AB<\/tspan>/);
   assert.doesNotMatch(svg, /@font-face|data:font/);
   assert.equal(documentModel.elements[0].type, "text");
 });
@@ -237,7 +237,7 @@ test("SVG paths remain editable, metric, and honor origin inversion", async () =
       id: "outline", type: "path", pathData, xMm: 5, yMm: 4, widthMm: 10, heightMm: 5
     }]
   });
-  assert.match(svg, /<path id="outline" d="M35 26L25 26L25 21z"/);
+  assert.match(svg, /<path id="outline" d="M5 4L15 4L15 9z"/);
   assert.throws(() => createDocument({
     elements: [{ type: "path", xMm: 0, yMm: 0, pathData: "M nope" }]
   }), /path/i);
@@ -494,4 +494,20 @@ test("GRBL curves use tolerance-based segments without zero-length moves", () =>
     .flatMap(({ points }) => points.slice(1).map((point, index) => Math.hypot(point.xMm - points[index].xMm, point.yMm - points[index].yMm)));
 
   assert.ok(Math.min(...lengths) > 0.5);
+});
+
+test("SVG export matches the stage regardless of origin and axis settings", () => {
+  const base = {
+    widthMm: 100, heightMm: 80,
+    layers: [{ ...DEFAULT_LAYER, id: "l", color: "#000000" }],
+    elements: [
+      { id: "p", type: "path", layerId: "l", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6, pathData: "M0 0 L10 0 L10 6 Z" },
+      { id: "r", type: "rect", layerId: "l", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6 }
+    ]
+  };
+  const stage = renderSvg(base);
+  const flipped = renderSvg({ ...base, origin: { corner: "bottom-right", flipX: true, flipY: true } });
+  assert.equal(flipped, stage);
+  assert.match(stage, /<path id="p" d="M30 20L40 20L40 26z"/);
+  assert.match(stage, /<rect id="r" x="30" y="20" width="10" height="6"/);
 });

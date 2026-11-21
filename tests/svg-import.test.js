@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSync, stringify } from "svgson";
-import { getSvgViewport, importSvgTree, sanitizeSvgForVisual, validateSvgSource } from "../src/core/svg-import.js";
+import { getSvgViewport, importSvgTree, nextImportIdPrefix, sanitizeSvgForVisual, validateSvgSource } from "../src/core/svg-import.js";
 import { jobReferencePoints, planGrblJob, planToDocumentSpace, renderSvg } from "../src/core/document.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
@@ -684,4 +684,10 @@ test("origin corners preserve stage geometry while axis inversions change the ma
   dimensions(converted).forEach((value, index) => {
     assert.ok(Math.abs(value - dimensions(reference)[index]) < 1e-9);
   });
+});
+
+test("import id prefixes skip prefixes already used by existing elements", () => {
+  assert.equal(nextImportIdPrefix([], 2), "svg-2");
+  assert.equal(nextImportIdPrefix(["svg-2-1", "svg-2-2"], 2), "svg-3");
+  assert.equal(nextImportIdPrefix(["svg-20-1"], 2), "svg-2");
 });

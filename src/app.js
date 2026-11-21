@@ -25,7 +25,8 @@ import {
 } from "./ui/field-validation.js";
 import enCatalog from "./locales/en.js";
 import ptBrCatalog from "./locales/pt-BR.js";
-import { fitImportedToTable, importSvgTree, validateSvgSource } from "./core/svg-import.js";
+import { moveImagesToLayer, vectorTargetLayers } from "./core/image-layers.js";
+import { fitImportedToTable, importSvgTree, nextImportIdPrefix, validateSvgSource } from "./core/svg-import.js";
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 import {
   createMachinePlayback,
@@ -1878,17 +1879,20 @@ async function importSvgFile(file) {
   const importOptions = {
     layerId: activeLayerId,
     fallbackLayer: layer,
-    idPrefix: `svg-${nextId}`
+    idPrefix: nextImportIdPrefix(currentDocument.elements.map((element) => element.id), nextId)
   };
   if (mode === "editable") {
     importOptions.forceLayerId = activeLayerId;
   }
   importOptions.splitShapes = byId("svg-import-split").checked;
   const imported = fitImportedToTable(importSvgTree(tree, importOptions), currentDocument.widthMm, currentDocument.heightMm);
-  const elements = [...currentDocument.elements, ...imported.elements];
+  // Raster images never share a layer with vectors, so SVG images get their own layer.
+  const imageLayer = imported.elements.some((element) => element.type === "image") ? createLayerRecord() : null;
+  const importedElements = imageLayer ? moveImagesToLayer(imported.elements, imageLayer.id) : imported.elements;
+  const elements = [...currentDocument.elements, ...importedElements];
   currentDocument = createDocument({
     ...currentDocument,
-    layers: [...currentDocument.layers, ...imported.layers.filter((candidate) => candidate.id !== activeLayerId)],
+    layers: [...currentDocument.layers, ...imported.layers.filter((candidate) => candidate.id !== activeLayerId), ...(imageLayer ? [imageLayer] : [])],
     elements
   });
   widthInput.value = currentDocument.widthMm;
@@ -1899,13 +1903,14 @@ async function importSvgFile(file) {
   syncInspector();
   renderPreview();
   commitHistory();
+  const imageNotice = imageLayer ? ` ${i18n.t("ui.dialogs.svgImagesNewLayer")}` : "";
   const styleCount = imported.ignoredStyles.reduce((total, entry) => total + entry.count, 0);
   const importNotice = imported.scale < 1
     ? `SVG importado: ${imported.elements.length} objeto(s), reduzido a ${(imported.scale * 100).toFixed(1)}% para caber na mesa. A área de trabalho foi mantida.`
     : `SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`;
-  showNotice(styleCount
+  showNotice(`${styleCount
     ? `${importNotice} ${i18n.t("ui.import.styleIgnored", { count: styleCount })}`
-    : importNotice);
+    : importNotice}${imageNotice}`);
 }
 
 async function importProjectFile(file) {
@@ -2383,6 +2388,13 @@ async function updateImageVectorPreview() {
   }
 }
 
+function syncImageVectorTargetOptions(sourceId) {
+  const select = byId("image-vector-target");
+  select.replaceChildren(new Option(i18n.t("ui.dialogs.newLayer"), "new"),
+    ...vectorTargetLayers(currentDocument.layers, currentDocument.elements, sourceId).map((layer) => new Option(layer.name, layer.id)));
+  select.value = "new";
+}
+
 function openImageVectorizer() {
   try {
     const source = currentDocument.elements.find((element) => element.id === selectedId);
@@ -2392,6 +2404,7 @@ function openImageVectorizer() {
     const layer = currentDocument.layers.find((candidate) => candidate.id === source.layerId);
     if (!layer || layer.locked) throw new Error("Desbloqueie a camada da imagem antes de convertê-la.");
     imageVectorSourceId = source.id;
+    syncImageVectorTargetOptions(source.id);
     syncImageVectorStyleControls();
     byId("image-vector-dialog").showModal();
     void updateImageVectorPreview();
@@ -2403,19 +2416,25 @@ function openImageVectorizer() {
 function applyImageVectorization() {
   try {
     const source = currentDocument.elements.find((element) => element.id === imageVectorSourceId);
-    const layer = currentDocument.layers.find((candidate) => candidate.id === source?.layerId);
     if (!source || source.type !== "image" || !imageVectorResult) {
       throw new Error("Gere uma prévia vetorial válida para uma imagem raster antes de aplicar.");
     }
-    if (!layer || layer.locked) throw new Error("A camada da imagem não está disponível.");
+    const targetValue = byId("image-vector-target").value;
+    const newLayer = targetValue === "new" ? createLayerRecord() : null;
+    const targetLayerId = newLayer?.id ?? targetValue;
+    if (!newLayer && !vectorTargetLayers(currentDocument.layers, currentDocument.elements, source.id).some((layer) => layer.id === targetLayerId)) {
+      throw new Error(i18n.t("ui.dialogs.targetLayerUnavailable"));
+    }
     const styles = imageVectorStyleOptions();
     const convertedElements = imageVectorResult.elements
       .filter((element) => imageVectorColors.has(element.color))
-      .map((element) => ({ ...element, ...styles }));
+      .map((element) => ({ ...element, ...styles, layerId: targetLayerId }));
     if (!convertedElements.length) throw new Error("Selecione ao menos uma cor para converter.");
     const convertedIds = convertedElements.map((element) => element.id);
+    const snapshot = readDocument();
     currentDocument = createDocument({
-      ...readDocument(),
+      ...snapshot,
+      layers: newLayer ? [...currentDocument.layers, newLayer] : currentDocument.layers,
       elements: [
         ...currentDocument.elements.filter((element) => element.id !== source.id),
         ...convertedElements
@@ -2423,7 +2442,7 @@ function applyImageVectorization() {
     });
     selectedIds = convertedIds.length ? [convertedIds.at(-1)] : [];
     selectedId = convertedIds.at(-1) ?? null;
-    activeLayerId = currentDocument.elements.find((element) => element.id === selectedId)?.layerId ?? layer.id;
+    activeLayerId = targetLayerId;
     syncInspector();
     renderPreview();
     commitHistory();
@@ -2974,7 +2993,7 @@ function showShortcuts() {
   byId("shortcuts-dialog").showModal();
 }
 
-function addLayer() {
+function createLayerRecord() {
   const layerIndex = currentDocument.layers.length + 1;
   const layer = {
     id: `layer-${crypto.randomUUID()}`,
@@ -2992,6 +3011,11 @@ function addLayer() {
     color: ["#3978eb", "#e58a2d", "#32a77f", "#9665d8", "#d65d8c", "#5a718f"][layerIndex % 6]
   };
   generatedLayerNames.set(layer.id, { kind: "numbered" });
+  return layer;
+}
+
+function addLayer() {
+  const layer = createLayerRecord();
   currentDocument = createDocument({ ...currentDocument, layers: [...currentDocument.layers, layer] });
   activeLayerId = layer.id;
   selectedId = null;

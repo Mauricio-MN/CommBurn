@@ -22,7 +22,7 @@ test("CLI exports a validated document to SVG", async (t) => {
   const svg = await readFile(outputPath, "utf8");
   assert.match(svg, /width="42mm" height="30mm"/);
   assert.match(svg, /<text id="label" font-family="sans-serif"/);
-  assert.match(svg, /<tspan x="37" y="8">Teste<\/tspan>/);
+  assert.match(svg, /<tspan x="5" y="8">Teste<\/tspan>/);
   assert.doesNotMatch(svg, /@font-face|data:font/);
 });
 

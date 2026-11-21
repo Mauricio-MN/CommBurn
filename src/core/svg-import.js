@@ -991,6 +991,14 @@ function strokeOutlineShape(shape, widthMm) {
   };
 }
 
+// Imported ids are `${prefix}-${n}`; a prefix is free only when no existing id starts with it.
+export function nextImportIdPrefix(existingIds, startIndex) {
+  const ids = [...existingIds];
+  let index = startIndex;
+  while (ids.some((id) => id.startsWith(`svg-${index}-`))) index += 1;
+  return `svg-${index}`;
+}
+
 export function importSvgTree(inputRoot, {
   layerId = "layer-engrave",
   idPrefix = "svg",
