@@ -395,6 +395,14 @@ test("bold and italic text layers produce G-code paths and job markers", () => {
   }, { maxSpindleSpeed: 1000 });
   assert.ok(plan("bold", "normal").paths.some(({ kind }) => kind === "work"));
   assert.ok(plan("normal", "italic").paths.some(({ kind }) => kind === "work"));
+  const refs = (fontWeight, fontStyle) => jobReferencePoints({
+    widthMm: 100, heightMm: 100, origin: "top-left", layers: [layer],
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 20, text: "Ag", fontSizeMm: 8, fontFamily: "sans-serif", fontWeight, fontStyle, layerId: "L1" }]
+  }, { maxSpindleSpeed: 1000 });
+  for (const [weight, style] of [["bold", "normal"], ["normal", "italic"]]) {
+    const { start, end } = refs(weight, style);
+    assert.ok(start && end, "start and end markers stay visible for styled text");
+  }
 });
 
 test("GRBL rotated text follows the rotated outline instead of the upright outline", () => {
