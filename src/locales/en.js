@@ -158,6 +158,10 @@ export default Object.freeze({
       addShape: "Add shape",
       addShapeTooltip: "Create the shape using the type and dimensions above."
     },
+    contextMenu: {
+      properties: "Edit properties",
+      copy: "Copy"
+    },
     inspector: {
       title: "Object properties",
       selected: "Selected object",

@@ -47,6 +47,14 @@ export class CanvasController {
     svg.addEventListener("pointermove", (event) => this.onPointerMove(event));
     svg.addEventListener("pointerup", (event) => this.onPointerUp(event));
     svg.addEventListener("pointercancel", (event) => this.onPointerUp(event));
+    svg.addEventListener("contextmenu", (event) => this.onContextMenu(event));
+  }
+
+  onContextMenu(event) {
+    const node = event.target.closest("[data-id]");
+    if (!node) return;
+    event.preventDefault();
+    this.callbacks.contextMenu?.({ id: node.dataset.id, clientX: event.clientX, clientY: event.clientY });
   }
 
   onPointerDown(event) {
@@ -81,6 +89,7 @@ export class CanvasController {
       toggle: event.shiftKey,
       keepExisting: currentIds.includes(id) && !event.shiftKey
     });
+    if (tool === "edit") this.callbacks.revealInspector?.();
     if (["select", "edit"].includes(tool)) return;
     const selectedIds = this.callbacks.getSelectedIds();
     if (!selectedIds.includes(id)) return;

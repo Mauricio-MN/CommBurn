@@ -2419,6 +2419,42 @@ byId("add-shape").addEventListener("click", () => {
 removeButton.addEventListener("click", removeSelectedObject);
 byId("duplicate-selection").addEventListener("click", duplicateSelectedObject);
 
+function revealInspector() {
+  const inspector = byId("object-inspector");
+  if (inspector.hidden) return;
+  inspector.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+const objectContextMenu = byId("object-context-menu");
+
+function hideObjectContextMenu() {
+  objectContextMenu.hidden = true;
+}
+
+function showObjectContextMenu({ id, clientX, clientY }) {
+  if (!selectedIds.includes(id)) selectObjectWithOptions(id);
+  objectContextMenu.hidden = false;
+  const { width, height } = objectContextMenu.getBoundingClientRect();
+  objectContextMenu.style.left = `${Math.max(0, Math.min(clientX, window.innerWidth - width - 8))}px`;
+  objectContextMenu.style.top = `${Math.max(0, Math.min(clientY, window.innerHeight - height - 8))}px`;
+  objectContextMenu.querySelector("button")?.focus();
+}
+
+objectContextMenu.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-context-action]")?.dataset.contextAction;
+  hideObjectContextMenu();
+  if (action === "properties") revealInspector();
+  if (action === "duplicate") duplicateSelectedObject();
+  if (action === "copy") copySelectedObjects();
+  if (action === "remove") removeSelectedObject();
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!objectContextMenu.hidden && !objectContextMenu.contains(event.target)) hideObjectContextMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideObjectContextMenu();
+});
+
 function removeSelectedObject() {
   if (selectedIds.length === 0) return;
   const selected = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
@@ -2668,6 +2704,7 @@ byId("object-layer").addEventListener("change", (event) => {
 
 const toolbar = connectToolbar(byId("action-toolbar"), (toolId) => {
   activeTool = toolId;
+  if (toolId === "edit") revealInspector();
   const button = byId("action-toolbar").querySelector(`[data-tool="${toolId}"]`);
   const tool = TOOLS.find((candidate) => candidate.id === toolId);
   const label = i18n.t(tool?.labelKey ?? "ui.tools.select.label");
@@ -2686,6 +2723,8 @@ new CanvasController(artboard, {
   selectMany: selectObjects,
   deselect: () => selectObject(null),
   notify: showNotice,
+  revealInspector,
+  contextMenu: showObjectContextMenu,
   update: (id, patch) => {
     selectedId = id;
     const element = currentDocument.elements.find((candidate) => candidate.id === id);

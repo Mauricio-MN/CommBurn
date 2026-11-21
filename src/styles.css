@@ -311,3 +311,8 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
   .statusbar { padding: 9px 12px; }
 }
 .advanced-details { margin: 6px 0; font-size: 11px; color: #5b6b82; } .advanced-details > summary { cursor: pointer; padding: 4px 0; font-weight: 600; } .advanced-details[open] > summary { margin-bottom: 6px; }
+.context-menu { position: fixed; z-index: 1000; display: flex; flex-direction: column; min-width: 180px; padding: 4px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 30, 50, 0.18); }
+.context-menu[hidden] { display: none; }
+.context-menu-item { text-align: left; padding: 7px 10px; border: 0; border-radius: 5px; background: none; font: inherit; font-size: 13px; color: #1f2b3d; cursor: pointer; }
+.context-menu-item:hover, .context-menu-item:focus-visible { background: #eef3fb; outline: none; }
+.context-menu-danger { color: #b42318; }

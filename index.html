@@ -342,6 +342,12 @@
       <p data-i18n="ui.dialogs.shortcutsHelp">Atalhos de edição não interceptam a digitação em campos de texto.</p>
       <table><tbody id="shortcuts-list"></tbody></table>
     </dialog>
+    <div class="context-menu" id="object-context-menu" role="menu" hidden>
+      <button class="context-menu-item" type="button" role="menuitem" data-context-action="properties" data-i18n="ui.contextMenu.properties">Editar propriedades</button>
+      <button class="context-menu-item" type="button" role="menuitem" data-context-action="duplicate" data-i18n="ui.inspector.duplicate">Duplicar</button>
+      <button class="context-menu-item" type="button" role="menuitem" data-context-action="copy" data-i18n="ui.contextMenu.copy">Copiar</button>
+      <button class="context-menu-item context-menu-danger" type="button" role="menuitem" data-context-action="remove" data-i18n="ui.inspector.remove">Remover</button>
+    </div>
     <script src="./vendor/svgson.js"></script>
     <script type="module" src="./src/app.js"></script>
   </body>
