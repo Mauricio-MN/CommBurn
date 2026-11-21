@@ -570,10 +570,13 @@ function renderActiveToolStatus() {
   byId("active-tool-status").textContent = i18n.t("ui.canvas.activeTool", { tool: label, key });
 }
 
+let controllerLaserMode = null;
+
 function applyControllerSettings(settings) {
   const maxSpindleSpeed = settings?.$30;
   if (typeof maxSpindleSpeed !== "number" || !Number.isFinite(maxSpindleSpeed) || maxSpindleSpeed <= 0) return false;
   byId("machine-smax").value = String(maxSpindleSpeed);
+  controllerLaserMode = settings?.$32 === 0 || settings?.$32 === 1 ? settings.$32 : null;
   return true;
 }
 
@@ -1010,6 +1013,7 @@ function readJobPlacement() {
 function createMachinePlan({ allowDefaultSmax = false, documentModel = readDocument() } = {}) {
   return planGrblJob(documentModel, {
     maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax),
+    controllerLaserMode,
     ...readJobPlacement()
   });
 }
@@ -2941,7 +2945,7 @@ startMachineButton.addEventListener("click", async () => {
     if (!machineSimulation && !safetyCheckbox.checked) throw new Error(i18n.t("ui.machine.confirmSafety"));
     const documentModel = readDocument();
     await prepareRasters(documentModel);
-    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), ...readJobPlacement() };
+    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), controllerLaserMode, ...readJobPlacement() };
     const plan = planGrblJob(documentModel, settings);
     const result = await machineApi("/api/job", "POST", {
       safetyConfirmed: safetyCheckbox.checked,

@@ -444,3 +444,43 @@ test("the start choice maps to one job mode and the head marker sits on the chos
     }
   }
 });
+
+test("GRBL vector power follows junction speed only when controller laser mode is off", () => {
+  const input = {
+    widthMm: 100,
+    heightMm: 100,
+    layers: [{ ...DEFAULT_LAYER, id: "cut" }],
+    elements: [{
+      id: "square", type: "path", xMm: 10, yMm: 10, widthMm: 40, heightMm: 40,
+      pathData: "M0 0 L40 0 L40 40 L0 40 Z",
+      layerId: "cut"
+    }]
+  };
+  const sValues = (controllerLaserMode) => {
+    const plan = planGrblJob(input, { feedMmPerMinute: 1200, maxSpindleSpeed: 1000, controllerLaserMode });
+    return plan.gcode.split("\n").filter((line) => /^G1 X.* S\d+$/.test(line))
+      .map((line) => Number(line.match(/S(\d+)$/)[1]));
+  };
+
+  assert.deepEqual(sValues(1), []);
+  const compensated = sValues(0);
+  assert.ok(compensated.length > 0);
+  assert.ok(Math.min(...compensated) < 300);
+});
+
+test("GRBL curves use tolerance-based segments without zero-length moves", () => {
+  const plan = planGrblJob({
+    widthMm: 100,
+    heightMm: 100,
+    layers: [{ ...DEFAULT_LAYER, id: "engrave" }],
+    elements: [{
+      id: "circle", type: "path", xMm: 10, yMm: 10, widthMm: 40, heightMm: 40,
+      pathData: "M0 20 C0 9 9 0 20 0 C31 0 40 9 40 20 C40 31 31 40 20 40 C9 40 0 31 0 20 Z",
+      layerId: "engrave"
+    }]
+  }, { feedMmPerMinute: 1200, maxSpindleSpeed: 1000 });
+  const lengths = plan.paths.filter(({ kind }) => kind === "work")
+    .flatMap(({ points }) => points.slice(1).map((point, index) => Math.hypot(point.xMm - points[index].xMm, point.yMm - points[index].yMm)));
+
+  assert.ok(Math.min(...lengths) > 0.5);
+});

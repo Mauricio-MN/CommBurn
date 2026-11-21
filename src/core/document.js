@@ -448,6 +448,34 @@ function mapPoints(document, points) {
   return points.map(([xMm, yMm]) => mapMachinePoint(document, xMm, yMm));
 }
 
+// Curves are split until their control points lie within this chord error (mm), so long smooth arcs get long segments.
+const CURVE_TOLERANCE_MM = 0.02;
+
+function distanceToLine(point, start, end) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const length = Math.hypot(dx, dy);
+  if (length === 0) return Math.hypot(point[0] - start[0], point[1] - start[1]);
+  return Math.abs((point[0] - start[0]) * dy - (point[1] - start[1]) * dx) / length;
+}
+
+function flattenCubic(p0, p1, p2, p3, out, depth = 0) {
+  const flat = Math.max(distanceToLine(p1, p0, p3), distanceToLine(p2, p0, p3)) <= CURVE_TOLERANCE_MM;
+  if (flat || depth >= 16) {
+    out.push(p3);
+    return;
+  }
+  const middle = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const p01 = middle(p0, p1);
+  const p12 = middle(p1, p2);
+  const p23 = middle(p2, p3);
+  const p012 = middle(p01, p12);
+  const p123 = middle(p12, p23);
+  const mid = middle(p012, p123);
+  flattenCubic(p0, p01, p012, mid, out, depth + 1);
+  flattenCubic(mid, p123, p23, p3, out, depth + 1);
+}
+
 function flattenVectorPath(element) {
   const source = new SVGPathData(element.pathData);
   const bounds = source.getBounds();
@@ -477,28 +505,7 @@ function flattenVectorPath(element) {
       const control1 = [command.x1, command.y1];
       const control2 = [command.x2, command.y2];
       const end = [command.x, command.y];
-      const length = distanceBetween(
-        { xMm: current[0], yMm: current[1] },
-        { xMm: control1[0], yMm: control1[1] }
-      ) + distanceBetween(
-        { xMm: control1[0], yMm: control1[1] },
-        { xMm: control2[0], yMm: control2[1] }
-      ) + distanceBetween(
-        { xMm: control2[0], yMm: control2[1] },
-        { xMm: end[0], yMm: end[1] }
-      );
-      const steps = Math.max(4, Math.min(200, Math.ceil(length * Math.max(scaleX, scaleY) / 0.25)));
-      for (let step = 1; step <= steps; step += 1) {
-        const t = step / steps;
-        const oneMinusT = 1 - t;
-        const point = [0, 1].map((axis) =>
-          oneMinusT ** 3 * current[axis]
-          + 3 * oneMinusT ** 2 * t * control1[axis]
-          + 3 * oneMinusT * t ** 2 * control2[axis]
-          + t ** 3 * end[axis]
-        );
-        points.push(toDocumentPoint(point));
-      }
+      flattenCubic(toDocumentPoint(current), toDocumentPoint(control1), toDocumentPoint(control2), toDocumentPoint(end), points);
       current = end;
     } else if (command.type === SVGPathData.CLOSE_PATH) {
       if (points?.length > 1 && (current[0] !== subpathStart[0] || current[1] !== subpathStart[1])) {
@@ -514,7 +521,9 @@ function flattenVectorPath(element) {
   }
   if (points?.length > 1) paths.push(points);
   // Subpaths whose points all coincide (e.g. a glyph contour of "M x y Z") have no area and would fail fill.
-  const areaPaths = paths.filter((path) => path.some(([x, y]) => x !== path[0][0] || y !== path[0][1]));
+  // Repeated points produce zero-length G1 moves that waste planner blocks.
+  const withoutRepeats = (path) => path.filter(([x, y], index) => index === 0 || x !== path[index - 1][0] || y !== path[index - 1][1]);
+  const areaPaths = paths.map(withoutRepeats).filter((path) => path.some(([x, y]) => x !== path[0][0] || y !== path[0][1]));
   if (areaPaths.flat().length > 100000) {
     throw new RangeError(`O caminho ${element.id} excede 100.000 segmentos GRBL; simplifique a geometria antes de gerar a prévia.`);
   }
@@ -954,6 +963,41 @@ export function jobReferencePoints(input, settings) {
   };
 }
 
+// With GRBL laser mode ($32=1) the controller already scales power with speed. Otherwise the planner's speed
+// at each junction is estimated from GRBL's junction-deviation rule, and power follows that speed so the dose per mm stays constant.
+const MIN_DYNAMIC_POWER_FRACTION = 0.05;
+const DEFAULT_ACCELERATION_MM_PER_S2 = 500;
+const DEFAULT_JUNCTION_DEVIATION_MM = 0.01;
+
+function dynamicPowerFractions(points, feedMmPerMinute, settings) {
+  if (settings.controllerLaserMode !== 0 || points.length < 2) return null;
+  const feedMmPerSecond = feedMmPerMinute / 60;
+  const acceleration = settings.accelerationMmPerSecond2 ?? DEFAULT_ACCELERATION_MM_PER_S2;
+  const deviation = settings.junctionDeviationMm ?? DEFAULT_JUNCTION_DEVIATION_MM;
+  const directions = points.slice(1).map((point, index) => {
+    const dx = point.xMm - points[index].xMm;
+    const dy = point.yMm - points[index].yMm;
+    const length = Math.max(Math.hypot(dx, dy), 1e-9);
+    return { x: dx / length, y: dy / length };
+  });
+  const junctionSpeeds = [feedMmPerSecond];
+  for (let index = 1; index < directions.length; index += 1) {
+    const cos = directions[index - 1].x * directions[index].x + directions[index - 1].y * directions[index].y;
+    if (cos < -0.999) {
+      junctionSpeeds.push(0);
+      continue;
+    }
+    const sinHalf = Math.sqrt(0.5 * (1 - cos));
+    const speed = sinHalf < 1e-6 ? feedMmPerSecond : Math.sqrt(acceleration * deviation * sinHalf / (1 - sinHalf));
+    junctionSpeeds.push(Math.min(feedMmPerSecond, speed));
+  }
+  junctionSpeeds.push(feedMmPerSecond);
+  return directions.map((_, index) => Math.max(
+    MIN_DYNAMIC_POWER_FRACTION,
+    Math.min(junctionSpeeds[index], junctionSpeeds[index + 1]) / feedMmPerSecond
+  ));
+}
+
 function buildGrblJob(input, settings, offset, startReference = null) {
   const document = createDocument(input);
   const rasters = settings.rasters ?? {};
@@ -1049,9 +1093,12 @@ function buildGrblJob(input, settings, offset, startReference = null) {
         const pathPower = workPath.powerPercent ?? powerPercent;
         gcode.push(`M4 S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
         gcode.push(`G1 F${feedMmPerMinute}`);
+        const speedFractions = workPath.segmentPowerFractions ? null : dynamicPowerFractions(shiftedPath.points, feedMmPerMinute, settings);
         for (const [pointIndex, point] of shiftedPath.points.slice(1).entries()) {
           const fraction = workPath.segmentPowerFractions?.[pointIndex];
-          const spindle = fraction === undefined ? "" : ` S${Math.round(maxSpindleSpeed * powerPercent / 100 * fraction)}`;
+          let spindle = "";
+          if (fraction !== undefined) spindle = ` S${Math.round(maxSpindleSpeed * powerPercent / 100 * fraction)}`;
+          else if (speedFractions) spindle = ` S${Math.round(maxSpindleSpeed * pathPower / 100 * speedFractions[pointIndex])}`;
           gcode.push(`G1 X${point.xMm} Y${point.yMm}${spindle}`);
         }
         paths.push(shiftedPath);
