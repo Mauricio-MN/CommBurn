@@ -421,4 +421,5 @@ test("text creation and inspector expose bold and italic toggles", () => {
   assert.match(app, /fontWeight: byId\("new-font-bold"\)\.checked \? "bold" : "normal"/);
   assert.match(app, /fontStyle: byId\("new-font-italic"\)\.checked \? "italic" : "normal"/);
   assert.match(app, /input\.id === "object-font-bold"/);
+  assert.match(app, /xMm: numberFrom\(byId\("new-x"\), "Posição X"\)/);
 });

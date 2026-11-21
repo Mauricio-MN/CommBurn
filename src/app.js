@@ -1010,6 +1010,7 @@ function addText() {
     fontFamily: normalizeFontFamily(fontFamilyInput.value),
     fontWeight: byId("new-font-bold").checked ? "bold" : "normal",
     fontStyle: byId("new-font-italic").checked ? "italic" : "normal",
+    xMm: numberFrom(byId("new-x"), "Posição X"),
     yMm: numberFrom(byId("new-y"), "Posição Y"),
     fontSizeMm: numberFrom(fontSizeInput, "Tamanho do texto", Number.MIN_VALUE),
     rotationDeg: 0,
