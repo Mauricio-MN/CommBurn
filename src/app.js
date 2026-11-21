@@ -611,6 +611,12 @@ function reportControllerSettings(result) {
 }
 
 async function restoreMachineConnection() {
+  // Static hosts such as the Android bundle have no Node server, so the machine panel is not offered there.
+  const probe = await fetch("/api/connection-status").catch(() => null);
+  if (!probe || probe.status === 404) {
+    byId("machine-panel").hidden = true;
+    return;
+  }
   try {
     const state = await machineApi("/api/connection-status");
     machineConnected = state.connected;

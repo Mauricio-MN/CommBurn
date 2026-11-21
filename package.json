@@ -46,6 +46,7 @@
       "server.mjs",
       "index.html",
       "commburn-icon.svg",
+      "mouse-cursor-presentation.svg",
       "LICENSE",
       "LICENSE-PLUGINS",
       "src/**/*",
