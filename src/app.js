@@ -562,6 +562,7 @@ function updateMachineControls() {
   serialPathInput.disabled = machineConnected;
   byId("baud-rate").disabled = machineConnected;
   byId("read-machine-settings").disabled = !machineConnected || machineSimulation || machineBusy;
+  byId("read-machine-area").disabled = !machineConnected || machineSimulation || machineBusy;
   byId("machine-safety-check").hidden = machineSimulation;
   startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy;
   startMachineButton.textContent = i18n.t(machineSimulation ? "ui.machine.simulateJob" : "ui.machine.sendJob");
@@ -3057,6 +3058,25 @@ byId("read-machine-settings").addEventListener("click", async () => {
     reportControllerSettings(result);
   } catch (error) {
     reportControllerSettings({ settingsError: formatError(error) });
+  }
+});
+// $130 and $131 are the maximum travel in mm. Only the bed size changes; origin and axis direction stay user-controlled.
+byId("read-machine-area").addEventListener("click", async () => {
+  try {
+    const { settings, settingsError } = await machineApi("/api/settings", "POST", {});
+    const width = settings?.$130;
+    const height = settings?.$131;
+    const valid = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
+    if (!valid(width) || !valid(height)) {
+      showNotice(settingsError ?? i18n.t("ui.machine.areaInvalid"));
+      return;
+    }
+    widthInput.value = String(width);
+    heightInput.value = String(height);
+    renderDocumentFields(true);
+    showNotice(i18n.t("ui.machine.areaRead", { width, height }));
+  } catch (error) {
+    showNotice(formatError(error));
   }
 });
 simulateMachineButton.addEventListener("click", async () => {
