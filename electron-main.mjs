@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
-import { cp, mkdir, readdir, access, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startServer } from "./server.mjs";
+import { syncBundledPlugins } from "./src/core/bundled-plugins.mjs";
 
 const PROJECT_SAVE_LIMIT_BYTES = 50 * 1024 * 1024;
 const savedProjectPaths = new Set();
@@ -41,32 +42,7 @@ ipcMain.handle("commburn:save-project", async (event, request) => {
 
 async function installBundledPlugins(pluginDirectory) {
   if (!app.isPackaged) return;
-  const markerPath = join(app.getPath("userData"), "bundled-plugins-seeded");
-  try {
-    await access(markerPath);
-    return;
-  } catch {
-    // First run: seed bundled plugins below.
-  }
-  const bundledDirectory = join(process.resourcesPath, "bundled-plugins");
-  let entries;
-  try {
-    entries = await readdir(bundledDirectory, { withFileTypes: true });
-  } catch (error) {
-    if (error.code === "ENOENT") return;
-    throw error;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const target = join(pluginDirectory, entry.name);
-    try {
-      await access(target);
-      continue;
-    } catch {
-      await cp(join(bundledDirectory, entry.name), target, { recursive: true });
-    }
-  }
-  await writeFile(markerPath, "");
+  await syncBundledPlugins(join(process.resourcesPath, "bundled-plugins"), pluginDirectory);
 }
 
 function createWindow() {
