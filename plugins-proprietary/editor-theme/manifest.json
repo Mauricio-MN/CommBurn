@@ -1,6 +1,6 @@
 {
   "id": "editor-theme",
-  "name": "Editor Theme (Dark)",
+  "name": "Tema Escuro",
   "version": "1.0.0",
   "apiVersion": 1,
   "entry": "plugin.mjs"

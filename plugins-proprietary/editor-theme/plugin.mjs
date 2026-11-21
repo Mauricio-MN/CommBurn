@@ -73,7 +73,7 @@ export function activate(context) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "button button-secondary";
-  button.textContent = "Tema escuro";
+  button.textContent = "Tema Escuro";
 
   let enabled = false;
   const apply = (next) => {
@@ -85,7 +85,7 @@ export function activate(context) {
   button.addEventListener("click", () => apply(!enabled));
   apply(readEnabled());
 
-  const removeButton = context.registerExtension("menu-bar", button);
+  const removeButton = context.registerExtension("topbar-end", button);
 
   return () => {
     document.documentElement.classList.remove("editor-theme");

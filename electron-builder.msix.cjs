@@ -17,11 +17,4 @@ module.exports = {
   },
   artifactName: `\${productName} \${version}-${channel}.\${ext}`,
   extraResources: [...build.extraResources, bundledTheme],
-  extraResources: [
-    ...build.extraResources,
-    {
-      from: "plugins-proprietary/editor-theme",
-      to: "bundled-plugins/editor-theme",
-    },
-  ],
 };
