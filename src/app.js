@@ -13,6 +13,7 @@ import { PathEditor } from "./ui/path-editor.js";
 import { getInspectorSections } from "./ui/inspector-state.js";
 import { loadDesktopPlugins } from "./ui/plugins.js";
 import { createNativeMachineApi, isNativeApp } from "./machine/native-machine.js";
+import { machineAreaFromSettings } from "./machine/grbl.js";
 import { translateDom } from "./ui/dom-i18n.js";
 import { clampZoom, scrollDeltaToKeepAnchor, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, zoomByFactor, zoomPercent } from "./ui/zoom.js";
 import {
@@ -3064,17 +3065,15 @@ byId("read-machine-settings").addEventListener("click", async () => {
 byId("read-machine-area").addEventListener("click", async () => {
   try {
     const { settings, settingsError } = await machineApi("/api/settings", "POST", {});
-    const width = settings?.$130;
-    const height = settings?.$131;
-    const valid = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
-    if (!valid(width) || !valid(height)) {
+    const area = machineAreaFromSettings(settings);
+    if (!area) {
       showNotice(settingsError ?? i18n.t("ui.machine.areaInvalid"));
       return;
     }
-    widthInput.value = String(width);
-    heightInput.value = String(height);
+    widthInput.value = String(area.widthMm);
+    heightInput.value = String(area.heightMm);
     renderDocumentFields(true);
-    showNotice(i18n.t("ui.machine.areaRead", { width, height }));
+    showNotice(i18n.t("ui.machine.areaRead", { width: area.widthMm, height: area.heightMm }));
   } catch (error) {
     showNotice(formatError(error));
   }

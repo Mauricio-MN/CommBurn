@@ -1,5 +1,28 @@
 export const jobStoppedMessage = "Job stopped; controller was reset";
 
+// GRBL 1.1 separates status fields with "|" and GRBL 0.9 with ","; both start with "<State".
+const statusPattern = /^<(Idle|Run|Jog|Hold(?::\d+)?|Alarm(?::\d+)?|Door(?::\d+)?|Check|Home|Sleep|Tool|Queue)(?=[|,>])/i;
+const settingPattern = /^\$(\d+)=([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)$/i;
+
+export function parseStatusState(response) {
+  return statusPattern.exec(response)?.[1] ?? null;
+}
+
+export function parseSettingLine(response) {
+  const setting = settingPattern.exec(response);
+  if (!setting) return null;
+  const value = Number(setting[2]);
+  return Number.isFinite(value) ? [Number(setting[1]), value] : null;
+}
+
+// $130 and $131 are the maximum travel of X and Y in mm. Both must be positive to describe the bed.
+export function machineAreaFromSettings(settings) {
+  const isPositive = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
+  const widthMm = settings?.$130;
+  const heightMm = settings?.$131;
+  return isPositive(widthMm) && isPositive(heightMm) ? { widthMm, heightMm } : null;
+}
+
 function watchdogIntervalMs(timeoutMs) {
   return Math.min(250, Math.max(5, Math.floor(timeoutMs / 4)));
 }
@@ -35,9 +58,9 @@ export class GrblConnection {
     for (const line of lines) {
       const response = line.trim();
       if (!response) continue;
-      const status = /^<(Idle|Run|Jog|Hold(?::\d+)?|Alarm(?::\d+)?|Door(?::\d+)?|Check|Home|Sleep|Tool)(?:\||>)/i.exec(response);
-      if (status) {
-        this.status = status[1];
+      const state = parseStatusState(response);
+      if (state) {
+        this.status = state;
         this.updatePosition(response);
         if (this.pending && /^(Run|Hold|Jog|Home)/.test(this.status)) this.pending.lastProgressAt = Date.now();
         this.statusWaiter?.resolve(this.status);
@@ -46,10 +69,9 @@ export class GrblConnection {
       } else if (/^error:/i.test(response)) {
         this.rejectPending(new Error(`Controller rejected command: ${response}`));
       } else {
-        const setting = /^\$(\d+)=([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)$/i.exec(response);
+        const setting = parseSettingLine(response);
         if (setting) {
-          const value = Number(setting[2]);
-          if (Number.isFinite(value)) this.grblSettings.set(Number(setting[1]), value);
+          this.grblSettings.set(setting[0], setting[1]);
         } else if (/^ok$/i.test(response)) {
           this.pending?.resolve();
         }
@@ -59,7 +81,7 @@ export class GrblConnection {
 
   updatePosition(report) {
     const read = (name) => {
-      const match = new RegExp(`[|<]${name}:([+-]?\\d+(?:\\.\\d+)?),([+-]?\\d+(?:\\.\\d+)?)`).exec(report);
+      const match = new RegExp(`[|<,]${name}:([+-]?\\d+(?:\\.\\d+)?),([+-]?\\d+(?:\\.\\d+)?)`).exec(report);
       return match ? { xMm: Number(match[1]), yMm: Number(match[2]) } : null;
     };
     const offset = read("WCO");

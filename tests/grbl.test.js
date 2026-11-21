@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { GrblConnection } from "../src/machine/grbl.js";
+import { GrblConnection, machineAreaFromSettings } from "../src/machine/grbl.js";
 
 class MockSerialPort extends EventEmitter {
   writes = [];
@@ -220,3 +220,35 @@ test("GRBL position, zero and homing are explicit commands that read or set work
   assert.deepEqual(serialPort.writes.filter((line) => line.endsWith("\n")), ["G10 L20 P2 X0 Y0\n", "$H\n"]);
   await assert.rejects(connection.setZeroHere(7), /1 to 6/);
 });
+
+test("status reports from GRBL 0.9 (comma fields) and 1.1 (pipe fields) update state and position", () => {
+  const connection = new GrblConnection(new MockSerialPort());
+  connection.receive(Buffer.from("<Idle,MPos:10.000,20.000,0.000,WPos:10.000,20.000,0.000>\r\n"));
+  assert.equal(connection.status, "Idle");
+  assert.deepEqual(connection.position.machine, { xMm: 10, yMm: 20 });
+
+  connection.receive(Buffer.from("<Run|MPos:1.500,2.500,0.000|FS:500,0>\r\n"));
+  assert.equal(connection.status, "Run");
+  assert.deepEqual(connection.position.machine, { xMm: 1.5, yMm: 2.5 });
+
+  connection.receive(Buffer.from("<Queue,MPos:3.000,4.000,0.000>\r\n"));
+  assert.equal(connection.status, "Queue");
+  assert.deepEqual(connection.position.machine, { xMm: 3, yMm: 4 });
+
+  connection.receive(Buffer.from("<Alarm:1|MPos:0.000,0.000,0.000>\r\n"));
+  assert.equal(connection.status, "Alarm:1");
+});
+
+test("controller settings from GRBL 0.9 and 1.1 are read and produce the bed area", () => {
+  const connection = new GrblConnection(new MockSerialPort());
+  connection.receive(Buffer.from("$30=1000\r\n$32=1\r\n$130=400.000\r\n$131=300\r\n$22=1\r\nok\r\n"));
+  assert.equal(connection.settings.$130, 400);
+  assert.equal(connection.settings.$131, 300);
+  assert.deepEqual(machineAreaFromSettings(connection.settings), { widthMm: 400, heightMm: 300 });
+
+  connection.receive(Buffer.from("$130=0\r\n$131=abc\r\n"));
+  assert.equal(machineAreaFromSettings(connection.settings), null);
+  assert.equal(machineAreaFromSettings({ $130: 400 }), null);
+  assert.equal(machineAreaFromSettings(undefined), null);
+});
+
