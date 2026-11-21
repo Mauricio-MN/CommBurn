@@ -59,7 +59,8 @@ export default Object.freeze({
       tooltip: "Import SVG as editable vectors by color or on the active layer.",
       button: "Import file",
       confirm: "Import SVG",
-      cancel: "Cancel import"
+      cancel: "Cancel import",
+      styleIgnored: "{count} SVG style setting(s) were not applied (filters, gradients, hidden elements, or unsupported properties)."
     },
     document: {
       title: "Work area",

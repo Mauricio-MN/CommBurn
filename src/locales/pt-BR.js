@@ -59,7 +59,8 @@ export default Object.freeze({
       tooltip: "Importe SVG como vetores editáveis por cor ou na camada atual.",
       button: "Importar arquivo",
       confirm: "Importar SVG",
-      cancel: "Cancelar importação"
+      cancel: "Cancelar importação",
+      styleIgnored: "{count} configuração(ões) de estilo do SVG não foram aplicadas (filtros, gradientes, elementos ocultos ou propriedades sem suporte)."
     },
     document: {
       title: "Área de trabalho",

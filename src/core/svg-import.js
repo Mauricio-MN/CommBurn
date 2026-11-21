@@ -10,12 +10,16 @@ const PRESENTATION_ATTRIBUTES = new Set([
   "fill", "stroke", "stroke-width", "stroke-dasharray", "fill-rule", "stroke-linecap", "stroke-linejoin",
   "opacity", "fill-opacity", "stroke-opacity"
 ]);
+// Style properties that become presentation attributes; other properties are ignored and reported.
+const STYLE_ATTRIBUTE_PROPERTIES = new Set([...PRESENTATION_ATTRIBUTES, "font-size", "font-family", "text-anchor", "dominant-baseline"]);
+const TEXT_ONLY_STYLE_PROPERTIES = new Set(["font-size", "font-family", "text-anchor", "dominant-baseline"]);
+const PAINT_STYLE_PROPERTIES = new Set(["fill", "stroke"]);
 const GEOMETRY_ATTRIBUTES = {
   rect: new Set(["x", "y", "width", "height", "rx", "ry", "transform"]),
   circle: new Set(["cx", "cy", "r", "transform"]),
   ellipse: new Set(["cx", "cy", "rx", "ry", "transform"]),
   line: new Set(["x1", "y1", "x2", "y2", "transform"]),
-  path: new Set(["d", "transform", "data-power-percent", "style"]),
+  path: new Set(["d", "transform", "data-power-percent"]),
   polygon: new Set(["points", "transform"]),
   polyline: new Set(["points", "transform"]),
   text: new Set(["x", "y", "font-size", "font-family", "text-anchor", "dominant-baseline", "transform"]),
@@ -377,33 +381,157 @@ function checkedAttributes(node, allowed, label) {
   }
 }
 
-function parseInlinePathStyle(attributes) {
-  if (attributes.style === undefined) return { attributes, hasStyle: false };
-  const parsed = { ...attributes };
-  const declarations = parsed.style;
-  delete parsed.style;
-  validateVisualCss(declarations, "<path> style");
-  for (const declaration of declarations.split(";")) {
+const SIMPLE_SELECTOR = /^(\*|[a-z][\w-]*)?((?:\.[\w-]+|#[\w-]+)*)$/i;
+
+function parseSimpleSelector(text) {
+  const selector = text.trim();
+  const match = SIMPLE_SELECTOR.exec(selector);
+  if (!selector || !match) fail(`unsupported CSS selector "${selector}"; use element, class, or id selectors.`);
+  const classes = [];
+  const ids = [];
+  for (const [, prefix, name] of match[2].matchAll(/([.#])([\w-]+)/g)) (prefix === "." ? classes : ids).push(name);
+  const tag = match[1] && match[1] !== "*" ? match[1].toLowerCase() : null;
+  return { tag, classes, ids, specificity: [ids.length, classes.length, tag ? 1 : 0] };
+}
+
+function selectorMatches(selector, node) {
+  if (selector.tag && node.name.toLowerCase() !== selector.tag) return false;
+  const classNames = (node.attributes?.class ?? "").split(/\s+/);
+  return selector.classes.every((name) => classNames.includes(name))
+    && selector.ids.every((id) => node.attributes?.id === id);
+}
+
+function compareSpecificity(left, right) {
+  for (let index = 0; index < 3; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
+}
+
+function parseDeclarations(text, label) {
+  const declarations = [];
+  for (const declaration of text.split(";")) {
     if (!declaration.trim()) continue;
     const separator = declaration.indexOf(":");
-    if (separator <= 0) fail("<path> style contains an invalid declaration.");
+    if (separator <= 0) fail(`${label} contains an invalid declaration.`);
     const property = declaration.slice(0, separator).trim().toLowerCase();
-    const value = declaration.slice(separator + 1).trim();
+    let value = declaration.slice(separator + 1).trim();
+    const important = /!\s*important$/i.test(value);
+    value = value.replace(/!\s*important$/i, "").trim();
+    if (!value) fail(`${label} ${property} has no value.`);
+    declarations.push({ property, value, important });
+  }
+  return declarations;
+}
+
+function parseStylesheet(css) {
+  const text = decodeXmlEntities(css, "<style>").replace(/\/\*[\s\S]*?\*\//g, "");
+  validateVisualCss(text, "<style>");
+  const rulePattern = /([^{}]*)\{([^{}]*)\}/g;
+  if (text.replace(rulePattern, "").trim()) {
+    fail("<style> contains an unsupported CSS rule; use element, class, or id selectors.");
+  }
+  const rules = [];
+  for (const [, selectorText, body] of text.matchAll(rulePattern)) {
+    const declarations = parseDeclarations(body, "<style>");
+    for (const selectorPart of selectorText.split(",")) {
+      const selector = parseSimpleSelector(selectorPart);
+      rules.push({ selector, declarations, order: rules.length });
+    }
+  }
+  return rules.sort((left, right) => compareSpecificity(left.selector.specificity, right.selector.specificity) || left.order - right.order);
+}
+
+// Resolves <style> rules and style attributes into presentation attributes so editable import
+// keeps supported paints and reports ignored properties instead of rejecting the file.
+function flattenSvgStyles(inputRoot) {
+  const ignored = new Map();
+  const styledNodes = new WeakSet();
+  const note = (code, property) => {
+    const key = `${code}:${property ?? ""}`;
+    const entry = ignored.get(key) ?? { code, ...(property ? { property } : {}), count: 0 };
+    entry.count += 1;
+    ignored.set(key, entry);
+  };
+  const stylesheetRules = [];
+  const collectStylesheets = (node, depth) => {
+    if (depth > 64) fail("the SVG exceeds the 64-level nesting limit.");
+    if (node.type !== "element") return;
+    if (node.name.toLowerCase() === "style") {
+      const css = (node.children ?? []).map((child) => child.value ?? "").join("");
+      stylesheetRules.push(...parseStylesheet(css));
+    }
+    for (const child of node.children ?? []) collectStylesheets(child, depth + 1);
+  };
+  collectStylesheets(inputRoot, 1);
+  stylesheetRules.sort((left, right) => compareSpecificity(left.selector.specificity, right.selector.specificity) || left.order - right.order);
+
+  const applyDeclaration = (node, attributes, declaration, state) => {
+    const { property, value } = declaration;
+    const lower = value.toLowerCase();
+    if (property === "transform") fail("transform in a style declaration is not supported; use the transform attribute.");
+    if (property === "display" && lower === "none") { state.hidden = true; return; }
+    if (property === "visibility" && lower === "hidden") { state.hidden = true; return; }
+    if (["inherit", "initial", "unset"].includes(lower)) return;
+    if (!STYLE_ATTRIBUTE_PROPERTIES.has(property)) {
+      note("svg.style.propertyIgnored", property);
+      return;
+    }
+    if (TEXT_ONLY_STYLE_PROPERTIES.has(property) && node.name !== "text") {
+      note("svg.style.propertyIgnored", property);
+      return;
+    }
+    if (PAINT_STYLE_PROPERTIES.has(property) && (/url\s*\(/i.test(value) || lower === "currentcolor")) {
+      delete attributes[property];
+      note("svg.style.paintIgnored", property);
+      return;
+    }
     if (property === "stroke-width") {
       const match = /^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)\s*(?:mm|cm|in|px|pt|pc|%)?$/i.exec(value);
       if (!match || !Number.isFinite(Number(match[1])) || Number(match[1]) < 0) {
-        fail("<path> style stroke-width must be a non-negative finite SVG length.");
+        fail("style stroke-width must be a non-negative finite SVG length.");
       }
-      parsed["stroke-width"] = value;
-      continue;
     }
-    if (!["fill", "stroke"].includes(property)) {
-      fail(`unsupported <path> style property "${property}".`);
+    attributes[property] = value;
+  };
+
+  const flattenElement = (node) => {
+    const attributes = { ...(node.attributes ?? {}) };
+    const inlineText = attributes.style;
+    const matchedRules = stylesheetRules.filter((rule) => selectorMatches(rule.selector, node));
+    delete attributes.style;
+    delete attributes.class;
+    if (inlineText === undefined && matchedRules.length === 0) return { attributes, styled: false, hidden: false };
+    const declarations = matchedRules.flatMap((rule) => rule.declarations);
+    if (inlineText !== undefined) {
+      const label = `<${node.name}> style`;
+      validateVisualCss(inlineText, label);
+      declarations.push(...parseDeclarations(decodeXmlEntities(inlineText, label), label));
     }
-    if (!value || /!important/i.test(value)) fail(`<path> style ${property} value is unsupported.`);
-    parsed[property] = value;
-  }
-  return { attributes: parsed, hasStyle: true };
+    const ordered = [
+      ...declarations.filter((declaration) => !declaration.important),
+      ...declarations.filter((declaration) => declaration.important)
+    ];
+    const state = { hidden: false };
+    for (const declaration of ordered) applyDeclaration(node, attributes, declaration, state);
+    if (state.hidden) note("svg.style.elementHidden");
+    return { attributes, styled: true, hidden: state.hidden };
+  };
+
+  const flattenNode = (node, depth) => {
+    if (node.type !== "element") return node;
+    if (depth > 64) fail("the SVG exceeds the 64-level nesting limit.");
+    if (node.name.toLowerCase() === "style") return null;
+    const { attributes, styled, hidden } = flattenElement(node);
+    if (hidden) return null;
+    const children = (node.children ?? []).map((child) => flattenNode(child, depth + 1)).filter(Boolean);
+    const result = { ...node, attributes, children };
+    if (styled) styledNodes.add(result);
+    return result;
+  };
+
+  const root = flattenNode(inputRoot, 1);
+  return { root, styledNodes, ignoredStyles: [...ignored.values()] };
 }
 
 function pathStyleProperties(attributes, layerId, layers, forceLayerColor) {
@@ -861,14 +989,17 @@ function strokeOutlineShape(shape, widthMm) {
   };
 }
 
-export function importSvgTree(root, {
+export function importSvgTree(inputRoot, {
   layerId = "layer-engrave",
   idPrefix = "svg",
   fallbackLayer,
   forceLayerId,
   splitShapes = false
 } = {}) {
-  if (!root || root.name !== "svg" || root.type !== "element") fail("the document must have an <svg> root.");
+  if (!inputRoot || inputRoot.name !== "svg" || inputRoot.type !== "element") fail("the document must have an <svg> root.");
+  const flattened = flattenSvgStyles(inputRoot);
+  const root = flattened.root;
+  if (!root) fail("the <svg> root cannot be hidden with display or visibility.");
   const rootAttributes = decodeAttributes(root.attributes, "<svg>");
   const decodedRoot = { ...root, attributes: rootAttributes };
   const view = viewport(decodedRoot);
@@ -911,7 +1042,7 @@ export function importSvgTree(root, {
       })).reverse());
       continue;
     }
-    if (["metadata", "title", "desc"].includes(node.name.toLowerCase())) {
+    if (["metadata", "title", "desc", "defs"].includes(node.name.toLowerCase())) {
       stack.push(...(node.children ?? []).map((child) => ({
         node: child,
         depth: depth + 1,
@@ -924,9 +1055,8 @@ export function importSvgTree(root, {
       continue;
     }
     const decodedAttributes = decodeAttributes(node.attributes, `<${node.name}>`);
-    const { attributes: a, hasStyle: hasInlinePathStyle } = node.name === "path"
-      ? parseInlinePathStyle(decodedAttributes)
-      : { attributes: decodedAttributes, hasStyle: false };
+    const hasInlinePathStyle = flattened.styledNodes.has(node);
+    const a = decodedAttributes;
     if (node.name === "g") {
       checkedAttributes(node, new Set(["id", "transform", ...LAYER_ATTRIBUTES]), "group");
       const childTransform = multiplyTransforms(inheritedTransform, parseTransform(a.transform));
@@ -1179,7 +1309,8 @@ export function importSvgTree(root, {
     widthMm: normalized.widthMm,
     heightMm: normalized.heightMm,
     layers: normalized.layers,
-    elements: normalized.elements
+    elements: normalized.elements,
+    ignoredStyles: flattened.ignoredStyles
   };
 }
 

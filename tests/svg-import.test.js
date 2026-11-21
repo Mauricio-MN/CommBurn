@@ -258,12 +258,40 @@ test("SVG path imports safe inline fill and stroke styles", () => {
     /external or unsupported content/
   );
   assert.throws(
-    () => importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 5" style="opacity:0.5"/></svg>'),
-    /unsupported <path> style property "opacity"/
-  );
-  assert.throws(
     () => importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 5" style="stroke-width:-1"/></svg>'),
     /stroke-width must be a non-negative finite SVG length/
+  );
+});
+
+test("SVG style rules and style attributes are flattened into editable paints with reported exceptions", () => {
+  const imported = importSvg(`<svg width="20mm" height="20mm">
+    <style>.cut { fill: #ff0000; stroke: none } #line { stroke: #0000ff } rect { filter: url(#blur) }</style>
+    <defs><linearGradient id="grad"/></defs>
+    <g style="stroke-width:2px; font-family: serif">
+      <path class="cut" d="M1 1 L5 1 L5 5 Z"/>
+      <path id="line" d="M1 10 L9 10" style="stroke:#00ff00"/>
+      <path d="M1 15 L5 15" style="display:none"/>
+      <path d="M10 1 L15 5" style="fill:url(#grad); stroke:#000000"/>
+    </g>
+  </svg>`);
+  const svg = renderSvg(imported);
+
+  assert.equal(imported.elements.length, 3);
+  assert.match(svg, /#ff0000/);
+  assert.match(svg, /#00ff00/);
+  assert.doesNotMatch(svg, /#0000ff/);
+  assert.deepEqual(imported.ignoredStyles, [
+    { code: "svg.style.propertyIgnored", property: "font-family", count: 1 },
+    { code: "svg.style.elementHidden", count: 1 },
+    { code: "svg.style.paintIgnored", property: "fill", count: 1 }
+  ]);
+  assert.throws(
+    () => importSvg('<svg width="10mm" height="10mm"><style>g > rect { fill: #ff0000 }</style><rect width="2" height="2"/></svg>'),
+    /unsupported CSS selector "g > rect"/
+  );
+  assert.throws(
+    () => importSvg('<svg width="10mm" height="10mm"><rect width="2" height="2" style="transform:rotate(10deg)"/></svg>'),
+    /transform in a style declaration is not supported/
   );
 });
   assert.ok(byColor.elements.every(({ type }) => type !== "image" && type !== "svg-image"));
@@ -434,7 +462,7 @@ test("SVG import rejects active content, unsupported geometry, and unsafe attrib
   assert.throws(() => importSvg('<svg width="10mm" height="10mm"><rect x="0" y="0" width="2" height="2" onclick="alert(1)"/></svg>'), /unsupported <rect> attribute "onclick"/);
   assert.throws(() => importSvg('<svg width="10mm" height="10mm"><image href="https://example.invalid/a.png"/></svg>'), /external image references are not loaded/);
   assert.throws(() => importSvg('<svg width="10mm" height="10mm"><text x="1" y="2" transform="scale(2 1)">No</text></svg>'), /non-uniform scale/);
-  assert.throws(() => importSvg('<svg width="10mm" height="10mm"><rect x="0" y="0" width="2" height="2" style="fill:url(x)"/></svg>'), /unsupported <rect> attribute "style"/);
+  assert.throws(() => importSvg('<svg width="10mm" height="10mm"><rect x="0" y="0" width="2" height="2" style="fill:url(x)"/></svg>'), /<rect> style references external or unsupported content/);
 });
 
 test("SVG import enforces finite dimensions, non-empty geometry, and supported text", () => {

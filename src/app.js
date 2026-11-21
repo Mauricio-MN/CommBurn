@@ -1781,9 +1781,13 @@ async function importSvgFile(file) {
   syncInspector();
   renderPreview();
   commitHistory();
-  showNotice(imported.scale < 1
+  const styleCount = imported.ignoredStyles.reduce((total, entry) => total + entry.count, 0);
+  const importNotice = imported.scale < 1
     ? `SVG importado: ${imported.elements.length} objeto(s), reduzido a ${(imported.scale * 100).toFixed(1)}% para caber na mesa. A área de trabalho foi mantida.`
-    : `SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`);
+    : `SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`;
+  showNotice(styleCount
+    ? `${importNotice} ${i18n.t("ui.import.styleIgnored", { count: styleCount })}`
+    : importNotice);
 }
 
 async function importProjectFile(file) {
