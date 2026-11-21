@@ -49,6 +49,7 @@ const CSS = `
 .editor-theme .quick-properties { background: #252526; border-color: #3c3c3c; color: #9da5b4; box-shadow: var(--shadow); }
 .editor-theme .quick-properties summary { color: #cccccc; }
 .editor-theme .quick-row input, .editor-theme .quick-row select { color: #cccccc; background: #3c3c3c; border-color: #505050; }
+.editor-theme .section-icon { background: #2d2d30; }
 `;
 
 function readEnabled() {
