@@ -368,6 +368,9 @@ export default Object.freeze({
       noSelection: "No object selected",
       draft: "CommBurn",
       unsavedBadge: "Unsaved",
+      savedBadge: "Saved",
+      saveTooltip: "Save the editable project to its file (Ctrl+S)",
+      saveButton: "Save",
       projectName: "Project name",
       editProjectName: "Edit project name",
       shortcuts: "Shortcuts",
@@ -391,6 +394,7 @@ export default Object.freeze({
       undo: "Undo",
       redo: "Redo",
       export: "Export SVG",
+      save: "Save project",
       help: "Show shortcuts"
     },
     tools: {

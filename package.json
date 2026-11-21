@@ -45,6 +45,7 @@
     ],
     "files": [
       "electron-main.mjs",
+      "electron-preload.cjs",
       "server.mjs",
       "index.html",
       "commburn-icon.svg",

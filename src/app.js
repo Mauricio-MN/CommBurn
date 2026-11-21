@@ -157,6 +157,7 @@ const removeButton = byId("remove-selection");
 const selectionStatus = byId("selection-status");
 const notice = byId("notice");
 const projectNameInput = byId("project-name");
+const saveStateBadge = byId("save-state");
 const languageSelect = byId("language-select");
 let projectNameIsUserValue = false;
 const serialPathInput = byId("serial-path");
@@ -222,6 +223,7 @@ function applyInterfaceLocale() {
   translateDom(document, i18n);
   languageSelect.value = i18n.locale;
   if (!projectNameIsUserValue) projectNameInput.value = i18n.t("app.unsavedProject");
+  renderSaveState();
   toolbar.setTranslator(i18n.t);
   layersPanel?.setTranslator(i18n.t);
   renderDocumentTabs();
@@ -280,6 +282,13 @@ for (const input of document.querySelectorAll('input[type="number"]:not([data-la
 function commitHistory() {
   if (presentationActive) return;
   history.push(currentDocument);
+  renderSaveState();
+}
+
+function renderSaveState() {
+  const dirty = history.isDirty();
+  saveStateBadge.dataset.savedState = dirty ? "unsaved" : "saved";
+  saveStateBadge.textContent = i18n.t(dirty ? "ui.canvas.unsavedBadge" : "ui.canvas.savedBadge");
 }
 
 function formatMm(value) {
@@ -976,9 +985,42 @@ function downloadFile(contents, filename, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function exportProject() {
-  const source = serializeProject(readDocument());
-  downloadFile(source, getProjectFilename("commburn.json"), "application/json;charset=utf-8");
+async function saveProject() {
+  const saveHistory = history;
+  const contents = serializeProject(readDocument());
+  const suggestedName = getProjectFilename("commburn.json");
+  const desktop = globalThis.commburnDesktop;
+  if (desktop?.saveProject) {
+    const currentPath = saveHistory.fileTarget?.path ?? null;
+    const savedPath = await desktop.saveProject({ contents, suggestedName, filePath: currentPath });
+    if (!savedPath) return;
+    saveHistory.markSaved({ path: savedPath });
+  } else if (typeof globalThis.showSaveFilePicker === "function") {
+    try {
+      let handle = saveHistory.fileTarget?.handle;
+      if (!handle) {
+        handle = await globalThis.showSaveFilePicker({
+          suggestedName,
+          types: [{ description: "CommBurn", accept: { "application/json": [".json"] } }]
+        });
+      }
+      const mode = { mode: "readwrite" };
+      if (await handle.queryPermission(mode) !== "granted" && await handle.requestPermission(mode) !== "granted") {
+        throw new Error("Permissão de escrita negada para o arquivo do projeto.");
+      }
+      const writable = await handle.createWritable();
+      await writable.write(contents);
+      await writable.close();
+      saveHistory.markSaved({ handle });
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      throw error;
+    }
+  } else {
+    downloadFile(contents, suggestedName, "application/json;charset=utf-8");
+    saveHistory.markSaved(saveHistory.fileTarget);
+  }
+  renderSaveState();
   showNotice("Projeto editável salvo com camadas e objetos.");
 }
 
@@ -1808,8 +1850,10 @@ async function importProjectFile(file) {
   heightInput.value = imported.heightMm;
   setOriginCorner(imported.origin.corner);
   history.reset(imported);
+  history.markSaved(null);
   syncInspector();
   renderPreview();
+  renderSaveState();
   showNotice("Projeto CommBurn carregado e validado.");
 }
 
@@ -2341,6 +2385,7 @@ function newDocument() {
   currentDocument = readDocument();
   syncInspector();
   renderPreview();
+  history.markUnsaved();
   commitHistory();
   showNotice("Novo trabalho criado.");
 }
@@ -2615,6 +2660,7 @@ function restoreDocument(snapshot) {
   selectedId = selectedIds.at(-1) ?? null;
   syncInspector();
   renderPreview();
+  renderSaveState();
 }
 
 function captureDocumentTabState() {
@@ -2871,6 +2917,9 @@ installShortcuts({
   export: () => {
     try { exportSvg(); } catch (error) { showNotice(error); }
   },
+  save: () => {
+    saveProject().catch((error) => showNotice(error));
+  },
   remove: removeSelectedObject,
   duplicate: duplicateSelectedObject,
   copy: copySelectedObjects,
@@ -2990,8 +3039,8 @@ byId("svg-file-input").addEventListener("change", async (event) => {
 for (const button of document.querySelectorAll('[data-action="export"]')) button.addEventListener("click", () => {
   try { exportSvg(); } catch (error) { showNotice(error); }
 });
-for (const button of document.querySelectorAll('[data-action="export-project"]')) button.addEventListener("click", () => {
-  try { exportProject(); } catch (error) { showNotice(error); }
+for (const button of document.querySelectorAll('[data-action="export-project"], [data-action="save-project"]')) button.addEventListener("click", () => {
+  saveProject().catch((error) => showNotice(error));
 });
 for (const button of document.querySelectorAll('[data-action="preview-machine"]')) {
   button.addEventListener("click", showMachinePreview);

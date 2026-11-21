@@ -369,6 +369,9 @@ export default Object.freeze({
       noSelection: "Nenhum objeto selecionado",
       draft: "CommBurn",
       unsavedBadge: "Não salvo",
+      savedBadge: "Salvo",
+      saveTooltip: "Salvar o projeto editável no seu arquivo (Ctrl+S)",
+      saveButton: "Salvar",
       projectName: "Nome do projeto",
       editProjectName: "Editar nome do projeto",
       shortcuts: "Atalhos",
@@ -392,6 +395,7 @@ export default Object.freeze({
       undo: "Desfazer",
       redo: "Refazer",
       export: "Exportar SVG",
+      save: "Salvar projeto",
       help: "Mostrar atalhos"
     },
     tools: {

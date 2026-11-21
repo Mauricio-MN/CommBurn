@@ -11,7 +11,7 @@ export const SHORTCUTS = Object.freeze([
   { keys: "Ctrl+D", translationKey: "ui.shortcuts.duplicate" },
   { keys: "Ctrl+Z", translationKey: "ui.shortcuts.undo" },
   { keys: "Ctrl+Y", translationKey: "ui.shortcuts.redo" },
-  { keys: "Ctrl+S", translationKey: "ui.shortcuts.export" },
+  { keys: "Ctrl+S", translationKey: "ui.shortcuts.save" },
   { keys: "?", translationKey: "ui.shortcuts.help" }
 ]);
 
@@ -47,7 +47,7 @@ export function installShortcuts(actions) {
       actions.redo();
       event.preventDefault();
     } else if ((event.ctrlKey || event.metaKey) && key === "s") {
-      actions.export();
+      actions.save();
       event.preventDefault();
     } else if ((event.ctrlKey || event.metaKey) && key === "d") {
       actions.duplicate();

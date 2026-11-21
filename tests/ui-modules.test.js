@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { SHORTCUTS } from "../src/ui/shortcuts.js";
+import { DocumentHistory } from "../src/ui/history.js";
 import { TOOLS } from "../src/ui/toolbar.js";
 import { loadDesktopPlugins } from "../src/ui/plugins.js";
 import { LayersPanel } from "../src/ui/layers-panel.js";
@@ -336,4 +337,18 @@ test("desktop plugin activation errors are isolated and reported", async () => {
   assert.deepEqual(result.loaded, []);
   assert.equal(result.errors[0].id, "broken-plugin");
   assert.match(result.errors[0].message, /desconhecido/);
+});
+
+test("document history tracks unsaved edits and returns clean after undo to the saved state", () => {
+  const history = new DocumentHistory({ objects: [] });
+  assert.equal(history.isDirty(), true);
+  history.markSaved({ path: "/tmp/a.commburn.json" });
+  assert.equal(history.isDirty(), false);
+  assert.deepEqual(history.fileTarget, { path: "/tmp/a.commburn.json" });
+  history.push({ objects: [{ id: 1 }] });
+  assert.equal(history.isDirty(), true);
+  history.undo();
+  assert.equal(history.isDirty(), false);
+  history.reset({ objects: [] });
+  assert.equal(history.fileTarget, null);
 });

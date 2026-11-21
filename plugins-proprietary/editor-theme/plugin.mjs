@@ -16,7 +16,12 @@ const CSS = `
 .editor-theme .field input, .editor-theme .field textarea, .editor-theme .field select, .editor-theme .locale-control select { color: #cccccc; background: #3c3c3c; border-color: #505050; }
 .editor-theme .document-name, .editor-theme .canvas-actions, .editor-theme .project-name { color: #cccccc; }
 .editor-theme .project-name:hover, .editor-theme .project-name:focus { background: #2a2d2e; border-color: #007acc; }
-.editor-theme dialog { box-shadow: 0 18px 60px rgb(0 0 0 / 60%); }
+.editor-theme .document-tabs { background: #252526; border-color: #3c3c3c; }
+.editor-theme .document-tab { background: #2d2d30; color: #9da5b4; border-color: #3c3c3c; }
+.editor-theme .document-tab.is-active { background: #1e1e1e; color: #ffffff; border-bottom-color: #007acc; }
+.editor-theme .document-tab:hover { background: #2a2d2e; color: #ffffff; }
+.editor-theme .saved-badge[data-saved-state="unsaved"] { color: #cca700; border-color: #5c4d00; }
+.editor-theme .saved-badge[data-saved-state="saved"] { color: #89d185; border-color: #2d5a2d; }
 `;
 
 function readEnabled() {
@@ -44,7 +49,7 @@ export function activate(context) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "button button-secondary";
-  button.textContent = "Tema editor";
+  button.textContent = "Tema escuro";
 
   let enabled = false;
   const apply = (next) => {
@@ -56,7 +61,7 @@ export function activate(context) {
   button.addEventListener("click", () => apply(!enabled));
   apply(readEnabled());
 
-  const removeButton = context.registerExtension("toolbar-tools", button);
+  const removeButton = context.registerExtension("topbar-end", button);
 
   return () => {
     document.documentElement.classList.remove("editor-theme");

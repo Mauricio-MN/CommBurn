@@ -1,9 +1,29 @@
 export class DocumentHistory {
   #snapshots = [];
   #index = -1;
+  #savedSnapshot = null;
+  #fileTarget = null;
 
   constructor(initialDocument) {
     this.push(initialDocument);
+  }
+
+  get fileTarget() {
+    return this.#fileTarget;
+  }
+
+  markSaved(fileTarget = this.#fileTarget) {
+    this.#savedSnapshot = this.#snapshots[this.#index];
+    this.#fileTarget = fileTarget;
+  }
+
+  markUnsaved() {
+    this.#savedSnapshot = null;
+    this.#fileTarget = null;
+  }
+
+  isDirty() {
+    return this.#snapshots[this.#index] !== this.#savedSnapshot;
   }
 
   push(document) {
@@ -18,6 +38,7 @@ export class DocumentHistory {
   reset(document) {
     this.#snapshots = [JSON.stringify(document)];
     this.#index = 0;
+    this.markUnsaved();
   }
 
   undo() {

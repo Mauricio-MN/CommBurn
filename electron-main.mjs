@@ -1,11 +1,35 @@
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { cp, mkdir, readdir, access, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { startServer } from "./server.mjs";
+
+const PROJECT_SAVE_LIMIT_BYTES = 50 * 1024 * 1024;
+const savedProjectPaths = new Set();
 
 let serverHandle;
 let mainWindow;
 let isClosing = false;
+
+ipcMain.handle("commburn:save-project", async (event, request) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Origem de salvamento não confiável.");
+  if (typeof request?.contents !== "string" || Buffer.byteLength(request.contents) > PROJECT_SAVE_LIMIT_BYTES) {
+    throw new RangeError("O projeto deve ter no máximo 50 MB.");
+  }
+  // Only paths returned by an earlier save dialog are reused, so the renderer cannot pick arbitrary files.
+  let filePath = savedProjectPaths.has(request.filePath) ? request.filePath : null;
+  if (!filePath) {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: basename(String(request.suggestedName ?? "Trabalho sem título.commburn.json")),
+      filters: [{ name: "CommBurn", extensions: ["json"] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    filePath = result.filePath;
+  }
+  await writeFile(filePath, request.contents, "utf8");
+  savedProjectPaths.add(filePath);
+  return filePath;
+});
 
 async function installBundledPlugins(pluginDirectory) {
   if (!app.isPackaged) return;
@@ -48,7 +72,8 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      preload: fileURLToPath(new URL("./electron-preload.cjs", import.meta.url))
     }
   });
   mainWindow.setMenuBarVisibility(false);
