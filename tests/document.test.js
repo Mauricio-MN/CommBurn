@@ -148,6 +148,16 @@ test("GRBL paths honor explicit axis inversions", () => {
   }
 });
 
+test("every origin point is accepted and centred axes put machine zero mid-bed", () => {
+  const points = ["top-left", "top-center", "top-right", "left-center", "center", "right-center", "bottom-left", "bottom-center", "bottom-right"];
+  for (const corner of points) {
+    assert.doesNotThrow(() => createDocument({ widthMm: 100, heightMm: 80, origin: { corner }, elements: [] }), corner);
+  }
+  const frame = machineFrame(createDocument({ widthMm: 100, heightMm: 80, origin: { corner: "top-center" }, elements: [] }));
+  assert.deepEqual(frame.originMm, { xMm: 50, yMm: 0 });
+  assert.deepEqual([frame.xDirection, frame.yDirection], [1, 1]);
+});
+
 test("GRBL text keeps its stage position for every origin corner and fills glyphs with open-free contours", () => {
   const documentModel = {
     widthMm: 100,

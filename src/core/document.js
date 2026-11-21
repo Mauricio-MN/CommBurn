@@ -4,7 +4,7 @@ import { createTextOutlinePathData, getTextFontAsset, getTextSvgFamily } from ".
 import { decodeRaster, rasterLevels, rasterRowRuns } from "./raster-engrave.js";
 import { SVGPathData } from "../../node_modules/svg-pathdata/lib/SVGPathData.module.js";
 
-const ORIGIN_CORNERS = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
+const ORIGIN_POINTS = new Set(["top-left", "top-center", "top-right", "left-center", "center", "right-center", "bottom-left", "bottom-center", "bottom-right"]);
 
 function finiteNumber(value, label) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -99,7 +99,7 @@ function normalizeImageAspect(value, id) {
 
 function normalizeOrigin(origin = {}) {
   const corner = origin.corner ?? "top-left";
-  if (!ORIGIN_CORNERS.has(corner)) throw new CommBurnRangeError("document.invalidOrigin", { corner }, { message: `Unsupported origin corner: ${corner}` });
+  if (!ORIGIN_POINTS.has(corner)) throw new CommBurnRangeError("document.invalidOrigin", { corner }, { message: `Unsupported origin corner: ${corner}` });
   const flipX = origin.flipX ?? false;
   const flipY = origin.flipY ?? false;
   if (typeof flipX !== "boolean" || typeof flipY !== "boolean") {
@@ -270,16 +270,29 @@ function normalizeZero(value) {
   return Object.is(value, -0) ? 0 : value;
 }
 
-// The single machine reference. Its origin is the chosen corner of the stage; +X and +Y point into the bed
-// (away from that corner), so every job lies in positive coordinates. flipX/flipY reverse an axis only.
-export function machineFrame(document) {
-  // A reversed axis puts machine zero on the opposite edge, so the bed always spans [0, width] x [0, height].
-  const originAtRight = document.origin.corner.endsWith("right") !== Boolean(document.origin.flipX);
-  const originAtBottom = document.origin.corner.startsWith("bottom") !== Boolean(document.origin.flipY);
+// Horizontal and vertical position of a named point; "center" on an axis means the middle of that axis.
+function pointAxes(point) {
   return {
-    originMm: { xMm: originAtRight ? document.widthMm : 0, yMm: originAtBottom ? document.heightMm : 0 },
-    xDirection: originAtRight ? -1 : 1,
-    yDirection: originAtBottom ? -1 : 1
+    horizontal: point.includes("left") ? "left" : point.includes("right") ? "right" : "center",
+    vertical: point.includes("top") ? "top" : point.includes("bottom") ? "bottom" : "center"
+  };
+}
+
+// The single machine reference. Its origin is the chosen point of the stage; +X and +Y point into the bed
+// (away from that edge; centred axes point toward the top/left), so jobs use the origin's side of the bed.
+// flipX/flipY reverse an axis only.
+export function machineFrame(document) {
+  const { horizontal, vertical } = pointAxes(document.origin.corner);
+  // A reversed axis puts machine zero on the opposite edge, so a bed edge origin spans [0, width] x [0, height].
+  const reversedX = (horizontal === "right") !== Boolean(document.origin.flipX);
+  const reversedY = (vertical === "bottom") !== Boolean(document.origin.flipY);
+  return {
+    originMm: {
+      xMm: horizontal === "center" ? document.widthMm / 2 : reversedX ? document.widthMm : 0,
+      yMm: vertical === "center" ? document.heightMm / 2 : reversedY ? document.heightMm : 0
+    },
+    xDirection: reversedX ? -1 : 1,
+    yDirection: reversedY ? -1 : 1
   };
 }
 
@@ -876,7 +889,7 @@ function withoutShadowedPaintParts(layerElements, layer) {
 }
 
 export const START_FROM_MODES = Object.freeze(["absolute", "objects"]);
-export const START_ANCHORS = Object.freeze(["top-left", "top-right", "bottom-left", "bottom-right", "center"]);
+export const START_ANCHORS = Object.freeze([...ORIGIN_POINTS]);
 
 // "absolute" starts at the machine origin; "head" puts the chosen drawing anchor under the current laser position.
 export function jobStartSettings(mode, anchor = "top-left") {
@@ -904,8 +917,7 @@ function planGrblJobBase(input, settings, startReference = null) {
   const xs = stagePoints.map((point) => point.xMm);
   const ys = stagePoints.map((point) => point.yMm);
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-  const horizontal = anchor.endsWith("left") ? "left" : anchor.endsWith("right") ? "right" : "center";
-  const vertical = anchor.startsWith("top") ? "top" : anchor.startsWith("bottom") ? "bottom" : "center";
+  const { horizontal, vertical } = pointAxes(anchor);
   const anchorStage = {
     xMm: horizontal === "center" ? (minX + maxX) / 2 : horizontal === "left" ? minX : maxX,
     yMm: vertical === "center" ? (minY + maxY) / 2 : vertical === "top" ? minY : maxY
