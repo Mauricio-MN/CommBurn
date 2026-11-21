@@ -365,3 +365,11 @@ test("sidebar notice log and layer submenu are wired in index.html and both loca
     }
   }
 });
+
+test("quick properties panel floats over the canvas instead of resizing the stage", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const rule = css.match(/\.quick-properties\s*\{([^}]*)\}/);
+  assert.ok(rule, "styles.css must define .quick-properties");
+  assert.match(rule[1], /position:\s*absolute/);
+  assert.doesNotMatch(rule[1], /position:\s*(relative|static)/);
+});

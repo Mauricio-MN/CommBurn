@@ -46,6 +46,9 @@ const CSS = `
 .editor-theme .layer-select, .editor-theme .layer-toggle, .editor-theme .layer-duplicate, .editor-theme .layer-remove { color: #cccccc; background: transparent; }
 .editor-theme .layer-duplicate, .editor-theme .layer-remove, .editor-theme .layer-duplicate:hover { background: #2d2d30; }
 .editor-theme dialog p, .editor-theme dialog h1, .editor-theme dialog h2 { color: #cccccc; }
+.editor-theme .quick-properties { background: #252526; border-color: #3c3c3c; color: #9da5b4; box-shadow: var(--shadow); }
+.editor-theme .quick-properties summary { color: #cccccc; }
+.editor-theme .quick-row input, .editor-theme .quick-row select { color: #cccccc; background: #3c3c3c; border-color: #505050; }
 `;
 
 function readEnabled() {
