@@ -230,6 +230,7 @@ function validateVisualUrl(value, label, sanitizeNestedSvg) {
   const url = value.trim();
   if (url.startsWith("#")) return;
   if (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/]+={0,2}$/i.test(url)) return;
+  if (/^data:font\/woff;base64,[a-z0-9+/]+={0,2}$/i.test(url)) return;
   if (/^data:image\/svg\+xml;base64,[a-z0-9+/]+={0,2}$/i.test(url) && sanitizeNestedSvg) {
     return sanitizeNestedSvg(url);
   }
@@ -425,8 +426,9 @@ function parseDeclarations(text, label) {
 }
 
 function parseStylesheet(css) {
-  const text = decodeXmlEntities(css, "<style>").replace(/\/\*[\s\S]*?\*\//g, "");
-  validateVisualCss(text, "<style>");
+  const decoded = decodeXmlEntities(css, "<style>").replace(/\/\*[\s\S]*?\*\//g, "");
+  validateVisualCss(decoded, "<style>");
+  const text = decoded.replace(/@font-face\s*\{[^{}]*\}/gi, "");
   const rulePattern = /([^{}]*)\{([^{}]*)\}/g;
   if (text.replace(rulePattern, "").trim()) {
     fail("<style> contains an unsupported CSS rule; use element, class, or id selectors.");

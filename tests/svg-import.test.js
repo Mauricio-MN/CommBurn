@@ -386,6 +386,16 @@ test("visual SVG sanitization preserves static effects and removes active conten
   ), /external or unsupported content/);
 });
 
+test("SVG import accepts CommBurn's embedded @font-face but rejects external font URLs", () => {
+  const woff = "d09GRgABAAAAAM3A";
+  const imported = importSvg(`<svg width="100mm" height="50mm" viewBox="0 0 200 100">
+    <style>@font-face{font-family:"CommBurn Sans";src:url(data:font/woff;base64,${woff}) format("woff");font-style:normal;font-weight:400}</style>
+    <rect x="1" y="1" width="2" height="2"/></svg>`);
+  assert.equal(imported.elements[0].type, "rect");
+  assert.throws(() => importSvg(`<svg width="10mm" height="10mm"><style>@font-face{font-family:"X";src:url(https://example.invalid/f.woff)}</style></svg>`),
+    /<style> references external or unsupported content/);
+});
+
 test("SVG text imports uniform scale, translation, and rotation transforms", () => {
   const imported = importSvg(`
     <svg width="100mm" height="50mm" viewBox="0 0 200 100">
