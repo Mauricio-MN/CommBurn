@@ -285,11 +285,32 @@ function commitHistory() {
   renderSaveState();
 }
 
+function hasUnsavedProjects() {
+  return documentTabs.some((tab) => {
+    const isActive = tab.id === activeDocumentTabId;
+    const tabHistory = isActive ? history : tab.state?.history;
+    const tabDocument = isActive ? currentDocument : tab.state?.document;
+    return Boolean(tabHistory?.isDirty() && tabDocument?.elements?.length);
+  });
+}
+
 function renderSaveState() {
   const dirty = history.isDirty();
   saveStateBadge.dataset.savedState = dirty ? "unsaved" : "saved";
   saveStateBadge.textContent = i18n.t(dirty ? "ui.canvas.unsavedBadge" : "ui.canvas.savedBadge");
+  globalThis.commburnDesktop?.setUnsavedChanges?.({
+    dirty: hasUnsavedProjects(),
+    message: i18n.t("ui.unsaved.message"),
+    leave: i18n.t("ui.unsaved.leave"),
+    stay: i18n.t("ui.unsaved.stay")
+  });
 }
+
+window.addEventListener("beforeunload", (event) => {
+  if (!hasUnsavedProjects()) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 
 function formatMm(value) {
   return `${Number(value.toFixed(1))}`;

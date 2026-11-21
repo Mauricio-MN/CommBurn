@@ -6,6 +6,14 @@ import { startServer } from "./server.mjs";
 
 const PROJECT_SAVE_LIMIT_BYTES = 50 * 1024 * 1024;
 const savedProjectPaths = new Set();
+let unsavedTexts = null;
+
+ipcMain.on("commburn:unsaved-changes", (event, state) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  unsavedTexts = state?.dirty
+    ? { message: String(state.message), leave: String(state.leave), stay: String(state.stay) }
+    : null;
+});
 
 let serverHandle;
 let mainWindow;
@@ -86,6 +94,18 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== trustedOrigin) event.preventDefault();
   });
+  // The renderer prevents unload while projects have unsaved edits; confirm before letting the window close.
+  mainWindow.webContents.on("will-prevent-unload", (event) => {
+    const texts = unsavedTexts ?? { message: "", leave: "OK", stay: "Cancel" };
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: "warning",
+      message: texts.message,
+      buttons: [texts.leave, texts.stay],
+      defaultId: 1,
+      cancelId: 1
+    });
+    if (choice === 0) event.preventDefault();
+  });
   // Blob downloads make Chromium replace the window title with the blob URL.
   mainWindow.on("page-title-updated", (event) => event.preventDefault());
   mainWindow.on("closed", () => {
@@ -128,7 +148,7 @@ if (app.requestSingleInstanceLock()) {
     if (process.platform !== "darwin") app.quit();
   });
 
-  app.on("before-quit", (event) => {
+  app.on("will-quit", (event) => {
     if (!serverHandle || isClosing) return;
     event.preventDefault();
     isClosing = true;

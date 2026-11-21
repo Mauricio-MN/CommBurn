@@ -39,6 +39,7 @@ export class GrblConnection {
     this.resumeWaiter = null;
     this.cancelRequested = false;
     this.status = null;
+    this.programEnded = false;
     this.statusWaiter = null;
     this.grblSettings = new Map();
     this.serialError = null;
@@ -64,6 +65,8 @@ export class GrblConnection {
         this.updatePosition(response);
         if (this.pending && /^(Run|Hold|Jog|Home)/.test(this.status)) this.pending.lastProgressAt = Date.now();
         this.statusWaiter?.resolve(this.status);
+      } else if (/^\[MSG:Pgm End\]$/i.test(response)) {
+        this.programEnded = true;
       } else if (/^ALARM:/i.test(response)) {
         this.rejectPending(new Error(`Controller alarm: ${response}`));
       } else if (/^error:/i.test(response)) {
@@ -246,6 +249,7 @@ export class GrblConnection {
     this.busy = true;
     this.cancelRequested = false;
     this.paused = false;
+    this.programEnded = false;
     const lines = gcode.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     try {
       for (const [index, line] of lines.entries()) {
@@ -286,6 +290,9 @@ export class GrblConnection {
       if (this.status === "Idle") {
         idleReports += 1;
         if (idleReports === 2) return;
+      } else if (this.programEnded && !/^(Run|Jog|Home|Hold)/.test(this.status ?? "")) {
+        // "[MSG:Pgm End]" is sent after the planner drains, so a non-motion state means the job finished.
+        return;
       } else {
         idleReports = 0;
         if (this.status === "Alarm" || this.status === "Door") {

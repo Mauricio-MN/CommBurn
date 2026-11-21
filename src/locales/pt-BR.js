@@ -169,6 +169,11 @@ export default Object.freeze({
       close: "Fechar {name}",
       closeConfirm: "Fechar esta aba? Alterações não salvas serão perdidas."
     },
+    unsaved: {
+      message: "Há projetos não salvos. Salvar antes de fechar ou sair sem salvar?",
+      leave: "Sair sem salvar",
+      stay: "Cancelar"
+    },
     inspector: {
       title: "Propriedades do objeto",
       selected: "Objeto selecionado",

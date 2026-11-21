@@ -252,3 +252,17 @@ test("controller settings from GRBL 0.9 and 1.1 are read and produce the bed are
   assert.equal(machineAreaFromSettings(undefined), null);
 });
 
+
+test("GRBL job completes on [MSG:Pgm End] once the controller is no longer moving", async () => {
+  const serialPort = new MockSerialPort();
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+    if (data === "?") setImmediate(() => this.emit("data", Buffer.from("<Queue|MPos:0,0,0>\r\n")));
+    else if (data.endsWith("\n")) setImmediate(() => this.emit("data", Buffer.from("ok\r\n[MSG:Pgm End]\r\n")));
+  };
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 1000 });
+
+  await connection.sendJob("G1 X1 Y1 F100\nM5\n");
+
+  assert.equal(connection.programEnded, true);
+});

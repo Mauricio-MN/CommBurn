@@ -167,7 +167,12 @@ export default Object.freeze({
       label: "Open documents",
       new: "New tab",
       close: "Close {name}",
-      closeConfirm: "Close this tab? Unsaved changes will be lost."
+    closeConfirm: "Close this tab? Unsaved changes will be lost."
+    },
+    unsaved: {
+      message: "There are unsaved projects. Save them before closing, or leave without saving?",
+      leave: "Leave without saving",
+      stay: "Cancel"
     },
     inspector: {
       title: "Object properties",
