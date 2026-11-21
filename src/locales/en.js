@@ -166,6 +166,23 @@ export default Object.freeze({
       moveToLayer: "Move to layer ›",
       layers: "Layers"
     },
+    quick: {
+      label: "Quick adjustment",
+      position: "Position",
+      size: "Size and rotation",
+      x: "X",
+      y: "Y",
+      width: "Width",
+      height: "Height",
+      rotation: "Rotation",
+      set: "Set",
+      relative: "Add/subtract",
+      modeX: "X adjustment mode",
+      modeY: "Y adjustment mode",
+      modeWidth: "Width adjustment mode",
+      modeHeight: "Height adjustment mode",
+      modeRotation: "Rotation adjustment mode"
+    },
     notice: {
       label: "Last notice",
       last: "Last notice",

@@ -166,6 +166,23 @@ export default Object.freeze({
       moveToLayer: "Mover para camada ›",
       layers: "Camadas"
     },
+    quick: {
+      label: "Ajuste rápido",
+      position: "Posição",
+      size: "Tamanho e rotação",
+      x: "X",
+      y: "Y",
+      width: "Largura",
+      height: "Altura",
+      rotation: "Rotação",
+      set: "Definir",
+      relative: "Somar/subtrair",
+      modeX: "Modo de ajuste de X",
+      modeY: "Modo de ajuste de Y",
+      modeWidth: "Modo de ajuste de largura",
+      modeHeight: "Modo de ajuste de altura",
+      modeRotation: "Modo de ajuste de rotação"
+    },
     notice: {
       label: "Último aviso",
       last: "Último aviso",

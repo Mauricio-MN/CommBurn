@@ -12,6 +12,7 @@ import { installTooltips } from "./ui/tooltips.js";
 import { LayersPanel } from "./ui/layers-panel.js";
 import { PathEditor } from "./ui/path-editor.js";
 import { getInspectorSections } from "./ui/inspector-state.js";
+import { ADJUSTABLE_PROPERTIES, computeAdjustedUpdates } from "./core/property-adjust.js";
 import { loadDesktopPlugins } from "./ui/plugins.js";
 import { createNativeMachineApi, isNativeApp } from "./machine/native-machine.js";
 import { machineAreaFromSettings } from "./machine/grbl.js";
@@ -387,6 +388,7 @@ function syncInspector() {
   byId("single-selection-fields").hidden = isMultiple;
   byId("multi-selection-message").hidden = !isMultiple;
   renderLayers();
+  syncQuickProperties();
   if (!selected) return;
   if (isMultiple) {
     byId("inspector-kind").textContent = i18n.t("ui.inspector.selectedCount", { count: selectedElements.length });
@@ -2501,6 +2503,46 @@ originInput.addEventListener("change", () => {
   renderPreview();
   commitHistory();
 });
+
+// "set" shows the primary selection's value; "relative" starts each delta at 0.
+function syncQuickProperties() {
+  const panel = byId("quick-properties");
+  const primary = currentDocument.elements.find((element) => element.id === selectedId);
+  panel.hidden = selectedIds.length === 0 || !primary;
+  if (panel.hidden) return;
+  const locked = currentDocument.layers.find((layer) => layer.id === primary.layerId)?.locked ?? false;
+  for (const input of panel.querySelectorAll("[data-quick-property]")) {
+    const property = input.dataset.quickProperty;
+    const mode = panel.querySelector(`[data-quick-mode="${property}"]`).value;
+    input.value = mode === "set" ? primary[property] ?? "" : 0;
+    input.disabled = locked;
+    panel.querySelector(`[data-quick-mode="${property}"]`).disabled = locked;
+  }
+}
+
+function applyQuickProperty(input) {
+  const panel = byId("quick-properties");
+  const property = input.dataset.quickProperty;
+  const mode = panel.querySelector(`[data-quick-mode="${property}"]`).value;
+  const minimum = mode === "set" ? ADJUSTABLE_PROPERTIES[property].minimum : -Infinity;
+  const value = numberFrom(input, property, minimum);
+  updateMany(computeAdjustedUpdates(currentDocument.elements, selectedIds, { property, mode, value }));
+  syncQuickProperties();
+}
+
+for (const input of byId("quick-properties").querySelectorAll("[data-quick-property]")) {
+  input.addEventListener("change", () => {
+    try {
+      applyQuickProperty(input);
+    } catch (error) {
+      showNotice(error);
+    }
+  });
+}
+
+for (const select of byId("quick-properties").querySelectorAll("[data-quick-mode]")) {
+  select.addEventListener("change", () => syncQuickProperties());
+}
 
 function updateSelectedFromInput(input) {
   const numericProperties = {

@@ -223,6 +223,19 @@
             <svg id="artboard" class="artboard" role="img" aria-label="Área de trabalho vetorial" data-i18n-aria-label="ui.canvas.artboard"><g id="objects"></g><g id="job-markers" pointer-events="none"></g><rect id="selection-marquee" class="selection-marquee" visibility="hidden" pointer-events="none"/></svg>
           </div>
         </div>
+        <section class="quick-properties" id="quick-properties" aria-label="Ajuste rápido de propriedades" data-i18n-aria-label="ui.quick.label" hidden>
+          <details open>
+            <summary data-i18n="ui.quick.position">Posição</summary>
+            <div class="quick-row" data-quick-row="xMm"><label for="quick-xMm" data-i18n="ui.quick.x">X</label><input id="quick-xMm" type="number" step="0.1" data-quick-property="xMm"><select data-quick-mode="xMm" aria-label="Modo de ajuste de X" data-i18n-aria-label="ui.quick.modeX"><option value="set" data-i18n="ui.quick.set">Definir</option><option value="relative" data-i18n="ui.quick.relative">Somar/subtrair</option></select></div>
+            <div class="quick-row" data-quick-row="yMm"><label for="quick-yMm" data-i18n="ui.quick.y">Y</label><input id="quick-yMm" type="number" step="0.1" data-quick-property="yMm"><select data-quick-mode="yMm" aria-label="Modo de ajuste de Y" data-i18n-aria-label="ui.quick.modeY"><option value="set" data-i18n="ui.quick.set">Definir</option><option value="relative" data-i18n="ui.quick.relative">Somar/subtrair</option></select></div>
+          </details>
+          <details>
+            <summary data-i18n="ui.quick.size">Tamanho e rotação</summary>
+            <div class="quick-row" data-quick-row="widthMm"><label for="quick-widthMm" data-i18n="ui.quick.width">Largura</label><input id="quick-widthMm" type="number" step="0.1" min="0" data-quick-property="widthMm"><select data-quick-mode="widthMm" aria-label="Modo de ajuste de largura" data-i18n-aria-label="ui.quick.modeWidth"><option value="set" data-i18n="ui.quick.set">Definir</option><option value="relative" data-i18n="ui.quick.relative">Somar/subtrair</option></select></div>
+            <div class="quick-row" data-quick-row="heightMm"><label for="quick-heightMm" data-i18n="ui.quick.height">Altura</label><input id="quick-heightMm" type="number" step="0.1" min="0" data-quick-property="heightMm"><select data-quick-mode="heightMm" aria-label="Modo de ajuste de altura" data-i18n-aria-label="ui.quick.modeHeight"><option value="set" data-i18n="ui.quick.set">Definir</option><option value="relative" data-i18n="ui.quick.relative">Somar/subtrair</option></select></div>
+            <div class="quick-row" data-quick-row="rotationDeg"><label for="quick-rotationDeg" data-i18n="ui.quick.rotation">Rotação</label><input id="quick-rotationDeg" type="number" step="1" data-quick-property="rotationDeg"><select data-quick-mode="rotationDeg" aria-label="Modo de ajuste de rotação" data-i18n-aria-label="ui.quick.modeRotation"><option value="set" data-i18n="ui.quick.set">Definir</option><option value="relative" data-i18n="ui.quick.relative">Somar/subtrair</option></select></div>
+          </details>
+        </section>
         <footer class="statusbar"><span id="selection-status" data-i18n="ui.canvas.noSelection">Nenhum objeto selecionado</span><span id="active-tool-status">Selecionar · V</span><span class="stage-note"><span class="status-dot"></span> <span data-i18n="ui.canvas.scale">Escala e medidas em milímetros</span></span><span>CommBurn</span></footer>
         <div id="notice" class="notice" role="status" aria-live="polite"></div>
       </section>

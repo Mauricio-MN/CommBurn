@@ -84,6 +84,11 @@ button, summary, select { cursor: pointer; }
 .tool-button.is-active > span:first-child { color: #2869df; }
 .tool-status { display: -webkit-box; height: 2.8em; overflow: hidden; margin: 9px 0 0; color: #768398; font-size: 10px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .inspector-panel[hidden] { display: none; }
+.quick-properties { display: grid; gap: 4px; max-width: 460px; margin: 0; padding: 6px 24px; background: #fff; border-top: 1px solid #edf0f5; font-size: 11px; color: #5f6a7d; }
+.quick-properties[hidden] { display: none; }
+.quick-properties summary { cursor: pointer; font-weight: 650; }
+.quick-row { display: grid; grid-template-columns: 70px 1fr 130px; align-items: center; gap: 6px; }
+.quick-row input, .quick-row select { min-width: 0; padding: 3px 6px; font: inherit; }
 .shape-properties[hidden] { display: none; }
 .panel-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .panel-heading h1, .panel-heading h2 { margin: 0; color: #273348; font-size: 13px; font-weight: 700; }
