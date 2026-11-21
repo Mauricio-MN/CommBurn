@@ -391,3 +391,34 @@ test("stage background is not overridden by the editor theme", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.artboard\s*\{[^}]*background:\s*var\(--artboard-bg,\s*#ffffff\)/);
 });
+
+test("system font listing reports unsupported, failed, and sorted de-duplicated families", async () => {
+  const { listSystemFontFamilies } = await import("../src/ui/font-options.js");
+  assert.deepEqual(await listSystemFontFamilies({}), { status: "unsupported", families: [] });
+  assert.deepEqual(
+    await listSystemFontFamilies({ queryLocalFonts: async () => { throw new Error("denied"); } }),
+    { status: "failed", families: [] }
+  );
+  assert.deepEqual(
+    await listSystemFontFamilies({
+      queryLocalFonts: async () => [
+        { family: "Verdana", fullName: "Verdana Bold" },
+        { family: "Arial", fullName: "Arial" },
+        { family: "Verdana", fullName: "Verdana" },
+        { family: "" }
+      ]
+    }),
+    { status: "loaded", families: ["Arial", "Verdana"] }
+  );
+});
+
+test("text creation and inspector expose bold and italic toggles", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  for (const id of ["new-font-bold", "new-font-italic", "object-font-bold", "object-font-italic", "load-system-fonts", "font-list-status"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /fontWeight: byId\("new-font-bold"\)\.checked \? "bold" : "normal"/);
+  assert.match(app, /fontStyle: byId\("new-font-italic"\)\.checked \? "italic" : "normal"/);
+  assert.match(app, /input\.id === "object-font-bold"/);
+});

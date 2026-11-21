@@ -691,3 +691,16 @@ test("import id prefixes skip prefixes already used by existing elements", () =>
   assert.equal(nextImportIdPrefix(["svg-2-1", "svg-2-2"], 2), "svg-3");
   assert.equal(nextImportIdPrefix(["svg-20-1"], 2), "svg-2");
 });
+
+test("SVG import keeps bold and italic text weight and style for editable text", () => {
+  const imported = importSvg(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50">
+      <text x="10" y="20" font-weight="700" font-style="italic">Bold</text>
+      <text x="10" y="40" font-weight="600" font-style="normal">Semi</text>
+    </svg>`, { layerId: "layer-cut", idPrefix: "input" });
+
+  assert.equal(imported.elements[0].fontWeight, "bold");
+  assert.equal(imported.elements[0].fontStyle, "italic");
+  assert.equal(imported.elements[1].fontWeight, "normal");
+  assert.equal(imported.elements[1].fontStyle, "normal");
+});

@@ -2,6 +2,7 @@ import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, pla
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { isFontInstalled } from "./font-availability.js";
+import { listSystemFontFamilies } from "./ui/font-options.js";
 import { parseProject, serializeProject } from "./core/project.js";
 import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
 import { CanvasController } from "./ui/canvas-controller.js";
@@ -162,32 +163,32 @@ stageBackgroundInput.addEventListener("input", () => {
   try { localStorage.setItem(STAGE_BACKGROUND_STORAGE_KEY, color); } catch {}
 });
 const fontOptionsList = byId("font-family-options");
-let localFontsRequested = false;
+const fontListStatus = byId("font-list-status");
+
+// Installed fonts need a user gesture and browser permission; the typed-name flow stays available either way.
+async function loadSystemFonts() {
+  const { status, families } = await listSystemFontFamilies(window);
+  if (status !== "loaded") {
+    fontListStatus.hidden = false;
+    fontListStatus.textContent = i18n.t(status === "unsupported" ? "ui.creation.systemFontsUnsupported" : "ui.creation.systemFontsDenied");
+    return;
+  }
+  fontListStatus.hidden = true;
+  fontOptionsList.querySelectorAll("option[data-system-font]").forEach((option) => option.remove());
+  for (const family of families) {
+    const option = document.createElement("option");
+    option.value = family;
+    option.dataset.systemFont = "";
+    fontOptionsList.append(option);
+  }
+}
+byId("load-system-fonts").addEventListener("click", loadSystemFonts);
 
 // Blank input falls back to the generic sans-serif family, matching the default in new projects.
 function normalizeFontFamily(value) {
   return String(value ?? "").trim() || "sans-serif";
 }
 
-// Local Font Access exposes installed fonts where the browser supports it (Chromium/Electron).
-// Other platforms keep the typed-name flow: the browser resolves whatever is installed.
-async function suggestLocalFonts() {
-  if (localFontsRequested || typeof window.queryLocalFonts !== "function") return;
-  localFontsRequested = true;
-  try {
-    const families = [...new Set((await window.queryLocalFonts()).map((font) => font.family))].sort();
-    for (const family of families) {
-      const option = document.createElement("option");
-      option.value = family;
-      fontOptionsList.append(option);
-    }
-  } catch {
-    // Permission denied or unsupported: the typed-name flow still works.
-  }
-}
-for (const input of [fontFamilyInput, byId("object-font")]) {
-  input.addEventListener("focus", suggestLocalFonts);
-}
 const boardFrame = byId("board-frame");
 const stage = boardFrame.parentElement;
 const zoomOutButton = byId("zoom-out");
@@ -417,6 +418,8 @@ function syncInspector() {
   byId("object-lock-ratio-field").hidden = isText;
   byId("object-text").value = isText ? selected.text : "";
   byId("object-font").value = selected.fontFamily ?? "sans-serif";
+  byId("object-font-bold").checked = selected.fontWeight === "bold";
+  byId("object-font-italic").checked = selected.fontStyle === "italic";
   const fontMissing = isText && missingFontElementIds.has(selected.id);
   byId("missing-font-hint").hidden = !fontMissing;
   byId("missing-font-hint").textContent = fontMissing ? i18n.t("ui.inspector.missingFont", { fontFamily: selected.fontFamily }) : "";
@@ -1005,7 +1008,8 @@ function addText() {
     type: "text",
     text: textInput.value || "Seu texto",
     fontFamily: normalizeFontFamily(fontFamilyInput.value),
-    xMm: numberFrom(byId("new-x"), "Posição X"),
+    fontWeight: byId("new-font-bold").checked ? "bold" : "normal",
+    fontStyle: byId("new-font-italic").checked ? "italic" : "normal",
     yMm: numberFrom(byId("new-y"), "Posição Y"),
     fontSizeMm: numberFrom(fontSizeInput, "Tamanho do texto", Number.MIN_VALUE),
     rotationDeg: 0,
@@ -1610,7 +1614,8 @@ function savePresentationState() {
       origin: originInput.value,
       text: textInput.value,
       fontFamily: normalizeFontFamily(fontFamilyInput.value),
-      fontSize: fontSizeInput.value,
+      fontBold: byId("new-font-bold").checked,
+      fontItalic: byId("new-font-italic").checked,
       newX: byId("new-x").value,
       newY: byId("new-y").value,
       shapeType: byId("new-shape-type").value,
@@ -1644,6 +1649,8 @@ function restorePresentationState() {
   setOriginCorner(saved.values.origin);
   textInput.value = saved.values.text;
   fontFamilyInput.value = saved.values.fontFamily;
+  byId("new-font-bold").checked = saved.values.fontBold;
+  byId("new-font-italic").checked = saved.values.fontItalic;
   fontSizeInput.value = saved.values.fontSize;
   byId("new-x").value = saved.values.newX;
   byId("new-y").value = saved.values.newY;
@@ -2599,6 +2606,10 @@ function updateSelectedFromInput(input) {
     updateSelected({ text: input.value }, true, false);
   } else if (input.id === "object-font") {
     updateSelected({ fontFamily: normalizeFontFamily(input.value) });
+  } else if (input.id === "object-font-bold" || input.id === "object-font-italic") {
+    updateSelected(input.id === "object-font-bold"
+      ? { fontWeight: input.checked ? "bold" : "normal" }
+      : { fontStyle: input.checked ? "italic" : "normal" });
   }
 }
 

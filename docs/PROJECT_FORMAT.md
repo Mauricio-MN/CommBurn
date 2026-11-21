@@ -2,12 +2,12 @@
 
 ## Versão atual
 
-O envelope persistido é JSON UTF-8 no formato `commburn-project`. A versão 2 declara a unidade canônica explicitamente:
+O envelope persistido é JSON UTF-8 no formato `commburn-project`. A versão 3 declara a unidade canônica e aceita `fontWeight` (`normal` ou `bold`) e `fontStyle` (`normal` ou `italic`) em textos:
 
 ```json
 {
   "format": "commburn-project",
-  "version": 2,
+  "version": 3,
   "units": "mm",
   "document": {}
 }
@@ -20,6 +20,8 @@ A versão do formato editável é independente da versão do aplicativo em `pack
 `src/core/project-conversions.js` contém as conversões entre versões. `parseProject` converte para a versão atual antes de validar e criar o modelo. Cada conversão precisa avançar exatamente uma versão. Versões futuras ou envelopes desconhecidos são recusados sem tentar adivinhar, descartar ou regravar seus dados.
 
 A conversão v1→v2 acrescenta `units: "mm"` ao envelope. Não transforma nem arredonda a geometria. A fixture v1 em `tests/fixtures/project-v1.json` é o contrato de compatibilidade para arquivos já existentes.
+
+A conversão v2→v3 apenas avança a versão. Textos antigos não têm `fontWeight` nem `fontStyle`; eles são lidos como `normal`, então a aparência não muda. A fixture v2 está em `tests/fixtures/project-v2.json`.
 
 ## TABUS
 

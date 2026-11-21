@@ -31,7 +31,7 @@ test("editable projects round-trip document dimensions, origin, layers, and obje
   assert.equal(JSON.parse(serialized).units, "mm");
 });
 
-test("version 1 editable projects migrate to version 2 without visual or model loss", async () => {
+test("version 1 editable projects migrate to the current version without visual or model loss", async () => {
   const legacySource = await readFile(new URL("./fixtures/project-v1.json", import.meta.url), "utf8");
   const legacyEnvelope = JSON.parse(legacySource);
   const convertedEnvelope = convertProjectEnvelope(legacyEnvelope);
@@ -39,12 +39,38 @@ test("version 1 editable projects migrate to version 2 without visual or model l
   const convertedDocument = parseProject(legacySource);
   const serializedAgain = JSON.parse(serializeProject(convertedDocument));
 
-  assert.equal(convertedEnvelope.version, 2);
+  assert.equal(convertedEnvelope.version, CURRENT_PROJECT_VERSION);
   assert.equal(convertedEnvelope.units, "mm");
   assert.deepEqual(convertedDocument, expectedDocument);
   assert.equal(renderSvg(convertedDocument), renderSvg(expectedDocument));
-  assert.equal(serializedAgain.version, 2);
+  assert.equal(serializedAgain.version, CURRENT_PROJECT_VERSION);
   assert.equal(serializedAgain.units, "mm");
+});
+
+test("version 2 editable projects migrate to version 3 with regular text and identical SVG", async () => {
+  const legacySource = await readFile(new URL("./fixtures/project-v2.json", import.meta.url), "utf8");
+  const legacyEnvelope = JSON.parse(legacySource);
+  const convertedDocument = parseProject(legacySource);
+  const expectedDocument = createDocument(legacyEnvelope.document);
+
+  assert.equal(convertedDocument.elements[0].fontWeight, "normal");
+  assert.equal(convertedDocument.elements[0].fontStyle, "normal");
+  assert.deepEqual(convertedDocument, expectedDocument);
+  assert.equal(renderSvg(convertedDocument), renderSvg(expectedDocument));
+  assert.equal(JSON.parse(serializeProject(convertedDocument)).version, 3);
+});
+
+test("bold and italic text round-trips through the project format", () => {
+  const document = createDocument({
+    widthMm: 60,
+    heightMm: 30,
+    elements: [{ id: "label", type: "text", xMm: 4, yMm: 15, text: "Bold", fontSizeMm: 6, fontWeight: "bold", fontStyle: "italic" }]
+  });
+  const parsed = parseProject(serializeProject(document));
+
+  assert.equal(parsed.elements[0].fontWeight, "bold");
+  assert.equal(parsed.elements[0].fontStyle, "italic");
+  assert.match(renderSvg(parsed), /font-weight="bold" font-style="italic"/);
 });
 
 test("project conversion rejects future versions instead of rewriting unknown data", () => {

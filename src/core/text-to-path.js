@@ -47,6 +47,9 @@ function unsupportedGlyph(character) {
 export function createTextOutlinePathData(element) {
   const font = resolveOutlineFont(element.fontFamily ?? "sans-serif");
   if (!font) throw new CommBurnRangeError("grbl.unsupportedTextFont", { fontFamily: element.fontFamily });
+  if (element.fontWeight === "bold" || element.fontStyle === "italic") {
+    throw new CommBurnRangeError("grbl.unsupportedTextStyle", { fontFamily: element.fontFamily });
+  }
   if (typeof element.text !== "string") throw new TypeError("Text element must contain a string");
   if (element.text.length > MAX_TEXT_CHARACTERS) {
     throw new CommBurnRangeError("grbl.textTooLong", { limit: MAX_TEXT_CHARACTERS });

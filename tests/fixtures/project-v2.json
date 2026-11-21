@@ -1,0 +1,46 @@
+{
+  "format": "commburn-project",
+  "version": 2,
+  "units": "mm",
+  "document": {
+    "widthMm": 60,
+    "heightMm": 30,
+    "origin": {
+      "corner": "top-left",
+      "flipX": false,
+      "flipY": false
+    },
+    "layers": [
+      {
+        "id": "engrave",
+        "name": "Engrave",
+        "operation": "engrave",
+        "feedMmPerMinute": 300,
+        "powerPercent": 10,
+        "passes": 1,
+        "fillSpacingMm": 1,
+        "fillAlgorithm": "horizontal-serpentine",
+        "objectOrder": "document",
+        "enabled": true,
+        "visible": true,
+        "locked": false,
+        "color": "#3978eb"
+      }
+    ],
+    "elements": [
+      {
+        "id": "label",
+        "type": "text",
+        "xMm": 4,
+        "yMm": 15,
+        "text": "Version two",
+        "fontSizeMm": 6,
+        "fontFamily": "sans-serif",
+        "rotationDeg": 0,
+        "skewXDeg": 0,
+        "skewYDeg": 0,
+        "layerId": "engrave"
+      }
+    ]
+  }
+}

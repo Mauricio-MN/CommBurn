@@ -11,9 +11,16 @@ const PRESENTATION_ATTRIBUTES = new Set([
   "opacity", "fill-opacity", "stroke-opacity"
 ]);
 // Style properties that become presentation attributes; other properties are ignored and reported.
-const STYLE_ATTRIBUTE_PROPERTIES = new Set([...PRESENTATION_ATTRIBUTES, "font-size", "font-family", "text-anchor", "dominant-baseline"]);
-const TEXT_ONLY_STYLE_PROPERTIES = new Set(["font-size", "font-family", "text-anchor", "dominant-baseline"]);
+const STYLE_ATTRIBUTE_PROPERTIES = new Set([...PRESENTATION_ATTRIBUTES, "font-size", "font-family", "font-weight", "font-style", "text-anchor", "dominant-baseline"]);
+const TEXT_ONLY_STYLE_PROPERTIES = new Set(["font-size", "font-family", "font-weight", "font-style", "text-anchor", "dominant-baseline"]);
 const PAINT_STYLE_PROPERTIES = new Set(["fill", "stroke"]);
+// Only bold and italic are representable; other weights and oblique-only styles fall back to normal.
+function importedFontWeight(value) {
+  return ["bold", "bolder", "700", "800", "900"].includes(String(value ?? "").trim()) ? "bold" : "normal";
+}
+function importedFontStyle(value) {
+  return ["italic", "oblique"].includes(String(value ?? "").trim()) ? "italic" : "normal";
+}
 const GEOMETRY_ATTRIBUTES = {
   rect: new Set(["x", "y", "width", "height", "rx", "ry", "transform"]),
   circle: new Set(["cx", "cy", "r", "transform"]),
@@ -22,7 +29,7 @@ const GEOMETRY_ATTRIBUTES = {
   path: new Set(["d", "transform", "data-power-percent"]),
   polygon: new Set(["points", "transform"]),
   polyline: new Set(["points", "transform"]),
-  text: new Set(["x", "y", "font-size", "font-family", "text-anchor", "dominant-baseline", "transform"]),
+  text: new Set(["x", "y", "font-size", "font-family", "font-weight", "font-style", "text-anchor", "dominant-baseline", "transform"]),
   image: new Set(["x", "y", "width", "height", "href", "xlink:href", "preserveAspectRatio", "transform"])
 };
 const ROOT_ATTRIBUTES = new Set(["xmlns", "xmlns:xlink", "width", "height", "viewBox", "version", "preserveAspectRatio", "data-commburn-version", "transform"]);
@@ -1220,6 +1227,7 @@ export function importSvgTree(inputRoot, {
         xMm: view.mapX(textPoint.x),
         yMm: view.mapY(textPoint.y),
         text, fontSizeMm: size * transform.scale, fontFamily: a["font-family"] ?? "sans-serif",
+        fontWeight: importedFontWeight(a["font-weight"]), fontStyle: importedFontStyle(a["font-style"]),
         rotationDeg: transform.rotationDeg
       });
     } else if (node.name === "image") {

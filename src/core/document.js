@@ -13,6 +13,14 @@ function finiteNumber(value, label) {
   return value;
 }
 
+function fontChoice(value, allowed, label) {
+  const choice = value ?? "normal";
+  if (!allowed.includes(choice)) {
+    throw new CommBurnRangeError("document.fontChoice", { label, value: String(choice) }, { message: `${label} must be one of ${allowed.join(", ")}` });
+  }
+  return choice;
+}
+
 function positiveNumber(value, label) {
 
   const number = finiteNumber(value, label);
@@ -124,6 +132,8 @@ function normalizeElement(element, index, defaultLayerId) {
       id, type: "text", xMm, yMm, text: element.text,
       fontSizeMm: positiveNumber(element.fontSizeMm, `Element ${id} fontSizeMm`),
       fontFamily: String(element.fontFamily ?? "sans-serif"),
+      fontWeight: fontChoice(element.fontWeight, ["normal", "bold"], `Element ${id} fontWeight`),
+      fontStyle: fontChoice(element.fontStyle, ["normal", "italic"], `Element ${id} fontStyle`),
       layerId,
       ...transforms
     };
@@ -351,7 +361,8 @@ export function renderSvg(input) {
       const lines = element.text.normalize("NFC").replace(/\r\n?/g, "\n").replaceAll("\t", "    ").split("\n");
       const lineHeight = element.fontSizeMm * 1.2;
       const spans = lines.map((line, index) => `<tspan x="${point.xMm}" y="${point.yMm + index * lineHeight}">${escapeXml(line)}</tspan>`).join("");
-      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" font-family="${escapeXml(element.fontFamily ?? "sans-serif")}" font-size="${element.fontSizeMm}" font-kerning="none" font-variant-ligatures="none" xml:space="preserve" ${operationLook(layer)}${transform}>${spans}</text>`);
+      const fontStyleAttributes = `${element.fontWeight === "bold" ? ' font-weight="bold"' : ""}${element.fontStyle === "italic" ? ' font-style="italic"' : ""}`;
+      nodesByLayer.get(layer.id).push(`<text id="${escapeXml(element.id)}" font-family="${escapeXml(element.fontFamily ?? "sans-serif")}"${fontStyleAttributes} font-size="${element.fontSizeMm}" font-kerning="none" font-variant-ligatures="none" xml:space="preserve" ${operationLook(layer)}${transform}>${spans}</text>`);
       continue;
     }
     const xMm = point.flipX ? point.xMm - element.widthMm : point.xMm;
