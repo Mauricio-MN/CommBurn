@@ -29,6 +29,7 @@
     "@capacitor/android": "^8.6.2",
     "@capacitor/cli": "^8.6.2",
     "@capacitor/core": "^8.6.2",
+    "@commburn/capacitor-usb-serial": "file:plugins/capacitor-usb-serial",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0"
   },

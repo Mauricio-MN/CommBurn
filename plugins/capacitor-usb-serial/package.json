@@ -1,0 +1,18 @@
+{
+  "name": "@commburn/capacitor-usb-serial",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor plugin that exposes USB serial ports (GRBL controllers) to the CommBurn Android app.",
+  "license": "AGPL-3.0-only",
+  "files": [
+    "android"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": "^8.6.2"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  }
+}
