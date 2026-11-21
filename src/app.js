@@ -223,6 +223,7 @@ function applyInterfaceLocale() {
   if (!projectNameIsUserValue) projectNameInput.value = i18n.t("app.unsavedProject");
   toolbar.setTranslator(i18n.t);
   layersPanel?.setTranslator(i18n.t);
+  renderDocumentTabs();
   renderActiveToolStatus();
   renderSelectionStatus();
   renderInspectorLocale();
@@ -231,7 +232,10 @@ function applyInterfaceLocale() {
   renderMachineState();
 }
 let presentationInternalClose = false;
-const history = new DocumentHistory(currentDocument);
+let history = new DocumentHistory(currentDocument);
+const documentTabs = [{ id: "tab-1", state: null }];
+let activeDocumentTabId = "tab-1";
+let documentTabSequence = 1;
 const pathEditor = new PathEditor(byId("path-editor-dialog"));
 
 function readDocument() {
@@ -2606,6 +2610,116 @@ function restoreDocument(snapshot) {
   syncInspector();
   renderPreview();
 }
+
+function captureDocumentTabState() {
+  return {
+    document: currentDocument,
+    history,
+    layerNames: [...generatedLayerNames],
+    activeLayerId,
+    selectedIds: [...selectedIds],
+    projectName: projectNameInput.value,
+    projectNameIsUserValue
+  };
+}
+
+function applyDocumentTabState(state) {
+  history = state.history;
+  generatedLayerNames.clear();
+  for (const [id, value] of state.layerNames) generatedLayerNames.set(id, value);
+  activeLayerId = state.activeLayerId;
+  selectedIds = [...state.selectedIds];
+  projectNameInput.value = state.projectName;
+  projectNameIsUserValue = state.projectNameIsUserValue;
+  restoreDocument(state.document);
+  renderLayers();
+}
+
+function documentTabsBusy() {
+  if (machineBusy || presentationActive) {
+    showNotice("Aguarde o trabalho da máquina terminar antes de trocar de aba.");
+    return true;
+  }
+  return false;
+}
+
+function switchDocumentTab(id) {
+  if (id === activeDocumentTabId || documentTabsBusy()) return;
+  const target = documentTabs.find((tab) => tab.id === id);
+  documentTabs.find((tab) => tab.id === activeDocumentTabId).state = captureDocumentTabState();
+  activeDocumentTabId = id;
+  applyDocumentTabState(target.state);
+  renderDocumentTabs();
+}
+
+function addDocumentTab() {
+  if (documentTabsBusy()) return;
+  documentTabs.find((tab) => tab.id === activeDocumentTabId).state = captureDocumentTabState();
+  documentTabSequence += 1;
+  documentTabs.push({ id: `tab-${documentTabSequence}`, state: null });
+  activeDocumentTabId = `tab-${documentTabSequence}`;
+  history = new DocumentHistory(createDocument({ widthMm: 180, heightMm: 120 }));
+  newDocument();
+  renderDocumentTabs();
+}
+
+function closeDocumentTab(id) {
+  if (documentTabs.length === 1 || documentTabsBusy()) return;
+  const index = documentTabs.findIndex((tab) => tab.id === id);
+  const isActive = id === activeDocumentTabId;
+  const state = isActive ? captureDocumentTabState() : documentTabs[index].state;
+  if (state.document.elements.length > 0 && !window.confirm(i18n.t("ui.tabs.closeConfirm"))) return;
+  documentTabs.splice(index, 1);
+  if (isActive) {
+    const next = documentTabs[Math.max(0, index - 1)];
+    activeDocumentTabId = next.id;
+    applyDocumentTabState(next.state);
+  }
+  renderDocumentTabs();
+}
+
+const documentTabsElement = byId("document-tabs");
+
+function renderDocumentTabs() {
+  const tabNodes = documentTabs.map((tab) => {
+    const isActive = tab.id === activeDocumentTabId;
+    const label = isActive ? projectNameInput.value : tab.state.projectName;
+    const wrapper = document.createElement("div");
+    wrapper.className = `document-tab${isActive ? " is-active" : ""}`;
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "document-tab-select";
+    select.dataset.tabId = tab.id;
+    select.setAttribute("aria-pressed", String(isActive));
+    select.textContent = label;
+    wrapper.append(select);
+    if (documentTabs.length > 1) {
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "document-tab-close";
+      close.dataset.closeTabId = tab.id;
+      close.setAttribute("aria-label", i18n.t("ui.tabs.close", { name: label }));
+      close.textContent = "×";
+      wrapper.append(close);
+    }
+    return wrapper;
+  });
+  const addButton = document.createElement("button");
+  addButton.type = "button";
+  addButton.className = "document-tab-add";
+  addButton.id = "add-document-tab";
+  addButton.textContent = i18n.t("ui.tabs.new");
+  documentTabsElement.replaceChildren(...tabNodes, addButton);
+}
+
+documentTabsElement.addEventListener("click", (event) => {
+  const closeId = event.target.closest("[data-close-tab-id]")?.dataset.closeTabId;
+  if (closeId) return closeDocumentTab(closeId);
+  const selectId = event.target.closest("[data-tab-id]")?.dataset.tabId;
+  if (selectId) return switchDocumentTab(selectId);
+  if (event.target.closest("#add-document-tab")) addDocumentTab();
+});
+projectNameInput.addEventListener("input", () => renderDocumentTabs());
 
 function showShortcuts() {
   const list = byId("shortcuts-list");

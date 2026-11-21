@@ -162,6 +162,12 @@ export default Object.freeze({
       properties: "Editar propriedades",
       copy: "Copiar"
     },
+    tabs: {
+      label: "Documentos abertos",
+      new: "Nova aba",
+      close: "Fechar {name}",
+      closeConfirm: "Fechar esta aba? Alterações não salvas serão perdidas."
+    },
     inspector: {
       title: "Propriedades do objeto",
       selected: "Objeto selecionado",

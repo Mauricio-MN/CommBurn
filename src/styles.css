@@ -316,3 +316,11 @@ dialog td:first-child { width: 110px; font-family: ui-monospace, monospace; font
 .context-menu-item { text-align: left; padding: 7px 10px; border: 0; border-radius: 5px; background: none; font: inherit; font-size: 13px; color: #1f2b3d; cursor: pointer; }
 .context-menu-item:hover, .context-menu-item:focus-visible { background: #eef3fb; outline: none; }
 .context-menu-danger { color: #b42318; }
+.document-tabs { display: flex; align-items: flex-end; gap: 4px; padding: 6px 10px 0; overflow-x: auto; background: #eef2f9; border-bottom: 1px solid var(--line); }
+.document-tab { display: flex; align-items: center; max-width: 220px; border: 1px solid var(--line); border-bottom: 0; border-radius: 7px 7px 0 0; background: #f9fafe; }
+.document-tab.is-active { background: #fff; font-weight: 600; }
+.document-tab-select, .document-tab-close, .document-tab-add { border: 0; background: none; font: inherit; font-size: 13px; color: #1f2b3d; cursor: pointer; }
+.document-tab-select { padding: 6px 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.document-tab-close { padding: 4px 8px 4px 0; color: #5b6b82; }
+.document-tab-add { padding: 6px 10px; color: #3b5b8c; }
+.document-tab-select:focus-visible, .document-tab-close:focus-visible, .document-tab-add:focus-visible { outline: 2px solid #3b5b8c; outline-offset: -2px; }
