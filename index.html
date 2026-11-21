@@ -262,6 +262,14 @@
         <button class="button button-primary" id="apply-image-edit" type="button" disabled data-i18n="ui.dialogs.applyAndImport">Aplicar e importar</button>
       </div>
     </dialog>
+    <dialog id="image-layer-dialog" class="image-layer-dialog" aria-labelledby="image-layer-title">
+      <h2 id="image-layer-title" data-i18n="ui.dialogs.imageLayerTitle">Camada com vetores</h2>
+      <p data-i18n="ui.dialogs.imageLayerBody">Imagens só podem ser importadas em uma camada vazia ou que contenha apenas imagens. Deseja importar a imagem em uma nova camada?</p>
+      <form method="dialog" class="preview-actions">
+        <button class="button button-secondary" value="cancel" type="submit" data-i18n="common.cancel">Cancelar</button>
+        <button class="button button-primary" value="new-layer" type="submit" data-i18n="ui.dialogs.imageLayerNew">Importar em nova camada</button>
+      </form>
+    </dialog>
     <dialog id="machine-preview-dialog" class="machine-preview-dialog" aria-labelledby="machine-preview-title">
       <form method="dialog"><button class="dialog-close" aria-label="Fechar prévia" data-i18n-aria-label="ui.dialogs.closePreview">×</button></form>
       <h2 id="machine-preview-title" data-i18n="ui.dialogs.machinePreview">Prévia do processamento GRBL</h2>

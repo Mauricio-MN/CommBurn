@@ -282,6 +282,10 @@ export default Object.freeze({
     dialogs: {
       closeImageEditor: "Close image editor",
       editImage: "Edit image",
+      imageLayerTitle: "Layer already has vectors",
+      imageLayerBody: "Images can only be imported into an empty layer or a layer that holds only images. Import the image into a new layer?",
+      imageLayerNew: "Import into new layer",
+      imageLayerRejected: "Image not imported: the active layer has vectors or is not an image layer. Choose an empty layer or import into a new one.",
       imageEditHelp: "Crop, resize, rotate, apply filters, and adjust tones. The edited image will be embedded in the document in millimetres.",
       widthInDocument: "Width in document",
       heightInDocument: "Height in document",

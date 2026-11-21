@@ -1948,6 +1948,18 @@ function blobToDataUri(blob) {
   });
 }
 
+function layerAcceptsImages(layer) {
+  return currentDocument.elements.every((element) => element.layerId !== layer.id || element.type === "image");
+}
+
+function askNewLayerForImage() {
+  const dialog = byId("image-layer-dialog");
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "new-layer"), { once: true });
+    dialog.showModal();
+  });
+}
+
 async function openImageEditor(file = null) {
   let target;
   let sourceBlob;
@@ -1964,8 +1976,13 @@ async function openImageEditor(file = null) {
     if ((file.type && !file.type.startsWith("image/")) || (!file.type && !mimeByExtension[extension])) {
       throw new TypeError("Escolha um arquivo de imagem compatível com o navegador.");
     }
-    const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
+    let layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
     if (!layer || layer.locked) throw new Error("Selecione uma camada desbloqueada para importar objetos.");
+    if (!layerAcceptsImages(layer)) {
+      if (!await askNewLayerForImage()) throw new Error(i18n.t("ui.dialogs.imageLayerRejected"));
+      addLayer();
+      layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
+    }
     layerId = layer.id;
     target = { mode: "import", layerId };
     sourceBlob = file.type ? file : new Blob([file], { type: mimeByExtension[extension] });

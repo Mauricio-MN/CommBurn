@@ -283,6 +283,10 @@ export default Object.freeze({
     dialogs: {
       closeImageEditor: "Fechar editor de imagem",
       editImage: "Editar imagem",
+      imageLayerTitle: "A camada já tem vetores",
+      imageLayerBody: "Imagens só podem ser importadas em uma camada vazia ou que contenha apenas imagens. Deseja importar a imagem em uma nova camada?",
+      imageLayerNew: "Importar em nova camada",
+      imageLayerRejected: "Imagem não importada: a camada ativa tem vetores ou não é de imagens. Escolha uma camada vazia ou importe em uma nova.",
       imageEditHelp: "Recorte, redimensione, gire, aplique filtros e ajuste tons. A imagem editada será incorporada ao trabalho em milímetros.",
       widthInDocument: "Largura no trabalho",
       heightInDocument: "Altura no trabalho",
