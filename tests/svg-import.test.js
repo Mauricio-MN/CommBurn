@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSync, stringify } from "svgson";
 import { getSvgViewport, importSvgTree, nextImportIdPrefix, sanitizeSvgForVisual, validateSvgSource } from "../src/core/svg-import.js";
-import { jobReferencePoints, planGrblJob, planToDocumentSpace, renderSvg } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, planGrblJob, planToDocumentSpace, renderSvg } from "../src/core/document.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
@@ -703,4 +703,27 @@ test("SVG import keeps bold and italic text weight and style for editable text",
   assert.equal(imported.elements[0].fontStyle, "italic");
   assert.equal(imported.elements[1].fontWeight, "normal");
   assert.equal(imported.elements[1].fontStyle, "normal");
+});
+
+test("embedded raster images survive SVG import, export, and re-import", () => {
+  const source = `<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50">
+      <rect x="1" y="1" width="20" height="10"/>
+      <image x="10" y="10" width="30" height="20" href="${onePixelPng}"/>
+    </svg>`;
+  const layer = { ...DEFAULT_LAYER, id: "layer-cut", operation: "cut" };
+  const imported = importSvgTree(parseSync(validateSvgSource(source)), {
+    layerId: layer.id, forceLayerId: layer.id, fallbackLayer: layer, idPrefix: "svg-1"
+  });
+  const image = imported.elements.find((element) => element.type === "image");
+  assert.equal(image.imageDataUri, onePixelPng);
+
+  const exported = renderSvg(createDocument({
+    widthMm: 100, heightMm: 50,
+    layers: [{ ...layer, id: "layer-image", operation: "engrave" }],
+    elements: [{ ...image, layerId: "layer-image" }]
+  }));
+  assert.match(exported, /<image [^>]*href="data:image\/png;base64,/);
+
+  const reimported = importSvg(exported, { layerId: layer.id, forceLayerId: layer.id, fallbackLayer: layer, idPrefix: "svg-2" });
+  assert.equal(reimported.elements.filter((element) => element.type === "image").length, 1);
 });
