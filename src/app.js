@@ -3036,7 +3036,7 @@ stage.addEventListener("wheel", (event) => {
 }, { passive: false });
 renderZoomControls();
 
-for (const button of document.querySelectorAll('[data-action="new"]')) button.addEventListener("click", newDocument);
+for (const button of document.querySelectorAll('[data-action="new"]')) button.addEventListener("click", addDocumentTab);
 for (const button of document.querySelectorAll('[data-action="import-svg"]')) {
   button.addEventListener("click", () => byId("svg-file-input").click());
 }
