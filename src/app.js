@@ -1,6 +1,7 @@
 import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
+import { isFontInstalled } from "./font-availability.js";
 import { parseProject, serializeProject } from "./core/project.js";
 import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
 import { CanvasController } from "./ui/canvas-controller.js";
@@ -220,6 +221,8 @@ let noticeTimer;
 let machineConnected = false;
 let machineSimulation = false;
 let machineBusy = false;
+// Text objects whose font is not installed here; they block sending until the font is changed.
+let missingFontElementIds = new Set();
 let machineSimulationPlan = null;
 let machineSimulationDocument = null;
 let machineSimulationPlayback = [];
@@ -400,6 +403,9 @@ function syncInspector() {
   byId("object-lock-ratio-field").hidden = isText;
   byId("object-text").value = isText ? selected.text : "";
   byId("object-font").value = selected.fontFamily ?? "sans-serif";
+  const fontMissing = isText && missingFontElementIds.has(selected.id);
+  byId("missing-font-hint").hidden = !fontMissing;
+  byId("missing-font-hint").textContent = fontMissing ? i18n.t("ui.inspector.missingFont", { fontFamily: selected.fontFamily }) : "";
   byId("object-x").value = selected.xMm;
   byId("object-y").value = selected.yMm;
   byId("object-width").value = selected.widthMm ?? "";
@@ -625,7 +631,11 @@ function updateMachineControls() {
   byId("read-machine-settings").disabled = !machineConnected || machineSimulation || machineBusy;
   byId("read-machine-area").disabled = !machineConnected || machineSimulation || machineBusy;
   byId("machine-safety-check").hidden = machineSimulation;
-  startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy;
+  const fontBlocked = missingFontElementIds.size > 0;
+  byId("missing-font-status").hidden = !fontBlocked;
+  byId("missing-font-status").textContent = fontBlocked ? i18n.t("ui.machine.missingFontBlocked", { count: missingFontElementIds.size }) : "";
+  simulateMachineButton.disabled ||= fontBlocked;
+  startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy || fontBlocked;
   startMachineButton.textContent = i18n.t(machineSimulation ? "ui.machine.simulateJob" : "ui.machine.sendJob");
   const jobActive = machineConnected && machineBusy;
   const stopping = machineJobStopRequested;
@@ -935,6 +945,11 @@ function renderPreview() {
 
     const svgDocument = new DOMParser().parseFromString(renderSvg({ ...currentDocument, origin: STAGE_ORIGIN }), "image/svg+xml");
     if (svgDocument.querySelector("parsererror")) throw new Error("Não foi possível desenhar este documento.");
+    missingFontElementIds = new Set(
+      currentDocument.elements
+        .filter((element) => element.type === "text" && !isFontInstalled(element.fontFamily))
+        .map((element) => element.id)
+    );
     const selection = new Set(selectedIds);
     const nodes = Array.from(svgDocument.querySelectorAll("[id]"), (node) => {
       const nodeId = node.getAttribute("id");
@@ -943,6 +958,11 @@ function renderPreview() {
       imported.dataset.layerId = node.closest("[data-layer-id]")?.getAttribute("data-layer-id") ?? "";
       const layer = currentDocument.layers.find((candidate) => candidate.id === imported.dataset.layerId);
       if (layer?.locked) imported.dataset.locked = "true";
+      if (missingFontElementIds.has(nodeId)) {
+        // Shown with a generic face so the text stays visible while it blinks.
+        imported.classList.add("missing-font");
+        imported.setAttribute("font-family", "sans-serif");
+      }
       if (selection.has(imported.dataset.id)) imported.classList.add("selected");
       return imported;
     });
@@ -956,6 +976,7 @@ function renderPreview() {
     removeButton.disabled = selected.length === 0 || hasLockedLayer;
     byId("duplicate-selection").disabled = selected.length === 0 || hasLockedLayer;
     renderLayers();
+    updateMachineControls();
   } catch (error) {
     showNotice(error);
   }
@@ -3311,6 +3332,7 @@ byId("home-machine").addEventListener("click", async () => {
 byId("machine-smax").addEventListener("input", updateMachineControls);
 startMachineButton.addEventListener("click", async () => {
   try {
+    if (missingFontElementIds.size > 0) throw new Error(i18n.t("ui.machine.missingFontBlocked", { count: missingFontElementIds.size }));
     if (!machineSimulation && !safetyCheckbox.checked) throw new Error(i18n.t("ui.machine.confirmSafety"));
     const documentModel = readDocument();
     await prepareRasters(documentModel);

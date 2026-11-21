@@ -134,6 +134,7 @@
           <div id="text-inspector-fields">
             <label class="field" data-i18n="ui.inspector.text">Texto<textarea id="object-text" rows="2"></textarea></label>
             <label class="field" data-i18n="ui.inspector.font">Fonte<input id="object-font" type="text" list="font-family-options" autocomplete="off" spellcheck="false"></label>
+          <p class="help-text" id="missing-font-hint" role="alert" hidden></p>
           </div>
           <div id="path-inspector-fields" hidden>
             <p class="help-text" data-i18n="ui.inspector.pathHelp">Edite nós e alças em uma janela visual dedicada.</p>
@@ -197,6 +198,7 @@
           <p class="help-text" data-i18n="ui.machine.positionHelp">Métodos opcionais e explícitos: “Definir zero aqui” grava a posição atual como X0 Y0 no sistema de coordenadas escolhido (G10 L20); “Homing” move a máquina até os fins de curso ($H) e exige confirmação; “Ler posição” só consulta, sem mover.</p>
           <p class="machine-state" id="machine-state" role="status" data-i18n="ui.machine.disconnected">Desconectado</p>
           <label class="safety-check" id="machine-safety-check"><input id="safety-confirmed" type="checkbox"><span data-i18n="ui.machine.safety">Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
+          <p class="help-text" id="missing-font-status" role="alert" hidden></p>
           <button class="button button-primary full-width" id="start-machine-job" type="button" disabled data-i18n="ui.machine.sendJob">Enviar contornos à máquina</button>
           <div class="machine-job-controls" role="group" aria-label="Controle do trabalho" data-i18n-aria-label="ui.machine.jobControls">
             <button class="button button-secondary full-width" id="pause-machine-job" type="button" data-machine-job-control="pause" disabled data-i18n="ui.machine.pause">Pausar trabalho</button>

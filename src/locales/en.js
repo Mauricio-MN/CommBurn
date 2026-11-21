@@ -187,6 +187,7 @@ export default Object.freeze({
       title: "Object properties",
       selected: "Selected object",
       selectedCount: { one: "{count} object selected", other: "{count} objects selected" },
+      missingFont: "Font “{fontFamily}” is not installed on this computer. Choose another font to unlock sending.",
       multiHelp: "Drag to move all. Use Shift-click or a marquee to adjust the selection; Delete and Duplicate apply to all.",
       text: "Text",
       font: "Font",
@@ -273,6 +274,7 @@ export default Object.freeze({
       baudSelected: "{rate} baud selected",
       connectedAt: "Connected to {path}; {baud}. Check the firmware and machine before sending.",
       confirmSafety: "Confirm the safety checklist before sending.",
+      missingFontBlocked: "{count} text object(s) use a font not installed here. Click the blinking text and choose another font to unlock sending.",
       simulationAccepted: "Simulation accepted: {lines} commands. No hardware will be activated.",
       jobAccepted: "Job accepted: {lines} commands.",
       pauseWarning: "Pause requested; use the physical emergency stop if there is any risk."

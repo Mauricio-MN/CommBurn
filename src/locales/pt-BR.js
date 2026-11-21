@@ -187,6 +187,7 @@ export default Object.freeze({
       title: "Propriedades do objeto",
       selected: "Objeto selecionado",
       selectedCount: { one: "{count} objeto selecionado", other: "{count} objetos selecionados" },
+      missingFont: "A fonte “{fontFamily}” não está instalada neste computador. Escolha outra fonte para liberar o envio.",
       multiHelp: "Arraste para mover todos. Use Shift+clique ou uma caixa para ajustar a seleção; Delete e Duplicar atuam em todos.",
       text: "Texto",
       font: "Fonte",
@@ -274,6 +275,7 @@ export default Object.freeze({
       connectedAt: "Conectado à porta {path}; {baud}. Confira o firmware e a máquina antes de enviar.",
       controllerFailure: "Falha ao consultar o controlador: {error}",
       confirmSafety: "Confirme a lista de segurança antes de enviar.",
+      missingFontBlocked: "{count} objeto(s) de texto usam uma fonte que não está instalada aqui. Clique no texto piscando e escolha outra fonte para liberar o envio.",
       simulationAccepted: "Simulação aceita: {lines} comandos. Nenhum hardware será acionado.",
       jobAccepted: "Trabalho aceito: {lines} comandos.",
       pauseWarning: "Pausa solicitada; use a parada de emergência física se houver risco."

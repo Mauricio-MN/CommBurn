@@ -151,6 +151,10 @@ span.origin-dot { display: block; width: 8px; height: 8px; border: 0; background
 .artboard { grid-area: board; display: block; width: 100%; height: auto; aspect-ratio: var(--doc-ratio, 3 / 2); overflow: hidden; background: #fff; border: 1px solid #dce3ed; box-shadow: 0 9px 28px rgb(47 64 96 / 12%); touch-action: none; }
 .artboard [data-id] { cursor: pointer; pointer-events: all; }
 .artboard [data-id].selected { filter: drop-shadow(0 0 1.5px #3978eb) drop-shadow(0 0 3px rgb(57 120 235 / 70%)); }
+.artboard [data-id].missing-font { animation: missing-font-blink 1s steps(1, end) infinite; }
+@keyframes missing-font-blink {
+  50% { filter: drop-shadow(0 0 3px #e53935) drop-shadow(0 0 6px rgb(229 57 53 / 80%)); }
+}
 .selection-marquee { fill: #3978eb20; stroke: #3978eb; stroke-dasharray: 4 2; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .ruler { position: relative; color: #778398; font-size: 9px; user-select: none; }
 .ruler-top { grid-area: x; display: flex; align-items: end; border-bottom: 1px solid #cfd7e3; }
