@@ -369,6 +369,34 @@ test("raster images engrave as scan lines with per-segment power", () => {
   assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000 }), /GRBL supports/);
 });
 
+test("raster layers honour vertical and unidirectional fill algorithms", () => {
+  const gray = Buffer.from([0, 128, 255, 0, 255, 255, 255, 255]).toString("base64");
+  const rasters = { photo: { widthPx: 4, heightPx: 2, gray } };
+  const rasterDocument = (fillAlgorithm) => ({
+    widthMm: 100, heightMm: 100, origin: "top-left",
+    layers: [{ id: "L1", name: "Img", operation: "engrave", color: "#000000", feedMmPerMinute: 1000, powerPercent: 50, passes: 1, fillSpacingMm: 1, fillAlgorithm, objectOrder: "document", enabled: true, visible: true, locked: false }],
+    elements: [{ id: "photo", type: "image", xMm: 10, yMm: 10, widthMm: 4, heightMm: 2, layerId: "L1", imageDataUri: "data:image/png;base64,iVBORw0KGgo=" }]
+  });
+  const scanOf = (fillAlgorithm) => planGrblJob(rasterDocument(fillAlgorithm), { maxSpindleSpeed: 1000, rasters, imageMode: "grayscale" })
+    .paths.filter(({ kind }) => kind === "work");
+  const vertical = scanOf("vertical-unidirectional");
+  assert.ok(vertical.length > 0);
+  assert.ok(vertical.every(({ points }) => new Set(points.map(({ xMm }) => xMm)).size === 1), "vertical lines keep one x per scan line");
+  assert.ok(vertical.every(({ points }) => points.every((point, index) => index === 0 || point.yMm >= points[index - 1].yMm)), "unidirectional never reverses");
+  const serpentine = scanOf("vertical-serpentine");
+  assert.ok(serpentine.some(({ points }) => points.length > 1 && points[1].yMm < points[0].yMm), "serpentine reverses alternate lines");
+});
+
+test("bold and italic text layers produce G-code paths and job markers", () => {
+  const layer = { id: "L1", name: "Texto", operation: "engrave", color: "#000000", feedMmPerMinute: 300, powerPercent: 50, passes: 1, fillSpacingMm: 1, fillAlgorithm: "horizontal-serpentine", objectOrder: "document", enabled: true, visible: true, locked: false };
+  const plan = (fontWeight, fontStyle) => planGrblJob({
+    widthMm: 100, heightMm: 100, origin: "top-left", layers: [layer],
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 20, text: "Ag", fontSizeMm: 8, fontFamily: "sans-serif", fontWeight, fontStyle, layerId: "L1" }]
+  }, { maxSpindleSpeed: 1000 });
+  assert.ok(plan("bold", "normal").paths.some(({ kind }) => kind === "work"));
+  assert.ok(plan("normal", "italic").paths.some(({ kind }) => kind === "work"));
+});
+
 test("GRBL rotated text follows the rotated outline instead of the upright outline", () => {
   const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000 };
   const bounds = (documentModel) => {

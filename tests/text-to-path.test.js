@@ -42,15 +42,12 @@ test("OpenType text conversion rejects characters without a glyph instead of dro
     (error) => error.code === "grbl.unsupportedTextGlyph"
   );
 });
-test("G-code text outlines reject bold and italic instead of silently sending regular glyphs", () => {
-  const base = { xMm: 0, yMm: 0, text: "A", fontSizeMm: 8 };
-  assert.throws(
-    () => createTextOutlinePathData({ ...base, fontWeight: "bold" }),
-    (error) => error.code === "grbl.unsupportedTextStyle"
-  );
-  assert.throws(
-    () => createTextOutlinePathData({ ...base, fontStyle: "italic" }),
-    (error) => error.code === "grbl.unsupportedTextStyle"
-  );
-  assert.ok(createTextOutlinePathData({ ...base, fontWeight: "normal", fontStyle: "normal" }).length > 0);
+test("G-code text outlines use the bold and italic faces instead of regular glyphs", () => {
+  const base = { xMm: 0, yMm: 0, text: "Ag", fontSizeMm: 8, fontFamily: "serif" };
+  const regular = createTextOutlinePathData({ ...base, fontWeight: "normal", fontStyle: "normal" });
+  const bold = createTextOutlinePathData({ ...base, fontWeight: "bold" });
+  const italic = createTextOutlinePathData({ ...base, fontStyle: "italic" });
+  const both = createTextOutlinePathData({ ...base, fontWeight: "bold", fontStyle: "italic" });
+  assert.equal(new Set([regular, bold, italic, both]).size, 4);
+  assert.ok(both.length > 0);
 });

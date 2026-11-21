@@ -724,19 +724,35 @@ function transformDocumentPoints(element, points) {
   });
 }
 
+function rasterScanLines(levels, widthPx, heightPx, vertical) {
+  if (!vertical) {
+    return Array.from({ length: heightPx }, (_, row) => ({ index: row, runs: rasterRowRuns(levels, widthPx, row) }));
+  }
+  const transposed = new levels.constructor(levels.length);
+  for (let y = 0; y < heightPx; y += 1) {
+    for (let x = 0; x < widthPx; x += 1) transposed[x * heightPx + y] = levels[y * widthPx + x];
+  }
+  return Array.from({ length: widthPx }, (_, column) => ({ index: column, runs: rasterRowRuns(transposed, heightPx, column) }));
+}
+
 function createImageWorkPaths(document, layer, element, raster, mode) {
   const decoded = decodeRaster(element.id, raster);
   const { levels, maxLevel } = rasterLevels(decoded, mode);
   const pixelWidth = element.widthMm / decoded.widthPx;
   const pixelHeight = element.heightMm / decoded.heightPx;
+  const vertical = layer.fillAlgorithm?.startsWith("vertical") === true;
+  const unidirectional = layer.fillAlgorithm?.endsWith("unidirectional") === true;
+  const lines = rasterScanLines(levels, decoded.widthPx, decoded.heightPx, vertical);
   const workPaths = [];
   for (let pass = 1; pass <= layer.passes; pass += 1) {
-    for (let row = 0; row < decoded.heightPx; row += 1) {
-      const runs = rasterRowRuns(levels, decoded.widthPx, row);
+    for (const { index, runs } of lines) {
       if (runs.length === 0) continue;
-      const yMm = element.yMm + (row + 0.5) * pixelHeight;
-      const ordered = row % 2 === 0 ? runs : runs.map(({ fromPx, toPx, level }) => ({ fromPx: toPx, toPx: fromPx, level })).reverse();
-      const xs = [ordered[0].fromPx, ...ordered.map(({ toPx }) => toPx)].map((px) => element.xMm + px * pixelWidth);
+      const reversed = !unidirectional && index % 2 === 1;
+      const ordered = reversed ? runs.map(({ fromPx, toPx, level }) => ({ fromPx: toPx, toPx: fromPx, level })).reverse() : runs;
+      const toMm = (px) => vertical
+        ? [element.xMm + (index + 0.5) * pixelWidth, element.yMm + px * pixelHeight]
+        : [element.xMm + px * pixelWidth, element.yMm + (index + 0.5) * pixelHeight];
+      const boundaries = [ordered[0].fromPx, ...ordered.map(({ toPx }) => toPx)].map(toMm);
       workPaths.push({
         kind: "work",
         elementId: element.id,
@@ -746,12 +762,13 @@ function createImageWorkPaths(document, layer, element, raster, mode) {
         pass,
         powerPercent: 0,
         segmentPowerFractions: ordered.map(({ level }) => level / maxLevel),
-        points: mapPoints(document, transformDocumentPoints(element, xs.map((xMm) => [xMm, yMm])))
+        points: mapPoints(document, transformDocumentPoints(element, boundaries))
       });
     }
   }
   return workPaths;
 }
+
 
 function createElementWorkPaths(document, layer, element) {
   let geometryElement = element;

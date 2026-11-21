@@ -1,20 +1,28 @@
 import { CommBurnRangeError } from "./i18n.js";
 import * as opentype from "../../node_modules/opentype.js/dist/opentype.mjs";
 
-// Only these bundled OpenType files produce laser outlines. Other font names (system fonts) are
+// Only these bundled OpenType families produce laser outlines. Other font names (system fonts) are
 // stored and drawn by name, but cannot be converted into G-code geometry.
-const OUTLINE_FILE_BY_NAME = Object.freeze({
-  "sans-serif": "DejaVuSans.woff",
-  serif: "DejaVuSerif.woff",
-  monospace: "DejaVuSansMono.woff",
-  "CommBurn Sans": "DejaVuSans.woff",
-  "CommBurn Serif": "DejaVuSerif.woff",
-  "CommBurn Mono": "DejaVuSansMono.woff"
+const FAMILY_FILE_BASE = Object.freeze({
+  "sans-serif": "DejaVuSans",
+  serif: "DejaVuSerif",
+  monospace: "DejaVuSansMono",
+  "CommBurn Sans": "DejaVuSans",
+  "CommBurn Serif": "DejaVuSerif",
+  "CommBurn Mono": "DejaVuSansMono"
 });
+const STYLE_FILE_SUFFIX = Object.freeze({
+  "normal|normal": "",
+  "bold|normal": "-Bold",
+  "normal|italic": "-Oblique",
+  "bold|italic": "-BoldOblique"
+});
+const OUTLINE_FILES = [...new Set(Object.values(FAMILY_FILE_BASE))]
+  .flatMap((base) => Object.values(STYLE_FILE_SUFFIX).map((suffix) => `${base}${suffix}.woff`));
 const MAX_TEXT_CHARACTERS = 5000;
 const MAX_TEXT_SEGMENTS = 100000;
 
-const loadedFiles = new Map(await Promise.all([...new Set(Object.values(OUTLINE_FILE_BY_NAME))].map(async (file) => {
+const loadedFiles = new Map(await Promise.all(OUTLINE_FILES.map(async (file) => {
   const url = new URL(`./fonts/${file}`, import.meta.url);
   let bytes;
   if (import.meta.url.startsWith("file:")) {
@@ -29,11 +37,13 @@ const loadedFiles = new Map(await Promise.all([...new Set(Object.values(OUTLINE_
   return [file, opentype.parse(bytes)];
 })));
 
-function resolveOutlineFont(fontFamily = "sans-serif") {
+function resolveOutlineFont(fontFamily = "sans-serif", fontWeight = "normal", fontStyle = "normal") {
   // A single bundled name only: a font list such as "Arial, sans-serif" would silently
   // outline with a different face than the one shown on screen.
   const name = String(fontFamily).trim().replace(/^(["'])(.*)\1$/, "$2");
-  return Object.hasOwn(OUTLINE_FILE_BY_NAME, name) ? loadedFiles.get(OUTLINE_FILE_BY_NAME[name]) : null;
+  if (!Object.hasOwn(FAMILY_FILE_BASE, name)) return null;
+  const suffix = STYLE_FILE_SUFFIX[`${fontWeight}|${fontStyle}`];
+  return suffix === undefined ? null : loadedFiles.get(`${FAMILY_FILE_BASE[name]}${suffix}.woff`);
 }
 
 function unsupportedGlyph(character) {
@@ -45,11 +55,8 @@ function unsupportedGlyph(character) {
 }
 
 export function createTextOutlinePathData(element) {
-  const font = resolveOutlineFont(element.fontFamily ?? "sans-serif");
+  const font = resolveOutlineFont(element.fontFamily ?? "sans-serif", element.fontWeight ?? "normal", element.fontStyle ?? "normal");
   if (!font) throw new CommBurnRangeError("grbl.unsupportedTextFont", { fontFamily: element.fontFamily });
-  if (element.fontWeight === "bold" || element.fontStyle === "italic") {
-    throw new CommBurnRangeError("grbl.unsupportedTextStyle", { fontFamily: element.fontFamily });
-  }
   if (typeof element.text !== "string") throw new TypeError("Text element must contain a string");
   if (element.text.length > MAX_TEXT_CHARACTERS) {
     throw new CommBurnRangeError("grbl.textTooLong", { limit: MAX_TEXT_CHARACTERS });

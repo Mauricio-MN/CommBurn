@@ -26,7 +26,7 @@ import {
 } from "./ui/field-validation.js";
 import enCatalog from "./locales/en.js";
 import ptBrCatalog from "./locales/pt-BR.js";
-import { moveImagesToLayer, vectorTargetLayers } from "./core/image-layers.js";
+import { canMoveElementsToLayer, layerAcceptsKind, moveImagesToLayer, vectorTargetLayers } from "./core/image-layers.js";
 import { fitImportedToTable, importSvgTree, nextImportIdPrefix, validateSvgSource } from "./core/svg-import.js";
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
 import { applyStageBackground, normalizeStageBackground, STAGE_BACKGROUND_DEFAULT, STAGE_BACKGROUND_STORAGE_KEY } from "./ui/stage-background.js";
@@ -1975,7 +1975,7 @@ function blobToDataUri(blob) {
 }
 
 function layerAcceptsImages(layer) {
-  return currentDocument.elements.every((element) => element.layerId !== layer.id || element.type === "image");
+  return layerAcceptsKind(currentDocument.elements, layer.id, "raster");
 }
 
 function askNewLayerForImage() {
@@ -2693,6 +2693,11 @@ function moveSelectionToLayer(layerId) {
     return element && !currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked;
   }));
   if (movableIds.size === 0) return;
+  if (!canMoveElementsToLayer(currentDocument.elements, movableIds, layerId)) {
+    showNotice(i18n.t("ui.layers.kindMismatch"));
+    syncInspector();
+    return;
+  }
   try {
     currentDocument = createDocument({
       ...currentDocument,
@@ -3105,8 +3110,7 @@ byId("add-layer").addEventListener("click", (event) => {
 byId("object-layer").addEventListener("change", (event) => {
   const layer = currentDocument.layers.find((candidate) => candidate.id === event.target.value);
   if (!layer || layer.locked) return;
-  updateSelected({ layerId: layer.id });
-  activeLayerId = layer.id;
+  moveSelectionToLayer(layer.id);
   renderLayers();
 });
 

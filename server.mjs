@@ -549,7 +549,7 @@ const server = createServer(async (request, response) => {
     && requestedPath !== "/vendor/svgson.js"
     && requestedPath !== "/mouse-cursor-presentation.svg"
     && !/^\/src\/[a-zA-Z0-9_/-]+\.(?:js|css)$/.test(requestedPath)
-    && !/^\/src\/core\/fonts\/(?:DejaVuSans|DejaVuSerif|DejaVuSansMono)\.woff$/.test(requestedPath)
+    && !/^\/src\/core\/fonts\/(?:DejaVuSans|DejaVuSerif|DejaVuSansMono)(?:-(?:Bold|Oblique|BoldOblique))?\.woff$/.test(requestedPath)
     && !/^\/node_modules\/svg-pathdata\/lib\/[a-zA-Z0-9_.-]+\.js$/.test(requestedPath)
     && requestedPath !== "/node_modules/opentype.js/dist/opentype.mjs"
     && requestedPath !== "/node_modules/@jodit/image-editor/dist/jodit-image-editor.js"

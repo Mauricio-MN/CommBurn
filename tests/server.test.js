@@ -52,7 +52,9 @@ test("server can be started on an ephemeral port and closed by an embedding app"
   assert.equal(brandResponse.status, 200);
   assert.match(brandResponse.headers.get("content-type"), /image\/svg\+xml/);
   assert.match(await brandResponse.text(), /<svg/);
-  for (const fontFile of ["DejaVuSans.woff", "DejaVuSerif.woff", "DejaVuSansMono.woff"]) {
+  const fontFiles = ["DejaVuSans", "DejaVuSerif", "DejaVuSansMono"].flatMap((base) =>
+    ["", "-Bold", "-Oblique", "-BoldOblique"].map((suffix) => `${base}${suffix}.woff`));
+  for (const fontFile of fontFiles) {
     const fontResponse = await fetch(`${runningServer.url}/src/core/fonts/${fontFile}`);
     assert.equal(fontResponse.status, 200);
     assert.match(fontResponse.headers.get("content-type"), /font\/woff/);

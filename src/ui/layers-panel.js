@@ -18,6 +18,7 @@ const FILL_ALGORITHMS = [
   { value: "diagonal-serpentine", labelKey: "ui.layers.algorithm.diagonal" },
   { value: "diagonal-crosshatch", labelKey: "ui.layers.algorithm.diagonalCrosshatch" }
 ];
+const RASTER_FILL_ALGORITHMS = FILL_ALGORITHMS.filter((value) => ["horizontal-serpentine", "vertical-serpentine", "horizontal-unidirectional", "vertical-unidirectional"].includes(value.value));
 const OBJECT_ORDERS = [
   { value: "document", labelKey: "ui.layers.order.document" },
   { value: "nearest", labelKey: "ui.layers.order.nearest" },
@@ -107,10 +108,10 @@ export class LayersPanel {
       fillField.hidden = layer.operation !== "fill" && !rasterOnly;
       fillField.dataset.fillSetting = "";
       settings.append(fillField);
-      const algorithmField = this.createField("ui.layers.fillAlgorithm", this.createSelect("fillAlgorithm", layer.fillAlgorithm, FILL_ALGORITHMS));
-      algorithmField.hidden = layer.operation !== "fill";
-      algorithmField.dataset.fillSetting = "";
-      settings.append(algorithmField);
+  const algorithmField = this.createField("ui.layers.fillAlgorithm", this.createSelect("fillAlgorithm", layer.fillAlgorithm, rasterOnly ? RASTER_FILL_ALGORITHMS : FILL_ALGORITHMS));
+  algorithmField.hidden = layer.operation !== "fill" && !rasterOnly;
+  algorithmField.dataset.fillSetting = "";
+  settings.append(algorithmField);
       settings.append(this.createField("ui.layers.objectOrder", this.createSelect("objectOrder", layer.objectOrder, OBJECT_ORDERS)));
 
       const switches = document.createElement("div");
