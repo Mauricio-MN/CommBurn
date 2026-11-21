@@ -134,24 +134,45 @@ export class CanvasController {
   onPointerMove(event) {
     const action = this.interaction;
     if (!action || event.pointerId !== action.pointerId) return;
-    const point = toCanvasPoint(this.svg, event);
-    const deltaX = point.x - action.startPoint.x;
-    const deltaY = point.y - action.startPoint.y;
-
     if (action.type === "marquee") {
-      const clientDeltaX = event.clientX - action.startClientX;
-      const clientDeltaY = event.clientY - action.startClientY;
-      action.moved = Math.abs(clientDeltaX) > 4 && Math.abs(clientDeltaY) > 4;
-      if (action.moved) {
-        this.marquee.setAttribute("x", Math.min(action.startPoint.x, point.x));
-        this.marquee.setAttribute("y", Math.min(action.startPoint.y, point.y));
-        this.marquee.setAttribute("width", Math.abs(deltaX));
-        this.marquee.setAttribute("height", Math.abs(deltaY));
-        this.marquee.setAttribute("visibility", "visible");
-      }
+      this.updateMarquee(action, event);
       event.preventDefault();
       return;
     }
+    // Each move re-renders the whole drawing, so only the latest pointer position is applied once per frame.
+    action.latestEvent = event;
+    if (action.frame == null) action.frame = requestAnimationFrame(() => this.flushPendingMove(action));
+  }
+
+  updateMarquee(action, event) {
+    const point = toCanvasPoint(this.svg, event);
+    const deltaX = point.x - action.startPoint.x;
+    const deltaY = point.y - action.startPoint.y;
+    const clientDeltaX = event.clientX - action.startClientX;
+    const clientDeltaY = event.clientY - action.startClientY;
+    action.moved = Math.abs(clientDeltaX) > 4 && Math.abs(clientDeltaY) > 4;
+    if (action.moved) {
+      this.marquee.setAttribute("x", Math.min(action.startPoint.x, point.x));
+      this.marquee.setAttribute("y", Math.min(action.startPoint.y, point.y));
+      this.marquee.setAttribute("width", Math.abs(deltaX));
+      this.marquee.setAttribute("height", Math.abs(deltaY));
+      this.marquee.setAttribute("visibility", "visible");
+    }
+  }
+
+  flushPendingMove(action) {
+    if (action.frame != null) cancelAnimationFrame(action.frame);
+    action.frame = null;
+    const event = action.latestEvent;
+    action.latestEvent = null;
+    if (!event) return;
+    this.applyPointerMove(action, event);
+  }
+
+  applyPointerMove(action, event) {
+    const point = toCanvasPoint(this.svg, event);
+    const deltaX = point.x - action.startPoint.x;
+    const deltaY = point.y - action.startPoint.y;
 
     if (action.tool === "move") {
       this.callbacks.updateMany(action.selected.map((element) => ({
@@ -192,6 +213,7 @@ export class CanvasController {
   onPointerUp(event) {
     if (!this.interaction || event.pointerId !== this.interaction.pointerId) return;
     const action = this.interaction;
+    if (action.type !== "marquee") this.flushPendingMove(action);
     this.interaction = null;
     if (action.type === "marquee") {
       this.marquee.setAttribute("visibility", "hidden");
