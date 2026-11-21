@@ -175,13 +175,9 @@ export class CanvasController {
     const deltaY = point.y - action.startPoint.y;
 
     if (action.tool === "move") {
-      this.callbacks.updateMany(action.selected.map((element) => ({
-        id: element.id,
-        patch: {
-          xMm: element.xMm + deltaX,
-          yMm: element.yMm + deltaY
-        }
-      })), false);
+      // Dragging only shifts the drawn objects; the document is updated once on release.
+      action.delta = { x: deltaX, y: deltaY };
+      this.callbacks.previewMove(action.selected.map((element) => element.id), deltaX, deltaY);
     } else if (action.tool === "size") {
       const currentDistance = Math.hypot(point.x - action.center.xMm, point.y - action.center.yMm);
       const scale = Math.max(0.01, 1 + (currentDistance - action.startDistance) / action.scaleReference);
@@ -231,6 +227,16 @@ export class CanvasController {
         this.callbacks.deselect();
       }
       return;
+    }
+    if (action.tool === "move") {
+      this.callbacks.clearMovePreview();
+      if (action.delta) {
+        const { x, y } = action.delta;
+        this.callbacks.updateMany(action.selected.map((element) => ({
+          id: element.id,
+          patch: { xMm: element.xMm + x, yMm: element.yMm + y }
+        })), false);
+      }
     }
     this.callbacks.commit();
   }

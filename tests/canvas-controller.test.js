@@ -42,6 +42,8 @@ function checkAxisInversionMoves() {
       }),
       getSelectedIds: () => selectedIds,
       select: (id) => { selectedIds = [id]; },
+      previewMove() {},
+      clearMovePreview() {},
       updateMany: (changes) => { updates = changes; },
       notify() {},
       commit() {}
@@ -64,12 +66,14 @@ function checkAxisInversionMoves() {
   }
 }
 
-test("pointer moves within one frame apply only the latest position", () => {
+test("pointer moves within one frame preview only the latest position, then commit once", () => {
   const frames = [];
   globalThis.requestAnimationFrame = (callback) => { frames.push(callback); return frames.length; };
   globalThis.cancelAnimationFrame = () => {};
   try {
     const updates = [];
+    const previews = [];
+    let cleared = 0;
     const element = { id: "box", type: "rect", xMm: 10, yMm: 20, widthMm: 5, heightMm: 5, layerId: "layer" };
     const handlers = new Map();
     const svg = {
@@ -84,6 +88,8 @@ test("pointer moves within one frame apply only the latest position", () => {
       getDocument: () => ({ origin: { corner: "bottom-left" }, elements: [element], layers: [{ id: "layer", locked: false }] }),
       getSelectedIds: () => ["box"],
       select() {},
+      previewMove: (ids, dx, dy) => previews.push({ ids, dx, dy }),
+      clearMovePreview: () => { cleared += 1; },
       updateMany: (changes) => updates.push(changes),
       notify() {},
       commit() {}
@@ -98,12 +104,17 @@ test("pointer moves within one frame apply only the latest position", () => {
     controller.onPointerMove(event(41, 51));
     controller.onPointerMove(event(44, 53));
     controller.onPointerMove(event(47, 44));
-    assert.equal(updates.length, 0);
+    assert.equal(previews.length, 0);
     assert.equal(frames.length, 1);
     frames[0]();
+    assert.deepEqual(previews, [{ ids: ["box"], dx: 7, dy: -6 }]);
+    assert.equal(updates.length, 0);
+    controller.onPointerUp(event(47, 44));
+    assert.equal(cleared, 1);
     assert.deepEqual(updates, [[{ id: "box", patch: { xMm: 17, yMm: 14 } }]]);
   } finally {
     delete globalThis.requestAnimationFrame;
     delete globalThis.cancelAnimationFrame;
   }
 });
+

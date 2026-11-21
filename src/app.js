@@ -553,6 +553,28 @@ function updateSelected(patch, saveHistory = true, refreshInspector = true) {
   }
 }
 
+// Dragging shifts the already drawn nodes, so the whole document is not re-rendered on every pointer move.
+const movePreviewBaseTransforms = new Map();
+
+function previewMoveSelection(ids, dxMm, dyMm) {
+  for (const id of ids) {
+    const node = objects.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (!node) continue;
+    if (!movePreviewBaseTransforms.has(id)) movePreviewBaseTransforms.set(id, node.getAttribute("transform") ?? "");
+    const base = movePreviewBaseTransforms.get(id);
+    node.setAttribute("transform", `translate(${dxMm} ${dyMm})${base ? ` ${base}` : ""}`);
+  }
+}
+
+function clearMovePreview() {
+  for (const [id, base] of movePreviewBaseTransforms) {
+    const node = objects.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (node && base) node.setAttribute("transform", base);
+    else node?.removeAttribute("transform");
+  }
+  movePreviewBaseTransforms.clear();
+}
+
 function updateMany(updates, saveHistory = true) {
   const patches = new Map(updates.map(({ id, patch }) => [id, patch]));
   try {
@@ -3147,6 +3169,8 @@ new CanvasController(artboard, {
     updateSelected(patch, false);
   },
   updateMany: (updates) => updateMany(updates, false),
+  previewMove: previewMoveSelection,
+  clearMovePreview,
   commit: commitHistory
 });
 
