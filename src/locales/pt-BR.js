@@ -421,6 +421,8 @@ export default Object.freeze({
       zoomIn: "Aumentar zoom",
       zoomOut: "Reduzir zoom",
       zoomReset: "Voltar o zoom para 100%",
+      stageBackground: "Fundo",
+      stageBackgroundTooltip: "Cor de fundo da área de trabalho (não é exportada)",
       noSelection: "Nenhum objeto selecionado",
       selectionOne: "Selecionado: {id}",
       selectionCount: { one: "{count} objeto selecionado", other: "{count} objetos selecionados" },

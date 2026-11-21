@@ -420,6 +420,8 @@ export default Object.freeze({
       zoomIn: "Zoom in",
       zoomOut: "Zoom out",
       zoomReset: "Reset zoom to 100%",
+      stageBackground: "Background",
+      stageBackgroundTooltip: "Workspace background colour (not exported)",
       noSelection: "No object selected",
       selectionOne: "Selected: {id}",
       selectionCount: { one: "{count} object selected", other: "{count} objects selected" },

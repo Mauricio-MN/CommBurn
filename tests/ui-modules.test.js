@@ -373,3 +373,21 @@ test("quick properties panel floats over the canvas instead of resizing the stag
   assert.match(rule[1], /position:\s*absolute/);
   assert.doesNotMatch(rule[1], /position:\s*(relative|static)/);
 });
+
+test("stage background accepts only hex colours and defaults to white", async () => {
+  const { normalizeStageBackground, applyStageBackground, STAGE_BACKGROUND_DEFAULT } = await import("../src/ui/stage-background.js");
+  assert.equal(STAGE_BACKGROUND_DEFAULT, "#ffffff");
+  assert.equal(normalizeStageBackground("#1A2B3C"), "#1a2b3c");
+  assert.equal(normalizeStageBackground("red"), "#ffffff");
+  assert.equal(normalizeStageBackground("#fff"), "#ffffff");
+  assert.equal(normalizeStageBackground(undefined), "#ffffff");
+
+  const props = new Map();
+  applyStageBackground({ style: { setProperty: (k, v) => props.set(k, v) } }, "#00FF00");
+  assert.equal(props.get("--artboard-bg"), "#00ff00");
+});
+
+test("stage background is not overridden by the editor theme", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.artboard\s*\{[^}]*background:\s*var\(--artboard-bg,\s*#ffffff\)/);
+});

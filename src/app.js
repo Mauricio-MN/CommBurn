@@ -28,6 +28,7 @@ import ptBrCatalog from "./locales/pt-BR.js";
 import { moveImagesToLayer, vectorTargetLayers } from "./core/image-layers.js";
 import { fitImportedToTable, importSvgTree, nextImportIdPrefix, validateSvgSource } from "./core/svg-import.js";
 import { selectMany as mergeSelection, selectOne } from "./ui/selection.js";
+import { applyStageBackground, normalizeStageBackground, STAGE_BACKGROUND_DEFAULT, STAGE_BACKGROUND_STORAGE_KEY } from "./ui/stage-background.js";
 import {
   createMachinePlayback,
   createMachineTrack,
@@ -150,6 +151,16 @@ const textInput = byId("text-content");
 const fontFamilyInput = byId("font-family");
 const fontSizeInput = byId("font-size");
 const artboard = byId("artboard");
+const stageBackgroundInput = byId("stage-background");
+let storedStageBackground = STAGE_BACKGROUND_DEFAULT;
+try { storedStageBackground = localStorage.getItem(STAGE_BACKGROUND_STORAGE_KEY) ?? STAGE_BACKGROUND_DEFAULT; } catch {}
+stageBackgroundInput.value = normalizeStageBackground(storedStageBackground);
+applyStageBackground(artboard, stageBackgroundInput.value);
+stageBackgroundInput.addEventListener("input", () => {
+  const color = normalizeStageBackground(stageBackgroundInput.value);
+  applyStageBackground(artboard, color);
+  try { localStorage.setItem(STAGE_BACKGROUND_STORAGE_KEY, color); } catch {}
+});
 const fontOptionsList = byId("font-family-options");
 let localFontsRequested = false;
 

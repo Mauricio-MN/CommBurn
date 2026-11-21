@@ -153,7 +153,9 @@ span.origin-dot { display: block; width: 8px; height: 8px; border: 0; background
 .zoom-value { color: #49566b; font-weight: 650; }
 .stage { position: relative; display: grid; flex: 1; place-items: start center; min-height: 0; overflow: auto; padding: 10px 24px 24px; background-color: #f4f6fa; background-image: radial-gradient(#dce2eb .8px, transparent .8px); background-size: 18px 18px; }
 .board-frame { display: grid; grid-template-areas: ". x" "y board"; grid-template-columns: 42px minmax(0, 1fr); grid-template-rows: 27px auto; align-items: stretch; min-width: 0; }
-.artboard { grid-area: board; display: block; width: 100%; height: auto; aspect-ratio: var(--doc-ratio, 3 / 2); overflow: hidden; background: #fff; border: 1px solid #dce3ed; box-shadow: 0 9px 28px rgb(47 64 96 / 12%); touch-action: none; }
+.artboard { grid-area: board; display: block; width: 100%; height: auto; aspect-ratio: var(--doc-ratio, 3 / 2); overflow: hidden; background: var(--artboard-bg, #ffffff); border: 1px solid #dce3ed; box-shadow: 0 9px 28px rgb(47 64 96 / 12%); touch-action: none; }
+.stage-background-field { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; }
+.stage-background-field input { width: 28px; height: 22px; padding: 0; border: 1px solid #c9d2df; border-radius: 4px; background: none; cursor: pointer; }
 .artboard [data-id] { cursor: pointer; pointer-events: all; }
 .artboard [data-id].selected { filter: drop-shadow(0 0 1.5px #3978eb) drop-shadow(0 0 3px rgb(57 120 235 / 70%)); }
 .artboard [data-id].missing-font { animation: missing-font-blink 1s steps(1, end) infinite; }

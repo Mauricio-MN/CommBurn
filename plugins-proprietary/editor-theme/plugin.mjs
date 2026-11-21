@@ -28,7 +28,7 @@ const CSS = `
 .editor-theme .brand, .editor-theme .panel-heading h1, .editor-theme .panel-heading h2 { color: #ffffff; }
 .editor-theme .panel-heading p, .editor-theme .help-text, .editor-theme .tool-status, .editor-theme .stage-note, .editor-theme .unit-note, .editor-theme .field, .editor-theme .toggle, .editor-theme .input-with-unit span, .editor-theme .machine-state { color: #9da5b4; }
 .editor-theme .canvas-area, .editor-theme .stage { background-color: #1e1e1e; }
-.editor-theme .artboard { background: #252526; border-color: #3c3c3c; }
+.editor-theme .artboard { border-color: #3c3c3c; }
 .editor-theme .ruler { color: #9da5b4; }
 .editor-theme .document-tab-select, .editor-theme .document-tab-close, .editor-theme .document-tab-add { color: #cccccc; background: transparent; }
 .editor-theme .document-tab-add:hover, .editor-theme .document-tab-close:hover { color: #ffffff; }
