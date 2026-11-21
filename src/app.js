@@ -127,6 +127,20 @@ for (const button of originButtons) {
     originInput.dispatchEvent(new Event("change"));
   });
 }
+const startAnchorInput = byId("start-anchor");
+const startAnchorButtons = [...document.querySelectorAll("[data-anchor-point]")];
+function setStartAnchor(point) {
+  startAnchorInput.value = point;
+  for (const button of startAnchorButtons) {
+    button.setAttribute("aria-checked", String(button.dataset.anchorPoint === point));
+  }
+}
+for (const button of startAnchorButtons) {
+  button.addEventListener("click", () => {
+    setStartAnchor(button.dataset.anchorPoint);
+    startAnchorInput.dispatchEvent(new Event("change"));
+  });
+}
 const textInput = byId("text-content");
 const fontFamilyInput = byId("font-family");
 const fontSizeInput = byId("font-size");

@@ -74,11 +74,14 @@
             <option value="absolute" data-i18n="ui.document.startAbsolute">Coordenadas absolutas</option>
             <option value="head" data-i18n="ui.document.startHead">Posição atual do laser</option>
           </select></label>
-          <label class="field" id="start-anchor-field" data-i18n="ui.document.startAnchor">Ponto do desenho sob a cabeça<select id="start-anchor">
-            <option value="top-left" data-i18n="ui.document.topLeft">Canto superior esquerdo</option><option value="top-right" data-i18n="ui.document.topRight">Canto superior direito</option>
-            <option value="bottom-left" data-i18n="ui.document.bottomLeft">Canto inferior esquerdo</option><option value="bottom-right" data-i18n="ui.document.bottomRight">Canto inferior direito</option>
-            <option value="center" data-i18n="ui.document.center">Centro</option>
-          </select></label>
+          <div class="field" id="start-anchor-field"><span id="start-anchor-label" data-i18n="ui.document.startAnchor">Ponto do desenho sob a cabeça</span>
+            <div class="origin-grid" role="radiogroup" aria-labelledby="start-anchor-label">
+              <button type="button" class="origin-dot" data-anchor-point="top-left" role="radio" aria-checked="true" aria-label="Canto superior esquerdo" data-i18n-aria-label="ui.document.topLeft"></button><span class="origin-dot" aria-hidden="true"></span><button type="button" class="origin-dot" data-anchor-point="top-right" role="radio" aria-checked="false" aria-label="Canto superior direito" data-i18n-aria-label="ui.document.topRight"></button>
+              <span class="origin-dot" aria-hidden="true"></span><button type="button" class="origin-dot" data-anchor-point="center" role="radio" aria-checked="false" aria-label="Centro" data-i18n-aria-label="ui.document.center"></button><span class="origin-dot" aria-hidden="true"></span>
+              <button type="button" class="origin-dot" data-anchor-point="bottom-left" role="radio" aria-checked="false" aria-label="Canto inferior esquerdo" data-i18n-aria-label="ui.document.bottomLeft"></button><span class="origin-dot" aria-hidden="true"></span><button type="button" class="origin-dot" data-anchor-point="bottom-right" role="radio" aria-checked="false" aria-label="Canto inferior direito" data-i18n-aria-label="ui.document.bottomRight"></button>
+            </div>
+            <input id="start-anchor" type="hidden" value="top-left">
+          </div>
           <details class="advanced-details"><summary data-i18n="ui.document.advanced">Avançado</summary>
           <label class="field" data-i18n="ui.document.workSystem">Sistema de coordenadas do controlador<select id="work-system">
             <option value="" data-i18n="ui.document.workSystemDefault">Atual do controlador (não enviar)</option>
