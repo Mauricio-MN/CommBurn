@@ -114,6 +114,7 @@ export default Object.freeze({
       visible: "Visível no desenho",
       locked: "Bloquear edição",
       selectTooltip: "Selecionar camada para criar novos objetos",
+      rasterLocked: "Camadas raster contêm apenas imagens; a operação é fixa.",
       removeTooltip: "Remover camada e mover seus objetos para outra camada",
       duplicateTooltip: "Duplicar camada e seus objetos",
       duplicateNotice: "Camada \"{name}\" duplicada com {count} objeto(s).",
@@ -121,7 +122,7 @@ export default Object.freeze({
       defaultEngravingName: "Gravação 1",
       defaultName: "Camada {index}",
       copyName: "{name} (cópia)",
-      operation: { engrave: "Gravação", cut: "Corte", fill: "Preenchimento" },
+      operation: { engrave: "Gravação", cut: "Corte", fill: "Preenchimento", raster: "Raster (imagens)" },
       algorithm: {
         horizontal: "Horizontal serpentina",
         vertical: "Vertical serpentina",
@@ -161,7 +162,15 @@ export default Object.freeze({
     },
     contextMenu: {
       properties: "Editar propriedades",
-      copy: "Copiar"
+      copy: "Copiar",
+      moveToLayer: "Mover para camada ›",
+      layers: "Camadas"
+    },
+    notice: {
+      label: "Último aviso",
+      last: "Último aviso",
+      copy: "Copiar",
+      text: "Texto do último aviso"
     },
     tabs: {
       label: "Documentos abertos",

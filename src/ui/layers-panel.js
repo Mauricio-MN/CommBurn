@@ -86,8 +86,17 @@ export class LayersPanel {
 
       const settings = document.createElement("div");
       settings.className = "layer-settings";
+      const layerElements = elements.filter((element) => element.layerId === layer.id);
+      const rasterOnly = layerElements.length > 0 && layerElements.every((element) => element.type === "image");
+      const operationSelect = rasterOnly
+        ? this.createSelect("operation", "raster", [{ value: "raster", labelKey: "ui.layers.operation.raster" }])
+        : this.createSelect("operation", layer.operation, OPERATIONS);
+      if (rasterOnly) {
+        operationSelect.disabled = true;
+        operationSelect.title = t("ui.layers.rasterLocked");
+      }
       settings.append(
-        this.createField("ui.layers.operationType", this.createSelect("operation", layer.operation, OPERATIONS)),
+        this.createField("ui.layers.operationType", operationSelect),
         this.createField("ui.layers.name", this.createInput("name", layer.name, "text")),
         this.createField("ui.layers.color", this.createInput("color", layer.color, "color")),
         this.createField("ui.layers.feed", this.createInput("feedMmPerMinute", layer.feedMmPerMinute, "number", { min: "0.1", step: "0.1" })),
@@ -95,7 +104,7 @@ export class LayersPanel {
         this.createField("ui.layers.passes", this.createInput("passes", layer.passes, "number", { min: "1", max: "100", step: "1" }))
       );
       const fillField = this.createField("ui.layers.fillSpacing", this.createInput("fillSpacingMm", layer.fillSpacingMm, "number", { min: "0.05", step: "0.05" }));
-      fillField.hidden = layer.operation !== "fill";
+      fillField.hidden = layer.operation !== "fill" && !rasterOnly;
       fillField.dataset.fillSetting = "";
       settings.append(fillField);
       const algorithmField = this.createField("ui.layers.fillAlgorithm", this.createSelect("fillAlgorithm", layer.fillAlgorithm, FILL_ALGORITHMS));

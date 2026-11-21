@@ -156,6 +156,7 @@ const objects = byId("objects");
 const removeButton = byId("remove-selection");
 const selectionStatus = byId("selection-status");
 const notice = byId("notice");
+const noticeLog = byId("notice-log-text");
 const projectNameInput = byId("project-name");
 const saveStateBadge = byId("save-state");
 const languageSelect = byId("language-select");
@@ -554,7 +555,9 @@ function showNotice(message) {
     message.input.focus({ preventScroll: true });
     return;
   }
-  notice.textContent = message instanceof Error ? formatError(message) : message;
+  const text = message instanceof Error ? formatError(message) : message;
+  notice.textContent = text;
+  noticeLog.value = text;
   notice.classList.add("visible");
   clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => notice.classList.remove("visible"), 3000);
@@ -2509,6 +2512,7 @@ function hideObjectContextMenu() {
 
 function showObjectContextMenu({ id, clientX, clientY }) {
   if (!selectedIds.includes(id)) selectObjectWithOptions(id);
+  renderContextLayerMenu();
   objectContextMenu.hidden = false;
   const { width, height } = objectContextMenu.getBoundingClientRect();
   objectContextMenu.style.left = `${Math.max(0, Math.min(clientX, window.innerWidth - width - 8))}px`;
@@ -2516,13 +2520,67 @@ function showObjectContextMenu({ id, clientX, clientY }) {
   objectContextMenu.querySelector("button")?.focus();
 }
 
+function renderContextLayerMenu() {
+  byId("context-layer-list").replaceChildren(...currentDocument.layers.map((layer, index) => {
+    const item = document.createElement("button");
+    item.className = "context-menu-item";
+    item.type = "button";
+    item.role = "menuitem";
+    item.dataset.contextLayer = layer.id;
+    item.disabled = layer.locked;
+    const swatch = document.createElement("span");
+    swatch.className = "context-swatch";
+    swatch.style.backgroundColor = layer.color;
+    item.append(swatch, getLayerDisplayName(layer, index));
+    return item;
+  }));
+}
+
+function moveSelectionToLayer(layerId) {
+  const target = currentDocument.layers.find((layer) => layer.id === layerId);
+  if (!target || target.locked) return;
+  const movableIds = new Set(selectedIds.filter((id) => {
+    const element = currentDocument.elements.find((candidate) => candidate.id === id);
+    return element && !currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked;
+  }));
+  if (movableIds.size === 0) return;
+  try {
+    currentDocument = createDocument({
+      ...currentDocument,
+      elements: currentDocument.elements.map((element) => movableIds.has(element.id) ? { ...element, layerId } : element)
+    });
+    activeLayerId = layerId;
+    syncInspector();
+    renderPreview();
+    commitHistory();
+  } catch (error) {
+    showNotice(error);
+  }
+}
+
 objectContextMenu.addEventListener("click", (event) => {
+  if (event.target.closest(".context-submenu > .context-menu-item")) return;
+  const layerId = event.target.closest("[data-context-layer]")?.dataset.contextLayer;
+  if (layerId) {
+    hideObjectContextMenu();
+    moveSelectionToLayer(layerId);
+    return;
+  }
   const action = event.target.closest("[data-context-action]")?.dataset.contextAction;
   hideObjectContextMenu();
   if (action === "properties") revealInspector();
   if (action === "duplicate") duplicateSelectedObject();
   if (action === "copy") copySelectedObjects();
   if (action === "remove") removeSelectedObject();
+});
+byId("copy-notice").addEventListener("click", async () => {
+  if (!noticeLog.value) return;
+  try {
+    await navigator.clipboard.writeText(noticeLog.value);
+  } catch {
+    noticeLog.select();
+    document.execCommand("copy");
+  }
 });
 document.addEventListener("pointerdown", (event) => {
   if (!objectContextMenu.hidden && !objectContextMenu.contains(event.target)) hideObjectContextMenu();
@@ -2836,6 +2894,19 @@ function addLayer() {
   commitHistory();
 }
 
+function flashActiveLayer() {
+  const layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
+  if (!layer) return;
+  const nodes = [...objects.querySelectorAll(`[data-layer-id="${CSS.escape(activeLayerId)}"]`)];
+  for (const node of nodes) {
+    node.classList.remove("layer-glow");
+    node.style.setProperty("--layer-glow", layer.color);
+  }
+  // Forces a reflow so the animation restarts when the same layer is selected again.
+  void objects.getBoundingClientRect();
+  for (const node of nodes) node.classList.add("layer-glow");
+}
+
 const layersPanel = new LayersPanel(byId("layers-list"), {
   t: i18n.t,
   onSelect: (layerId) => {
@@ -2844,6 +2915,7 @@ const layersPanel = new LayersPanel(byId("layers-list"), {
     selectedIds = [];
     syncInspector();
     renderPreview();
+    flashActiveLayer();
   },
   onAdd: addLayer,
   onUpdate: (layerId, patch) => {

@@ -114,6 +114,7 @@ export default Object.freeze({
       visible: "Visible on canvas",
       locked: "Lock editing",
       selectTooltip: "Select layer for new objects",
+      rasterLocked: "Raster layers hold only images; the operation is fixed.",
       removeTooltip: "Remove layer and move its objects to another layer",
       duplicateTooltip: "Duplicate layer and its objects",
       duplicateNotice: "Layer \"{name}\" duplicated with {count} object(s).",
@@ -121,7 +122,7 @@ export default Object.freeze({
       defaultEngravingName: "Engrave 1",
       defaultName: "Layer {index}",
       copyName: "{name} (copy)",
-      operation: { engrave: "Engrave", cut: "Cut", fill: "Fill" },
+      operation: { engrave: "Engrave", cut: "Cut", fill: "Fill", raster: "Raster (images)" },
       algorithm: {
         horizontal: "Horizontal serpentine",
         vertical: "Vertical serpentine",
@@ -161,7 +162,15 @@ export default Object.freeze({
     },
     contextMenu: {
       properties: "Edit properties",
-      copy: "Copy"
+      copy: "Copy",
+      moveToLayer: "Move to layer ›",
+      layers: "Layers"
+    },
+    notice: {
+      label: "Last notice",
+      last: "Last notice",
+      copy: "Copy",
+      text: "Text of the last notice"
     },
     tabs: {
       label: "Open documents",

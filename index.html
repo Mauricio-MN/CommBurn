@@ -205,6 +205,10 @@
           </div>
           <p class="help-text" data-i18n="ui.machine.limits">O GRBL grava texto com fontes de traço único integradas e envia retângulos e paths vetoriais editáveis. Imagens raster precisam ser vetorizadas; elipses, linhas e texto preenchido não são compatíveis. A pausa solicita feed hold e não substitui a parada de emergência.</p>
         </section>
+        <section class="notice-log" aria-label="Último aviso" data-i18n-aria-label="ui.notice.label">
+          <div class="notice-log-header"><span data-i18n="ui.notice.last">Último aviso</span><button class="button button-secondary" id="copy-notice" type="button" data-i18n="ui.notice.copy">Copiar</button></div>
+          <textarea id="notice-log-text" readonly rows="2" aria-label="Texto do último aviso" data-i18n-aria-label="ui.notice.text"></textarea>
+        </section>
       </aside>
 
       <section class="canvas-area" aria-label="Pré-visualização do trabalho">
@@ -349,6 +353,10 @@
       <button class="context-menu-item" type="button" role="menuitem" data-context-action="properties" data-i18n="ui.contextMenu.properties">Editar propriedades</button>
       <button class="context-menu-item" type="button" role="menuitem" data-context-action="duplicate" data-i18n="ui.inspector.duplicate">Duplicar</button>
       <button class="context-menu-item" type="button" role="menuitem" data-context-action="copy" data-i18n="ui.contextMenu.copy">Copiar</button>
+      <div class="context-submenu" id="context-layer-menu">
+        <button class="context-menu-item" type="button" role="menuitem" aria-haspopup="true" data-i18n="ui.contextMenu.moveToLayer">Mover para camada ›</button>
+        <div class="context-submenu-list" id="context-layer-list" role="menu" aria-label="Camadas" data-i18n-aria-label="ui.contextMenu.layers"></div>
+      </div>
       <button class="context-menu-item context-menu-danger" type="button" role="menuitem" data-context-action="remove" data-i18n="ui.inspector.remove">Remover</button>
     </div>
     <script src="./vendor/svgson.js"></script>

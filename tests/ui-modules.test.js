@@ -352,3 +352,16 @@ test("document history tracks unsaved edits and returns clean after undo to the 
   history.reset({ objects: [] });
   assert.equal(history.fileTarget, null);
 });
+
+test("sidebar notice log and layer submenu are wired in index.html and both locales", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  for (const id of ["notice-log-text", "copy-notice", "context-layer-list"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  for (const file of ["../src/locales/en.js", "../src/locales/pt-BR.js"]) {
+    const source = readFileSync(new URL(file, import.meta.url), "utf8");
+    for (const key of ["raster:", "rasterLocked:", "moveToLayer:", "layers:"]) {
+      assert.match(source, new RegExp(`\\b${key}`), `${file} is missing ${key}`);
+    }
+  }
+});
