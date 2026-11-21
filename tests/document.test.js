@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, renderGrblJob, renderSvg, stageToMachine } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg, stageToMachine } from "../src/core/document.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
@@ -90,7 +90,17 @@ test("GRBL job output uses explicit millimetres, user coordinates, and laser-off
   assert.match(gcode, /^G21\nG90\nG94\nM5/m);
   // The closed contour begins at the vertex nearest the machine zero, here the bottom-right corner of the table.
   assert.match(gcode, /G0 X70 Y60\nM4 S100\nG1 F300/);
-  assert.match(gcode, /G1 X90 Y60\nG1 X90 Y75\nG1 X70 Y75\nG1 X70 Y60\nM5\nM5\n$/);
+  assert.match(gcode, /G1 X90 Y60\nG1 X90 Y75\nG1 X70 Y75\nG1 X70 Y60\nM5\nM5\nG0 X0 Y0\n$/);
+});
+
+test("GRBL job returns the laser head to its start point after the last cut without homing", () => {
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 };
+  const base = { widthMm: 100, heightMm: 80, origin: { corner: "top-left" }, elements: [{ id: "r", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6 }] };
+  const absolute = renderGrblJob(base, settings);
+  assert.doesNotMatch(absolute, /\$H|G28/);
+  assert.match(absolute, /M5\nG0 X0 Y0\n$/);
+  const head = renderGrblJob(base, { ...settings, ...jobStartSettings("head", "center") });
+  assert.match(head, /M5\nG0 X0 Y0\n$/);
 });
 
 test("GRBL exports text and rejects out-of-area geometry and invalid machine settings", () => {
@@ -138,26 +148,24 @@ test("GRBL paths honor explicit axis inversions", () => {
   }
 });
 
-test("GRBL text stays upright when the selected origin inverts an axis", () => {
+test("GRBL text keeps its stage position for every origin corner and fills glyphs with open-free contours", () => {
   const documentModel = {
     widthMm: 100,
     heightMm: 80,
-    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "AB", fontSizeMm: 8 }]
+    layers: [{ ...DEFAULT_LAYER, id: "fill", operation: "fill", fillSpacingMm: 1 }],
+    elements: [{ id: "label", type: "text", xMm: 10, yMm: 25, text: "Lu", fontSizeMm: 8, layerId: "fill" }]
   };
   const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000 };
-  const normalPaths = planGrblJob(documentModel, settings).paths
-    .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
-  const flippedPaths = planGrblJob({ ...documentModel, origin: { corner: "top-right" } }, settings).paths
-    .filter(({ kind, elementId }) => kind === "work" && elementId === "label");
-  const byPosition = (a, b) => a.yMm - b.yMm || a.xMm - b.xMm;
-  const unique = (points) => points.sort(byPosition)
-    .filter((point, index, all) => index === 0 || byPosition(point, all[index - 1]) !== 0);
-  const normalPoints = unique(normalPaths.flatMap(({ points }) => points));
-  const flippedPoints = unique(flippedPaths.flatMap(({ points }) => points));
+  const stageKey = (input) => planToDocumentSpace(input, planGrblJob(input, settings)).paths
+    .filter(({ kind }) => kind === "work")
+    .flatMap(({ points }) => points)
+    .map(({ xMm, yMm }) => `${xMm.toFixed(3)},${yMm.toFixed(3)}`)
+    .sort();
+  const reference = stageKey(documentModel);
 
-  assert.equal(flippedPoints.length, normalPoints.length);
-  assert.equal(new Set(normalPoints.map((point, index) => (flippedPoints[index].xMm - point.xMm).toFixed(6))).size, 1);
-  assert.ok(flippedPoints[0].xMm > normalPoints[0].xMm);
+  for (const corner of ["top-right", "bottom-left", "bottom-right"]) {
+    assert.deepEqual(stageKey({ ...documentModel, origin: { corner } }), reference, corner);
+  }
 });
 
 test("GRBL text contours follow fill, engrave, and cut layer operations", () => {

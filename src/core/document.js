@@ -448,21 +448,6 @@ function mapPoints(document, points) {
   return points.map(([xMm, yMm]) => mapMachinePoint(document, xMm, yMm));
 }
 
-// Keeps glyphs upright when the origin inverts an axis: each glyph point is mirrored inside the (already transformed) text box before mapping.
-function mapTextOutlines(document, paths, box) {
-  const { flipX, flipY } = mapMachinePoint(document, 0, 0);
-  return paths.map((path) => mapPoints(document, path.map(([x, y]) => [
-    flipX ? box.minX + box.maxX - x : x,
-    flipY ? box.minY + box.maxY - y : y
-  ])));
-}
-
-function pointBounds(points) {
-  const xs = points.map(([x]) => x);
-  const ys = points.map(([, y]) => y);
-  return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
-}
-
 function flattenVectorPath(element) {
   const source = new SVGPathData(element.pathData);
   const bounds = source.getBounds();
@@ -528,10 +513,12 @@ function flattenVectorPath(element) {
     }
   }
   if (points?.length > 1) paths.push(points);
-  if (paths.flat().length > 100000) {
+  // Subpaths whose points all coincide (e.g. a glyph contour of "M x y Z") have no area and would fail fill.
+  const areaPaths = paths.filter((path) => path.some(([x, y]) => x !== path[0][0] || y !== path[0][1]));
+  if (areaPaths.flat().length > 100000) {
     throw new RangeError(`O caminho ${element.id} excede 100.000 segmentos GRBL; simplifique a geometria antes de gerar a prévia.`);
   }
-  return paths;
+  return areaPaths;
 }
 
 function fillPaths(element, algorithm, spacingMm) {
@@ -778,9 +765,7 @@ function createElementWorkPaths(document, layer, element) {
       : [outline];
   // Rotation and skew happen in document space first, so the machine output matches the rendered object.
   const transformedPaths = sourcePaths.map((points) => transformDocumentPoints(element, points));
-  const mappedPaths = element.type === "text"
-    ? mapTextOutlines(document, transformedPaths, pointBounds(transformDocumentPoints(element, outline)))
-    : transformedPaths.map((points) => mapPoints(document, points));
+  const mappedPaths = transformedPaths.map((points) => mapPoints(document, points));
   const workPaths = [];
   for (let pass = 1; pass <= layer.passes; pass += 1) {
     for (const points of mappedPaths) {
@@ -1083,6 +1068,16 @@ function buildGrblJob(input, settings, offset, startReference = null) {
     }
   }
   gcode.push("M5");
+  // Return the head to where the job began (no homing); the laser is already off.
+  if (previousPoint) {
+    const home = shift(startReference ?? offset);
+    const returnMm = distanceBetween(shift(previousPoint), home);
+    if (returnMm > 0) {
+      paths.push({ kind: "travel", elementId: null, layerId: null, points: [shift(previousPoint), home] });
+      travelDistanceMm += returnMm;
+      gcode.push(`G0 X${home.xMm} Y${home.yMm}`);
+    }
+  }
   return {
     gcode: `${gcode.join("\n")}\n`,
     paths,

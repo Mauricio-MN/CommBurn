@@ -629,7 +629,8 @@ test("origin corners preserve stage geometry while axis inversions change the ma
   };
   const settings = { maxSpindleSpeed: 1000 };
   const reference = planToDocumentSpace(base, planGrblJob(base, settings)).paths;
-  const key = (paths) => paths.flatMap(({ points }) => points).map(({ xMm, yMm }) => `${xMm.toFixed(3)},${yMm.toFixed(3)}`).sort().filter((value, index, all) => value !== all[index - 1]);
+  // Only work paths are compared: the final return-to-start move depends on where the job zero sits.
+  const key = (paths) => paths.filter(({ kind }) => kind === "work").flatMap(({ points }) => points).map(({ xMm, yMm }) => `${xMm.toFixed(3)},${yMm.toFixed(3)}`).sort().filter((value, index, all) => value !== all[index - 1]);
   const bottomRight = { ...base, origin: { corner: "bottom-right" } };
   assert.deepEqual(key(planToDocumentSpace(bottomRight, planGrblJob(bottomRight, settings)).paths), key(reference));
 

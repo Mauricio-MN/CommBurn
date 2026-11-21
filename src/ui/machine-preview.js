@@ -42,7 +42,8 @@ export function createMachinePlayback(plan) {
     completedLines += segmentCount;
     if (path.operation !== "fill") completedLines += 1;
   }
-  return { entries, totalLines: completedLines + 1 };
+  const totalLines = plan.gcode ? plan.gcode.trim().split(/\r?\n/).length : completedLines + 1;
+  return { entries, totalLines };
 }
 
 export function getMachinePlaybackSegments(entries, fromLine, toLine) {
