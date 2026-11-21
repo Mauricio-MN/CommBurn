@@ -1,4 +1,5 @@
 const { build } = require("./package.json");
+const bundledTheme = require("./electron-builder.theme.cjs");
 
 const publishers = {
   store: build.appx.publisher,
@@ -15,6 +16,7 @@ module.exports = {
     publisher: publishers[channel],
   },
   artifactName: `\${productName} \${version}-${channel}.\${ext}`,
+  extraResources: [...build.extraResources, bundledTheme],
   extraResources: [
     ...build.extraResources,
     {

@@ -10,6 +10,7 @@
     "start": "node server.mjs",
     "desktop": "electron .",
     "dist": "electron-builder --publish never",
+    "dist:test": "electron-builder --win nsis --publish never --config electron-builder.installer.cjs",
     "dist:msix": "electron-builder --win appx --publish never --config electron-builder.msix.cjs && node scripts/rename-msix.mjs",
     "build:www": "node scripts/build-www.mjs",
     "build:android": "node scripts/build-www.mjs && cap sync android"
