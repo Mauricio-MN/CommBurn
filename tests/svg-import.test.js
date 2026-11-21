@@ -234,6 +234,24 @@ test("editable SVG geometry stays native through GRBL planning and uses the sele
   assert.deepEqual(byColor.elements.map(({ type }) => type), ["rect", "path"]);
   assert.ok(plan.paths.some(({ kind, elementId }) => kind === "work" && elementId === "native-1"));
   assert.ok(plan.paths.some(({ kind, elementId }) => kind === "work" && elementId === "native-2"));
+  assert.ok(byColor.elements.every(({ type }) => type !== "image" && type !== "svg-image"));
+
+  const inCurrentLayer = importSvg(source, {
+    layerId: "selected",
+    forceLayerId: "selected",
+    fallbackLayer: { id: "selected", color: "#267b62", operation: "engrave" },
+    idPrefix: "current"
+  });
+  const currentLayerSvg = renderSvg({
+    ...inCurrentLayer,
+    layers: [{ ...DEFAULT_LAYER, id: "selected", color: "#267b62", operation: "engrave" }]
+  });
+
+  assert.equal(inCurrentLayer.layers.length, 1);
+  assert.ok(inCurrentLayer.elements.every(({ layerId }) => layerId === "selected"));
+  assert.match(currentLayerSvg, /data-color="#267b62"/);
+  assert.doesNotMatch(currentLayerSvg, /data-color="#ff0000"|data-color="#0000ff"/);
+});
 
 test("SVG path imports safe inline fill and stroke styles", () => {
   const filled = importSvg('<svg width="10mm" height="10mm"><path d="M1 1 L5 1 L5 5 Z" style="fill:#ff0000; stroke:none"/></svg>');
@@ -294,25 +312,6 @@ test("SVG style rules and style attributes are flattened into editable paints wi
     /transform in a style declaration is not supported/
   );
 });
-  assert.ok(byColor.elements.every(({ type }) => type !== "image" && type !== "svg-image"));
-
-  const inCurrentLayer = importSvg(source, {
-    layerId: "selected",
-    forceLayerId: "selected",
-    fallbackLayer: { id: "selected", color: "#267b62", operation: "engrave" },
-    idPrefix: "current"
-  });
-  const currentLayerSvg = renderSvg({
-    ...inCurrentLayer,
-    layers: [{ ...DEFAULT_LAYER, id: "selected", color: "#267b62", operation: "engrave" }]
-  });
-
-  assert.equal(inCurrentLayer.layers.length, 1);
-  assert.ok(inCurrentLayer.elements.every(({ layerId }) => layerId === "selected"));
-  assert.match(currentLayerSvg, /data-color="#267b62"/);
-  assert.doesNotMatch(currentLayerSvg, /data-color="#ff0000"|data-color="#0000ff"/);
-});
-
 test("SVG import strips external doctypes without fetching them and decodes standard XML references", () => {
   const source = `<?xml version="1.0"?>
     <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "https://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
