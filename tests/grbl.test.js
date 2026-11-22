@@ -283,3 +283,36 @@ test("GRBL position reports stay in millimetres when $13 is not inches", () => {
   assert.deepEqual(connection.position.machine, { xMm: 10, yMm: 20 });
   assert.deepEqual(connection.position.work, { xMm: 9, yMm: 18 });
 });
+
+test("GRBL status reports expose planner buffer, feed, overrides and firmware lines", () => {
+  const serialPort = new MockSerialPort();
+  const connection = new GrblConnection(serialPort);
+  connection.receive(Buffer.from("[VER:1.1h.20190825:]\r\n[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F500 S0]\r\n"));
+  connection.receive(Buffer.from("<Run|MPos:1,2,0|Bf:15,120|FS:500,0|Ov:100,100,100|A:S|Pn:P>\r\n"));
+  assert.equal(connection.firmwareVersion, "1.1h.20190825");
+  assert.ok(connection.parserState.includes("G21"));
+  assert.deepEqual(connection.report, {
+    plannerBlocks: 15,
+    serialBytes: 120,
+    feedMmPerMinute: 500,
+    spindleRpm: 0,
+    overrides: { feedPercent: 100, rapidPercent: 100, spindlePercent: 100 },
+    activeSignals: "S",
+    pins: "P"
+  });
+});
+
+test("GRBL keeps waiting for an acknowledgement while the controller answers status queries", async () => {
+  class SilentPort extends MockSerialPort {
+    write(data) {
+      this.writes.push(data);
+      if (data === "?") setImmediate(() => this.emit("data", Buffer.from("<Idle|MPos:0,0,0>\r\n")));
+    }
+  }
+  const serialPort = new SilentPort();
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 200 });
+  const sent = connection.sendLine("M5");
+  setTimeout(() => serialPort.emit("data", Buffer.from("ok\r\n")), 600);
+  await sent;
+  assert.ok(serialPort.writes.includes("?"));
+});

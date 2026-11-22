@@ -63,8 +63,16 @@ export class GrblConnection {
       if (state) {
         this.status = state;
         this.updatePosition(response);
-        if (this.pending && /^(Run|Hold|Jog|Home)/.test(this.status)) this.pending.lastProgressAt = Date.now();
+        this.updateReport(response);
+        // Any status answer shows the controller is alive, even while it reports Idle before a queued line is acknowledged.
+        if (this.pending) this.pending.lastProgressAt = Date.now();
         this.statusWaiter?.resolve(this.status);
+      } else if (/^\[VER:/i.test(response)) {
+        this.firmwareVersion = response.slice(5).replace(/:\]$/, "");
+      } else if (/^\[OPT:/i.test(response)) {
+        this.firmwareOptions = response.slice(5).replace(/\]$/, "");
+      } else if (/^\[GC:/i.test(response)) {
+        this.parserState = response.slice(4).replace(/\]$/, "").split(" ").filter(Boolean);
       } else if (/^\[MSG:Pgm End\]$/i.test(response)) {
         this.programEnded = true;
       } else if (/^ALARM:/i.test(response)) {
@@ -108,6 +116,32 @@ export class GrblConnection {
           : null
       };
     }
+  }
+
+  // Parses the optional fields of a status report (Bf, FS, Ov, A, Pn) into `report`; feed is in mm/min.
+  updateReport(report) {
+    const body = /^<([^>]*)>$/.exec(report)?.[1];
+    if (!body) return;
+    const fields = Object.fromEntries(body.split("|").slice(1).map((field) => {
+      const separator = field.indexOf(":");
+      return separator < 0 ? [field, ""] : [field.slice(0, separator), field.slice(separator + 1)];
+    }));
+    const unitScale = this.grblSettings.get(13) === 1 ? 25.4 : 1;
+    const numbers = (text) => (text ?? "").split(",").map(Number);
+    const buffers = numbers(fields.Bf);
+    const feed = numbers(fields.FS);
+    const overrides = numbers(fields.Ov);
+    this.report = {
+      plannerBlocks: Number.isFinite(buffers[0]) ? buffers[0] : null,
+      serialBytes: Number.isFinite(buffers[1]) ? buffers[1] : null,
+      feedMmPerMinute: Number.isFinite(feed[0]) ? feed[0] * unitScale : null,
+      spindleRpm: Number.isFinite(feed[1]) ? feed[1] : null,
+      overrides: overrides.length === 3 && overrides.every(Number.isFinite)
+        ? { feedPercent: overrides[0], rapidPercent: overrides[1], spindlePercent: overrides[2] }
+        : null,
+      activeSignals: fields.A ?? "",
+      pins: fields.Pn ?? ""
+    };
   }
 
   // Asks for a status report without waiting; the reply updates `position` and `status`.

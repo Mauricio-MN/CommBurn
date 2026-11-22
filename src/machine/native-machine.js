@@ -207,7 +207,7 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
         return startJob(body);
       case "GET /api/job-status":
         if (activeJob) connection?.requestStatusReport();
-        return { ...jobStatus, position: connection?.position?.work ?? null };
+        return { ...jobStatus, position: connection?.position?.work ?? null, report: connection?.report ?? null };
       case "POST /api/job-pause":
         if (!connection || !activeJob) throw new Error("No machine job is running");
         connection.pauseJob();
