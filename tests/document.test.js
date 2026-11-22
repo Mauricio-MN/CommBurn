@@ -159,6 +159,13 @@ test("every origin point is accepted and centred axes put machine zero mid-bed",
   assert.deepEqual([frame.xDirection, frame.yDirection], [1, 1]);
 });
 
+test("centred origin jobs are accepted when objects are inside the bed and rejected outside it", () => {
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 };
+  const base = { widthMm: 100, heightMm: 80, origin: { corner: "center" } };
+  assert.doesNotThrow(() => renderGrblJob({ ...base, elements: [{ type: "rect", xMm: 10, yMm: 10, widthMm: 20, heightMm: 10 }] }, settings));
+  assert.throws(() => renderGrblJob({ ...base, elements: [{ type: "rect", xMm: 90, yMm: 10, widthMm: 20, heightMm: 10 }] }, settings), { code: "grbl.outsideWorkArea" });
+});
+
 test("GRBL text keeps its stage position for every origin corner and fills glyphs with open-free contours", () => {
   const documentModel = {
     widthMm: 100,

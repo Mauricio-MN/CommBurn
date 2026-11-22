@@ -946,10 +946,13 @@ function drawJobMarkers(documentModel) {
     byId("job-markers").replaceChildren();
     return;
   }
-  requestJobReference(documentModel).then(({ failed, reference }) => {
-    if (request !== jobMarkersRequest) return;
-    keepScrollPositions(() => paintJobMarkers(documentModel, failed ? visualReference(documentModel) : reference));
-  });
+  // Images must be decoded for this document first, or the planner rejects them and the markers lose Start and End.
+  prepareRasters(documentModel)
+    .then((rasters) => requestJobReference(documentModel, rasters))
+    .then(({ failed, reference }) => {
+      if (request !== jobMarkersRequest) return;
+      keepScrollPositions(() => paintJobMarkers(documentModel, failed ? visualReference(documentModel) : reference));
+    });
 }
 
 let jobReferenceWorker = null;
@@ -965,7 +968,7 @@ function finishPendingJobReferences(result) {
 }
 
 // Planning the job runs in a worker so dropping a large selection does not block the editor.
-function requestJobReference(documentModel) {
+function requestJobReference(documentModel, rasters = currentRasters) {
   if (!jobReferenceWorker) {
     const worker = new Worker(new URL("./ui/job-reference-worker.js", import.meta.url), { type: "module" });
     jobReferenceWorker = worker;
@@ -992,7 +995,7 @@ function requestJobReference(documentModel) {
     });
   }
   const id = ++jobReferenceRequest;
-  const settings = { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() };
+  const settings = { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement(), rasters };
   return new Promise((resolve) => {
     pendingJobReferences.set(id, resolve);
     jobReferenceWorkerReady.then(() => {
@@ -1256,6 +1259,7 @@ async function prepareRasters(documentModel = readDocument()) {
     }
   }
   currentRasters = rasters;
+  return rasters;
 }
 
 function readJobPlacement() {

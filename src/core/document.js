@@ -973,8 +973,12 @@ export function planGrblJob(input, settings) {
   const document = createDocument(input);
   // Physical head positions are absolute machine coordinates; "objects" mode only re-zeroes the work coordinates.
   const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 });
-  const outside = absolute.paths.some(({ points }) => points.some(({ xMm, yMm }) =>
-    xMm < -1e-6 || yMm < -1e-6 || xMm > document.widthMm + 1e-6 || yMm > document.heightMm + 1e-6));
+  // Machine coordinates are compared with the bed through the origin frame, so centred axes can be negative.
+  const frame = machineFrame(document);
+  const outside = absolute.paths.some(({ points }) => points.some((point) => {
+    const { xMm, yMm } = machineToStage(frame, point.xMm, point.yMm);
+    return xMm < -1e-6 || yMm < -1e-6 || xMm > document.widthMm + 1e-6 || yMm > document.heightMm + 1e-6;
+  }));
   if (outside) {
     throw new CommBurnRangeError("grbl.outsideMachineArea", {}, { message: "The job would move the head outside the machine bed" });
   }
