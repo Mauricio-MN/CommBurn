@@ -43,7 +43,55 @@ export function createMachinePlayback(plan) {
     if (path.operation !== "fill") completedLines += 1;
   }
   const totalLines = plan.gcode ? plan.gcode.trim().split(/\r?\n/).length : completedLines + 1;
-  return { entries, totalLines };
+  return { entries, totalLines, timing: createPlaybackTiming(entries, totalLines) };
+}
+
+// Assumed rapid speed for playback only; real G0 speed depends on the machine.
+const PLAYBACK_RAPID_MM_PER_MINUTE = 3000;
+
+function pathLengthMm(points) {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(points[index].xMm - points[index - 1].xMm, points[index].yMm - points[index - 1].yMm);
+  }
+  return length;
+}
+
+// Maps playback line positions to estimated seconds, using each path's feed for work and a rapid speed for travel.
+function createPlaybackTiming(entries, totalLines) {
+  const lineSeconds = new Float64Array(totalLines);
+  for (const entry of entries) {
+    if (entry.kind === "travel") {
+      const lineIndex = Math.min(entry.endLine - 1, totalLines - 1);
+      lineSeconds[lineIndex] += pathLengthMm(entry.path.points) / PLAYBACK_RAPID_MM_PER_MINUTE * 60;
+      continue;
+    }
+    const feed = entry.path.feedMmPerMinute;
+    if (!(feed > 0)) continue;
+    for (let index = 0; index < entry.segmentCount; index += 1) {
+      const a = entry.path.points[index];
+      const b = entry.path.points[index + 1];
+      lineSeconds[entry.segmentStartLine + index] += Math.hypot(b.xMm - a.xMm, b.yMm - a.yMm) / feed * 60;
+    }
+  }
+  const cumulative = new Float64Array(totalLines + 1);
+  for (let line = 0; line < totalLines; line += 1) cumulative[line + 1] = cumulative[line] + lineSeconds[line];
+  return {
+    totalSeconds: cumulative[totalLines],
+    secondsAtLine(line) {
+      return cumulative[Math.max(0, Math.min(totalLines, Math.floor(line)))];
+    },
+    lineAtSeconds(seconds) {
+      let low = 0;
+      let high = totalLines;
+      while (low < high) {
+        const middle = (low + high) >> 1;
+        if (cumulative[middle] < seconds) low = middle + 1;
+        else high = middle;
+      }
+      return low;
+    }
+  };
 }
 
 export function getMachinePlaybackSegments(entries, fromLine, toLine) {

@@ -1132,7 +1132,7 @@ function buildGrblJob(input, settings, offset, startReference = null) {
           throw new RangeError("O trabalho excede o limite seguro de 100.000 trajetórias GRBL; reduza objetos/passagens ou aumente o espaçamento do preenchimento.");
         }
         const start = workPath.points[0];
-        const shiftedPath = { ...workPath, points: workPath.points.map(shift) };
+        const shiftedPath = { ...workPath, points: workPath.points.map(shift), feedMmPerMinute };
         if (previousPoint) {
           const travelMm = distanceBetween(previousPoint, start);
           if (travelMm > 0) {

@@ -1578,10 +1578,13 @@ function toggleTimelinePlayback() {
   const scrub = byId("machine-timeline-scrub");
   const total = Number(scrub.max);
   if (Number(scrub.value) >= total) setTimelinePosition(0);
-  const step = Math.max(1, Math.ceil(total / 240));
+  const timing = createMachinePlayback(machineSimulationPlan).timing;
+  const startSeconds = timing.secondsAtLine(Number(scrub.value));
+  const startedAt = performance.now();
   byId("machine-timeline-play").textContent = i18n.t("ui.dialogs.timelinePause");
   timelineTimer = setInterval(() => {
-    const next = Math.min(total, Number(scrub.value) + step);
+    const elapsedSeconds = (performance.now() - startedAt) / 1000;
+    const next = Math.min(total, timing.lineAtSeconds(startSeconds + elapsedSeconds));
     setTimelinePosition(next);
     if (next >= total) stopTimelinePlayback();
   }, 25);
@@ -1818,6 +1821,7 @@ function resetPresentationDemo() {
 }
 
 async function animatePresentationSimulation(run) {
+  const timing = createMachinePlayback(machineSimulationPlan).timing;
   const totalLines = createMachinePlayback(machineSimulationPlan).totalLines;
   const durationMs = 5200;
   let elapsed = 0;
@@ -1825,7 +1829,7 @@ async function animatePresentationSimulation(run) {
     if (!await waitPresentation(50, run)) return;
     if (presentationPaused) continue;
     elapsed += 50;
-    const completed = Math.min(totalLines, Math.floor(totalLines * elapsed / durationMs));
+    const completed = Math.min(totalLines, timing.lineAtSeconds(timing.totalSeconds * elapsed / durationMs));
     renderMachineSimulationProgress(completed, totalLines, "running");
   }
   if (presentationCurrent(run)) renderMachineSimulationProgress(totalLines, totalLines, "complete");
@@ -2602,6 +2606,7 @@ function newDocument() {
   widthInput.value = "180";
   heightInput.value = "120";
   setOriginCorner("top-left");
+  applyPlacementControls(DEFAULT_PLACEMENT);
   selectedId = null;
   selectedIds = [];
   textInput.value = "";
@@ -2990,6 +2995,26 @@ function restoreDocument(snapshot) {
   renderSaveState();
 }
 
+// Job placement belongs to each tab; machine settings such as the S-max stay global.
+const DEFAULT_PLACEMENT = Object.freeze({ startMode: "absolute", startAnchor: "top-left", workSystem: "", imageMode: "grayscale" });
+
+function readPlacementControls() {
+  return {
+    startMode: byId("start-mode").value,
+    startAnchor: startAnchorInput.value,
+    workSystem: byId("work-system").value,
+    imageMode: byId("image-mode").value
+  };
+}
+
+function applyPlacementControls(placement) {
+  byId("start-mode").value = placement.startMode;
+  setStartAnchor(placement.startAnchor);
+  byId("work-system").value = placement.workSystem;
+  byId("image-mode").value = placement.imageMode;
+  byId("start-anchor-field").hidden = placement.startMode !== "head";
+}
+
 function captureDocumentTabState() {
   return {
     document: currentDocument,
@@ -2998,7 +3023,8 @@ function captureDocumentTabState() {
     activeLayerId,
     selectedIds: [...selectedIds],
     projectName: projectNameInput.value,
-    projectNameIsUserValue
+    projectNameIsUserValue,
+    placement: readPlacementControls()
   };
 }
 
@@ -3010,6 +3036,7 @@ function applyDocumentTabState(state) {
   selectedIds = [...state.selectedIds];
   projectNameInput.value = state.projectName;
   projectNameIsUserValue = state.projectNameIsUserValue;
+  applyPlacementControls(state.placement);
   restoreDocument(state.document);
   renderLayers();
 }

@@ -47,6 +47,19 @@ test("machine simulation playback maps acknowledged G-code lines to work and rap
     plan.paths.filter((path) => path.kind === "work").reduce((count, path) => count + path.points.length - 1, 0));
 });
 
+test("machine simulation playback timing follows the layer feed for work time", () => {
+  const job = (feedMmPerMinute) => ({
+    widthMm: 30,
+    heightMm: 20,
+    layers: [{ id: "engrave", feedMmPerMinute }],
+    elements: [{ id: "line", type: "path", xMm: 1, yMm: 1, widthMm: 20, heightMm: 1, layerId: "engrave", pathData: "M 0 0 L 20 0" }]
+  });
+  const slow = createMachinePlayback(planGrblJob(job(300), { maxSpindleSpeed: 1000 })).timing;
+  const fast = createMachinePlayback(planGrblJob(job(3000), { maxSpindleSpeed: 1000 })).timing;
+  assert.ok(slow.totalSeconds > fast.totalSeconds * 5);
+  assert.equal(fast.lineAtSeconds(fast.totalSeconds), createMachinePlayback(planGrblJob(job(3000), { maxSpindleSpeed: 1000 })).totalLines);
+});
+
 test("machine simulation playback returns only segments acknowledged in the current interval", () => {
   const path = {
     kind: "work",
