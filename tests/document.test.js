@@ -481,13 +481,30 @@ test("the start choice maps to one job mode and the head marker sits on the chos
   };
   const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 };
   const headAt = { "top-left": { xMm: 30, yMm: 20 }, "bottom-right": { xMm: 40, yMm: 26 }, center: { xMm: 35, yMm: 23 } };
+  // The first G0 move is measured from machine X0 Y0, so the start marker must be origin + direction * move.
+  const firstMove = (input, jobSettings) => {
+    const [, x, y] = /^G0 X(-?[\d.]+) Y(-?[\d.]+)$/m.exec(planGrblJob(input, jobSettings).gcode);
+    return { x: Number(x), y: Number(y) };
+  };
+  const assertStartFromGcode = (input, jobSettings, ref, label) => {
+    const move = firstMove(input, jobSettings);
+    assert.deepEqual(ref.start, {
+      xMm: ref.origin.xMm + ref.xDirection * move.x,
+      yMm: ref.origin.yMm + ref.yDirection * move.y
+    }, `start follows G-code ${label}`);
+  };
   for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
-    const table = jobReferencePoints({ ...base, origin: { corner } }, { ...settings, ...jobStartSettings("absolute") });
+    const input = { ...base, origin: { corner } };
+    const tableSettings = { ...settings, ...jobStartSettings("absolute") };
+    const table = jobReferencePoints(input, tableSettings);
     const zero = { "top-left": { xMm: 0, yMm: 0 }, "top-right": { xMm: 100, yMm: 0 }, "bottom-left": { xMm: 0, yMm: 80 }, "bottom-right": { xMm: 100, yMm: 80 } }[corner];
     assert.deepEqual(table.origin, zero, `table origin ${corner}`);
+    assertStartFromGcode(input, tableSettings, table, `absolute ${corner}`);
     for (const anchor of Object.keys(headAt)) {
-      const ref = jobReferencePoints({ ...base, origin: { corner } }, { ...settings, ...jobStartSettings("head", anchor) });
+      const headSettings = { ...settings, ...jobStartSettings("head", anchor) };
+      const ref = jobReferencePoints(input, headSettings);
       assert.deepEqual(ref.origin, headAt[anchor], `head on ${anchor} with origin ${corner}`);
+      assertStartFromGcode(input, headSettings, ref, `head ${anchor} ${corner}`);
     }
   }
 });
