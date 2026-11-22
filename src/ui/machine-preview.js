@@ -1,3 +1,5 @@
+import { simulatedMachineSettings } from "../machine/motion-model.js";
+
 export function groupMachinePreviewPaths(paths) {
   const groups = new Map();
   for (const plannedPath of paths) {
@@ -46,8 +48,12 @@ export function createMachinePlayback(plan) {
   return { entries, totalLines, timing: createPlaybackTiming(entries, totalLines) };
 }
 
-// Assumed rapid speed for playback only; real G0 speed depends on the machine.
-const PLAYBACK_RAPID_MM_PER_MINUTE = 3000;
+// Rapid moves run at the controller's max rate ($110/$111); the simulated machine's values are the fallback.
+let playbackRapidMmPerMinute = Math.min(simulatedMachineSettings.$110, simulatedMachineSettings.$111);
+
+export function setPlaybackRapidMmPerMinute(value) {
+  playbackRapidMmPerMinute = value > 0 ? value : Math.min(simulatedMachineSettings.$110, simulatedMachineSettings.$111);
+}
 
 function pathLengthMm(points) {
   let length = 0;
@@ -63,7 +69,7 @@ function createPlaybackTiming(entries, totalLines) {
   for (const entry of entries) {
     if (entry.kind === "travel") {
       const lineIndex = Math.min(entry.endLine - 1, totalLines - 1);
-      lineSeconds[lineIndex] += pathLengthMm(entry.path.points) / PLAYBACK_RAPID_MM_PER_MINUTE * 60;
+      lineSeconds[lineIndex] += pathLengthMm(entry.path.points) / playbackRapidMmPerMinute * 60;
       continue;
     }
     const feed = entry.path.feedMmPerMinute;

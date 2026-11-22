@@ -7,7 +7,8 @@ import {
   formatOperationTimeEstimates,
   getMachinePlaybackSegments,
   groupMachinePreviewPaths,
-  locateMachinePosition
+  locateMachinePosition,
+  setPlaybackRapidMmPerMinute
 } from "../src/ui/machine-preview.js";
 
 test("machine preview groups many work and travel paths into one SVG path per layer and kind", () => {
@@ -58,6 +59,24 @@ test("machine simulation playback timing follows the layer feed for work time", 
   const fast = createMachinePlayback(planGrblJob(job(3000), { maxSpindleSpeed: 1000 })).timing;
   assert.ok(slow.totalSeconds > fast.totalSeconds * 5);
   assert.equal(fast.lineAtSeconds(fast.totalSeconds), createMachinePlayback(planGrblJob(job(3000), { maxSpindleSpeed: 1000 })).totalLines);
+});
+
+test("machine simulation playback times rapid moves at the controller max rate", () => {
+  const plan = planGrblJob({
+    widthMm: 100,
+    heightMm: 100,
+    layers: [{ id: "engrave" }],
+    elements: [
+      { id: "a", type: "rect", xMm: 1, yMm: 1, widthMm: 2, heightMm: 2, layerId: "engrave" },
+      { id: "b", type: "rect", xMm: 80, yMm: 80, widthMm: 2, heightMm: 2, layerId: "engrave" }
+    ]
+  }, { maxSpindleSpeed: 1000 });
+  setPlaybackRapidMmPerMinute(600);
+  const slowRapid = createMachinePlayback(plan).timing.totalSeconds;
+  setPlaybackRapidMmPerMinute(6000);
+  const fastRapid = createMachinePlayback(plan).timing.totalSeconds;
+  setPlaybackRapidMmPerMinute(null);
+  assert.ok(slowRapid > fastRapid);
 });
 
 test("machine simulation playback returns only segments acknowledged in the current interval", () => {

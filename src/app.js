@@ -36,7 +36,8 @@ import {
   formatOperationTimeEstimates,
   getMachinePlaybackSegments,
   groupMachinePreviewPaths,
-  locateMachinePosition
+  locateMachinePosition,
+  setPlaybackRapidMmPerMinute
 } from "./ui/machine-preview.js";
 import {
   createPresentationDocument,
@@ -724,6 +725,8 @@ function applyControllerSettings(settings) {
   if (typeof maxSpindleSpeed !== "number" || !Number.isFinite(maxSpindleSpeed) || maxSpindleSpeed <= 0) return false;
   byId("machine-smax").value = String(maxSpindleSpeed);
   controllerLaserMode = settings?.$32 === 0 || settings?.$32 === 1 ? settings.$32 : null;
+  const rapidLimits = [settings?.$110, settings?.$111].filter((value) => typeof value === "number" && value > 0);
+  setPlaybackRapidMmPerMinute(rapidLimits.length === 2 ? Math.min(...rapidLimits) : null);
   return true;
 }
 
