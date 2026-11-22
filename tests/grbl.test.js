@@ -126,7 +126,8 @@ test("stopping cancels an in-flight command without waiting for its timeout and 
   };
   const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 5000 });
   const job = connection.sendJob("G21\n");
-  setImmediate(() => connection.stopJob());
+  while (!serialPort.writes.includes("G21\n")) await new Promise((resolve) => setImmediate(resolve));
+  connection.stopJob();
 
   await assert.rejects(job, /Job stopped/);
   assert.ok(serialPort.writes.includes("!"));
@@ -158,7 +159,9 @@ test("GRBL sender times out when the controller goes idle without acknowledging"
   };
   const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 40 });
 
+  const startedAt = Date.now();
   await assert.rejects(connection.sendLine("G1 X1 Y1 F100"), /Timed out waiting for controller acknowledgement: G1 X1 Y1 F100/);
+  assert.ok(Date.now() - startedAt < 3000);
   assert.equal(connection.pending, null);
 });
 

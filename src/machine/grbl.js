@@ -241,9 +241,10 @@ export class GrblConnection {
     if (this.serialError) throw this.serialError;
     if (this.pending) throw new Error("A GRBL command is already awaiting acknowledgement");
     const result = new Promise((resolve, reject) => {
-      // Counts time without progress: a full planner or a feed hold delays "ok" on purpose.
+      // Status replies allow brief delays, but cannot postpone a missing acknowledgement forever.
       const pending = {
         lastProgressAt: Date.now(),
+        maximumWaitAt: Date.now() + timeoutMs + 1000,
         resolve: () => {
           clearInterval(pending.timer);
           this.pending = null;
@@ -258,7 +259,8 @@ export class GrblConnection {
       };
       pending.timer = setInterval(() => {
         if (this.pending !== pending) return;
-        if (Date.now() - pending.lastProgressAt > timeoutMs) {
+        const now = Date.now();
+        if (now - pending.lastProgressAt > timeoutMs || now >= pending.maximumWaitAt) {
           pending.reject(new Error(`Timed out waiting for controller acknowledgement: ${line}`));
           return;
         }
