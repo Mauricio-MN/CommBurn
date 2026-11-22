@@ -287,6 +287,7 @@ export default Object.freeze({
       simulationFailure: "Não foi possível iniciar o simulador: {error}",
       jobRunning: "Enviando comandos: {completed}/{total}",
       simulationRunning: "Simulando comandos: {completed}/{total}",
+      liveFeed: "Avanço real {feed} mm/min · ajuste de avanço {override}%",
       jobComplete: "Trabalho enviado e confirmado pelo controlador.",
       simulationComplete: "Simulação concluída; nenhum comando foi enviado à máquina.",
       sendInterrupted: "Envio interrompido: {error}",

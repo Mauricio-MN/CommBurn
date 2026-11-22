@@ -836,6 +836,13 @@ async function pollMachineJob() {
           ? "ui.machine.jobStopping"
           : machineSimulation ? "ui.machine.simulationRunning" : "ui.machine.jobRunning";
       setMachineState(key, { completed: result.completed, total: result.total });
+      const liveFeed = result.report?.feedMmPerMinute;
+      if (Number.isFinite(liveFeed)) {
+        appendMachineState("ui.machine.liveFeed", {
+          feed: Math.round(liveFeed),
+          override: result.report.overrides?.feedPercent ?? 100
+        });
+      }
       return;
     }
     clearInterval(statusPollTimer);
