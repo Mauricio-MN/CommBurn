@@ -312,7 +312,12 @@ test("GRBL keeps waiting for an acknowledgement while the controller answers sta
   const serialPort = new SilentPort();
   const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 200 });
   const sent = connection.sendLine("M5");
-  setTimeout(() => serialPort.emit("data", Buffer.from("ok\r\n")), 600);
-  await sent;
-  assert.ok(serialPort.writes.includes("?"));
-});
+  const acknowledge = setTimeout(() => serialPort.emit("data", Buffer.from("ok\r\n")), 600);
+  try {
+    await sent;
+    assert.ok(serialPort.writes.includes("?"));
+  } finally {
+    clearTimeout(acknowledge);
+    connection.rejectPending(new Error("test finished"));
+  }
+}, { timeout: 5000 });
