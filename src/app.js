@@ -698,7 +698,7 @@ function updateMachineControls() {
     stop: jobActive && !stopping
   };
   for (const button of machineJobControlButtons) button.disabled = !jobEnabled[button.dataset.machineJobControl];
-  byId("preview-machine-job").disabled = machineBusy;
+  byId("preview-machine-job").disabled = machineBusy && !machineSimulationLive;
   for (const id of ["read-position", "set-zero", "home-machine"]) byId(id).disabled = !machineConnected || machineBusy;
 }
 
@@ -1562,6 +1562,7 @@ function showMachineSimulation(machinePlan, documentModel, totalLines, { live = 
 }
 
 let timelineTimer = null;
+const TIMELINE_PLAYBACK_MS = 6000;
 
 function stopTimelinePlayback() {
   clearInterval(timelineTimer);
@@ -1580,14 +1581,19 @@ function toggleTimelinePlayback() {
   if (timelineTimer) return stopTimelinePlayback();
   const scrub = byId("machine-timeline-scrub");
   const total = Number(scrub.max);
-  if (Number(scrub.value) >= total) setTimelinePosition(0);
+  let startLine = Number(scrub.value);
+  if (startLine >= total) {
+    startLine = 0;
+    setTimelinePosition(0);
+  }
   const timing = createMachinePlayback(machineSimulationPlan).timing;
-  const startSeconds = timing.secondsAtLine(Number(scrub.value));
+  // The whole job plays in a fixed time; feed only changes how long each part of the path takes within it.
+  const startFraction = timing.totalSeconds > 0 ? timing.secondsAtLine(startLine) / timing.totalSeconds : 0;
   const startedAt = performance.now();
   byId("machine-timeline-play").textContent = i18n.t("ui.dialogs.timelinePause");
   timelineTimer = setInterval(() => {
-    const elapsedSeconds = (performance.now() - startedAt) / 1000;
-    const next = Math.min(total, timing.lineAtSeconds(startSeconds + elapsedSeconds));
+    const progress = Math.min(1, startFraction + (performance.now() - startedAt) / TIMELINE_PLAYBACK_MS);
+    const next = progress >= 1 ? total : Math.min(total, timing.lineAtSeconds(progress * timing.totalSeconds));
     setTimelinePosition(next);
     if (next >= total) stopTimelinePlayback();
   }, 25);
@@ -1606,6 +1612,11 @@ function showTimelinePreview(plan, documentModel) {
 }
 
 async function showMachinePreview() {
+  if (machineBusy && machineSimulationLive) {
+    const dialog = byId("machine-preview-dialog");
+    if (!dialog.open) dialog.showModal();
+    return;
+  }
   try {
     await prepareRasters();
     const referenceDocument = readDocument();

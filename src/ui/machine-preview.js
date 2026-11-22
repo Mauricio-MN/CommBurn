@@ -80,6 +80,8 @@ function createPlaybackTiming(entries, totalLines) {
       lineSeconds[entry.segmentStartLine + index] += Math.hypot(b.xMm - a.xMm, b.yMm - a.yMm) / feed * 60;
     }
   }
+  // Without feed information every line gets equal weight, so playback still advances.
+  if (!lineSeconds.some((seconds) => seconds > 0)) lineSeconds.fill(1);
   const cumulative = new Float64Array(totalLines + 1);
   for (let line = 0; line < totalLines; line += 1) cumulative[line + 1] = cumulative[line] + lineSeconds[line];
   return {
