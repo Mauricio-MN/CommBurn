@@ -719,12 +719,25 @@ function renderActiveToolStatus() {
 }
 
 let controllerLaserMode = null;
+// Reported acceleration and junction deviation drive the corner power estimate; null when the controller reports none.
+let controllerMotion = null;
+
+function controllerJobSettings() {
+  return { controllerLaserMode, ...(controllerMotion ?? {}) };
+}
 
 function applyControllerSettings(settings) {
   const maxSpindleSpeed = settings?.$30;
   if (typeof maxSpindleSpeed !== "number" || !Number.isFinite(maxSpindleSpeed) || maxSpindleSpeed <= 0) return false;
   byId("machine-smax").value = String(maxSpindleSpeed);
   controllerLaserMode = settings?.$32 === 0 || settings?.$32 === 1 ? settings.$32 : null;
+  const accelerations = [settings?.$120, settings?.$121];
+  const junctionDeviationMm = settings?.$11;
+  const motionKnown = accelerations.every((value) => typeof value === "number" && value > 0)
+    && typeof junctionDeviationMm === "number" && junctionDeviationMm > 0;
+  controllerMotion = motionKnown
+    ? { accelerationMmPerSecond2: Math.min(...accelerations), junctionDeviationMm }
+    : null;
   const rapidLimits = [settings?.$110, settings?.$111].filter((value) => typeof value === "number" && value > 0);
   setPlaybackRapidMmPerMinute(rapidLimits.length === 2 ? Math.min(...rapidLimits) : null);
   return true;
@@ -1278,7 +1291,7 @@ function readJobPlacement() {
 function createMachinePlan({ allowDefaultSmax = false, documentModel = readDocument() } = {}) {
   return planGrblJob(documentModel, {
     maxSpindleSpeed: machineMaxSpindleSpeed(allowDefaultSmax),
-    controllerLaserMode,
+    ...controllerJobSettings(),
     ...readJobPlacement()
   });
 }
@@ -3584,7 +3597,7 @@ startMachineButton.addEventListener("click", async () => {
     if (!machineSimulation && !safetyCheckbox.checked) throw new Error(i18n.t("ui.machine.confirmSafety"));
     const documentModel = readDocument();
     await prepareRasters(documentModel);
-    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), controllerLaserMode, ...readJobPlacement() };
+    const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), ...controllerJobSettings(), ...readJobPlacement() };
     const plan = planGrblJob(documentModel, settings);
     const result = await machineApi("/api/job", "POST", {
       safetyConfirmed: safetyCheckbox.checked,

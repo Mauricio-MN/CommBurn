@@ -552,6 +552,14 @@ test("GRBL vector power follows junction speed only when controller laser mode i
   const compensated = sValues(0);
   assert.ok(compensated.length > 0);
   assert.ok(Math.min(...compensated) < 300);
+
+  const minPower = (motion) => {
+    const plan = planGrblJob(input, { feedMmPerMinute: 1200, maxSpindleSpeed: 1000, controllerLaserMode: 0, ...motion });
+    return Math.min(...plan.gcode.split("\n").filter((line) => /^G1 X.* S\d+$/.test(line))
+      .map((line) => Number(line.match(/S(\d+)$/)[1])));
+  };
+  // A stiffer controller (higher acceleration) keeps corners faster, so the power dip is shallower.
+  assert.ok(minPower({ accelerationMmPerSecond2: 2000, junctionDeviationMm: 0.01 }) > minPower({ accelerationMmPerSecond2: 100, junctionDeviationMm: 0.01 }));
 });
 
 test("GRBL curves use tolerance-based segments without zero-length moves", () => {
