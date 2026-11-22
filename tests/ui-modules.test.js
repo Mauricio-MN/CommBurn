@@ -37,6 +37,21 @@ test("copy and paste shortcuts are documented for cross-layer object transfer", 
   assert.ok(SHORTCUTS.some(({ keys }) => keys === "Ctrl+V"));
 });
 
+test("Ctrl+A selects all stage objects and blocks the browser's page-wide selection", async () => {
+  const listeners = [];
+  globalThis.document = { addEventListener: (type, fn) => listeners.push(fn), removeEventListener() {} };
+  globalThis.Element = class { closest() { return null; } };
+  const { installShortcuts } = await import("../src/ui/shortcuts.js");
+  let selectedAll = 0;
+  installShortcuts({ selectAll: () => selectedAll++ });
+  let prevented = false;
+  listeners[0]({ key: "a", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, defaultPrevented: false, target: new Element(), preventDefault: () => (prevented = true) });
+  delete globalThis.document;
+  delete globalThis.Element;
+  assert.equal(selectedAll, 1);
+  assert.equal(prevented, true);
+});
+
 test("presentation simulation includes editable text and only GRBL-supported geometry", () => {
   const source = createPresentationDocument();
   const documentModel = {

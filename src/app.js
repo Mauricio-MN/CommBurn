@@ -3197,6 +3197,7 @@ installShortcuts({
     saveProject().catch((error) => showNotice(error));
   },
   remove: removeSelectedObject,
+  selectAll: () => changeSelection(currentDocument.elements.map((element) => element.id)),
   duplicate: duplicateSelectedObject,
   copy: copySelectedObjects,
   paste: pasteCopiedObjects,

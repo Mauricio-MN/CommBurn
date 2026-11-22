@@ -436,6 +436,7 @@ export default Object.freeze({
     shortcuts: {
       tool: "{tool} tool",
       addText: "Add text",
+      selectAll: "Select all objects",
       copy: "Copy selected object(s)",
       paste: "Paste to active layer",
       remove: "Remove selected object(s)",

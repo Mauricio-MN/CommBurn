@@ -437,6 +437,7 @@ export default Object.freeze({
     shortcuts: {
       tool: "Ferramenta {tool}",
       addText: "Adicionar texto",
+      selectAll: "Selecionar todos os objetos",
       copy: "Copiar objeto(s) selecionado(s)",
       paste: "Colar na camada ativa",
       remove: "Remover objeto(s) selecionado(s)",

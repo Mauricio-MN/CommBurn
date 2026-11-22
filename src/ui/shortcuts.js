@@ -5,6 +5,7 @@ const EDITABLE_SELECTOR = "input, textarea, select, [contenteditable='true']";
 export const SHORTCUTS = Object.freeze([
   ...TOOLS.map(({ id, key }) => ({ keys: key, translationKey: "ui.shortcuts.tool", toolId: id })),
   { keys: "Ctrl+Enter", translationKey: "ui.shortcuts.addText" },
+  { keys: "Ctrl+A", translationKey: "ui.shortcuts.selectAll" },
   { keys: "Ctrl+C", translationKey: "ui.shortcuts.copy" },
   { keys: "Ctrl+V", translationKey: "ui.shortcuts.paste" },
   { keys: "Delete", translationKey: "ui.shortcuts.remove" },
@@ -36,6 +37,9 @@ export function installShortcuts(actions) {
     }
     if ((event.ctrlKey || event.metaKey) && key === "z") {
       (event.shiftKey ? actions.redo : actions.undo)();
+      event.preventDefault();
+    } else if ((event.ctrlKey || event.metaKey) && key === "a") {
+      actions.selectAll();
       event.preventDefault();
     } else if ((event.ctrlKey || event.metaKey) && key === "c") {
       actions.copy();

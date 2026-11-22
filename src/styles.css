@@ -35,7 +35,8 @@
 }
 * { box-sizing: border-box; }
 html { width: 100%; min-width: 340px; height: 100%; overflow: hidden; }
-body { display: flex; width: 100%; min-width: 340px; height: 100vh; height: 100dvh; min-height: 0; flex-direction: column; overflow: hidden; margin: 0; }
+body { display: flex; width: 100%; min-width: 340px; height: 100vh; height: 100dvh; min-height: 0; flex-direction: column; overflow: hidden; margin: 0; user-select: none; }
+input, textarea, [contenteditable='true'] { user-select: text; }
 html.presentation-active { height: 100%; overflow: hidden; }
 body.presentation-active { height: 100dvh; overflow: hidden; }
 button, input, textarea, select { font: inherit; }
