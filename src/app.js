@@ -1,4 +1,4 @@
-import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderSvg } from "./core/document.js";
+import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderSvg, unlockedElementIds } from "./core/document.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { isFontInstalled } from "./font-availability.js";
@@ -899,11 +899,12 @@ for (const button of machineJobControlButtons) {
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 let jobMarkersTimer = null;
+let jobMarkersRequest = 0;
 
 // Planning the job is heavier than drawing, so markers are refreshed shortly after edits settle.
 function renderJobMarkers(documentModel) {
   clearTimeout(jobMarkersTimer);
-  jobMarkersTimer = setTimeout(() => keepScrollPositions(() => drawJobMarkers(documentModel)), 120);
+  jobMarkersTimer = setTimeout(() => drawJobMarkers(documentModel), 120);
 }
 
 // Redrawing the marker layer can make the browser re-anchor the page; restoring every scroll position keeps the view still.
@@ -940,16 +941,60 @@ function visualReference(documentModel) {
 }
 
 function drawJobMarkers(documentModel) {
+  const request = ++jobMarkersRequest;
+  if (!byId("show-job-markers").checked) {
+    byId("job-markers").replaceChildren();
+    return;
+  }
+  requestJobReference(documentModel).then(({ failed, reference }) => {
+    if (request !== jobMarkersRequest) return;
+    keepScrollPositions(() => paintJobMarkers(documentModel, failed ? visualReference(documentModel) : reference));
+  });
+}
+
+let jobReferenceWorker = null;
+let jobReferenceRequest = 0;
+const pendingJobReferences = new Map();
+
+function finishPendingJobReferences(result) {
+  for (const [id, done] of pendingJobReferences) {
+    pendingJobReferences.delete(id);
+    done(result);
+  }
+}
+
+// Planning the job runs in a worker so dropping a large selection does not block the editor.
+function requestJobReference(documentModel) {
+  if (!jobReferenceWorker) {
+    jobReferenceWorker = new Worker(new URL("./ui/job-reference-worker.js", import.meta.url), { type: "module" });
+    jobReferenceWorker.addEventListener("message", ({ data }) => {
+      const done = pendingJobReferences.get(data.id);
+      if (!done) return;
+      pendingJobReferences.delete(data.id);
+      done({ failed: Boolean(data.error), reference: data.reference ?? null });
+    });
+    jobReferenceWorker.addEventListener("error", (event) => {
+      event.preventDefault();
+      jobReferenceWorker.terminate();
+      jobReferenceWorker = null;
+      finishPendingJobReferences({ failed: true, reference: null });
+    });
+  }
+  return new Promise((resolve) => {
+    const id = ++jobReferenceRequest;
+    pendingJobReferences.set(id, resolve);
+    jobReferenceWorker.postMessage({
+      id,
+      documentModel,
+      settings: { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() }
+    });
+  });
+}
+
+function paintJobMarkers(documentModel, reference) {
   const layer = byId("job-markers");
   layer.replaceChildren();
   layer.style.opacity = "0.7";
-  if (!byId("show-job-markers").checked) return;
-  let reference;
-  try {
-    reference = jobReferencePoints(documentModel, { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() });
-  } catch {
-    reference = visualReference(documentModel);
-  }
   if (!reference) return;
   const size = Math.max(2, Math.max(documentModel.widthMm, documentModel.heightMm) / 50);
   const make = (name, attributes, text) => {
@@ -962,7 +1007,7 @@ function drawJobMarkers(documentModel) {
     x: point.xMm + size * dx, y: point.yMm + size * dy, "font-size": size * 0.9, fill: color, "font-family": "sans-serif"
   }, i18n.t(key));
   const { origin, start, end, xDirection, yDirection, bounds } = reference;
-  make("rect", { x: bounds.minXMm, y: bounds.minYMm, width: bounds.maxXMm - bounds.minXMm, height: bounds.maxYMm - bounds.minYMm, fill: "none", stroke: "#8a5a00", "stroke-width": size * 0.05, "stroke-dasharray": `${size * 0.15} ${size * 0.5}`, opacity: 0.45 });
+  make("rect", { x: bounds.minXMm, y: bounds.minYMm, width: Math.max(0, bounds.maxXMm - bounds.minXMm), height: Math.max(0, bounds.maxYMm - bounds.minYMm), fill: "none", stroke: "#8a5a00", "stroke-width": size * 0.05, "stroke-dasharray": `${size * 0.15} ${size * 0.5}`, opacity: 0.45 });
   const arrow = (dx, dy, name) => {
     make("line", { x1: origin.xMm, y1: origin.yMm, x2: origin.xMm + dx * size * 2, y2: origin.yMm + dy * size * 2, stroke: "#8a5a00", "stroke-width": size * 0.12 });
     make("text", { x: origin.xMm + dx * size * 2.3, y: origin.yMm + dy * size * 2.3 + size * 0.3, "font-size": size * 0.8, fill: "#8a5a00", "font-family": "sans-serif", "text-anchor": "middle" }, name);
@@ -3204,7 +3249,7 @@ installShortcuts({
     saveProject().catch((error) => showNotice(error));
   },
   remove: removeSelectedObject,
-  selectAll: () => changeSelection(currentDocument.elements.map((element) => element.id)),
+  selectAll: () => changeSelection(unlockedElementIds(currentDocument)),
   duplicate: duplicateSelectedObject,
   copy: copySelectedObjects,
   paste: pasteCopiedObjects,

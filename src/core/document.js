@@ -244,6 +244,11 @@ function positiveOrZero(value, label) {
   return number;
 }
 
+export function unlockedElementIds(documentModel) {
+  const locked = new Set(documentModel.layers.filter((layer) => layer.locked).map((layer) => layer.id));
+  return documentModel.elements.filter((element) => !locked.has(element.layerId)).map((element) => element.id);
+}
+
 export function createDocument(input = {}) {
   const widthMm = positiveNumber(input.widthMm ?? 100, "widthMm");
   const heightMm = positiveNumber(input.heightMm ?? 100, "heightMm");

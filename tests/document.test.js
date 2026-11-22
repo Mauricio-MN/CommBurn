@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg, stageToMachine } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg, stageToMachine, unlockedElementIds } from "../src/core/document.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
@@ -578,4 +578,13 @@ test("SVG export matches the stage regardless of origin and axis settings", () =
   assert.equal(flipped, stage);
   assert.match(stage, /<path id="p" d="M30 20L40 20L40 26z"/);
   assert.match(stage, /<rect id="r" x="30" y="20" width="10" height="6"/);
+});
+
+test("select-all ignores objects on locked layers", () => {
+  const layers = [{ ...DEFAULT_LAYER, id: "a" }, { ...DEFAULT_LAYER, id: "b", locked: true }];
+  const documentModel = createDocument({ widthMm: 100, heightMm: 100, layers, elements: [
+    { id: "free", type: "rect", layerId: "a", xMm: 0, yMm: 0, widthMm: 5, heightMm: 5 },
+    { id: "held", type: "rect", layerId: "b", xMm: 10, yMm: 0, widthMm: 5, heightMm: 5 }
+  ] });
+  assert.deepEqual(unlockedElementIds(documentModel), ["free"]);
 });
