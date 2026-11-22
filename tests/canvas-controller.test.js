@@ -118,3 +118,64 @@ test("pointer moves within one frame preview only the latest position, then comm
   }
 });
 
+
+test("a drag keeps the job markers on the moved object without rebuilding the model mid-drag", async () => {
+  const { createDocument, jobReferencePoints } = await import("../src/core/document.js");
+  const frames = [];
+  globalThis.requestAnimationFrame = (callback) => { frames.push(callback); return frames.length; };
+  globalThis.cancelAnimationFrame = () => {};
+  try {
+    let elements = [{ id: "box", type: "rect", xMm: 10, yMm: 10, widthMm: 20, heightMm: 10, layerId: "layer" }];
+    const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000 };
+    const markers = (items) => jobReferencePoints(createDocument({ widthMm: 100, heightMm: 80, layers: [{ id: "layer", locked: false }], elements: items }), settings);
+    const before = markers(elements);
+    const previews = [];
+    let updates = null;
+    const handlers = new Map();
+    const svg = {
+      querySelector: () => ({}),
+      addEventListener: (name, handler) => handlers.set(name, handler),
+      createSVGPoint: () => ({ x: 0, y: 0, matrixTransform() { return { x: this.x, y: this.y }; } }),
+      getScreenCTM: () => ({ inverse: () => ({}) }),
+      setPointerCapture() {}
+    };
+    const callbacks = {
+      getTool: () => "move",
+      getDocument: () => createDocument({ widthMm: 100, heightMm: 80, layers: [{ id: "layer", locked: false }], elements }),
+      getSelectedIds: () => ["box"],
+      select() {},
+      previewMove: (ids, dx, dy) => previews.push({ dx, dy }),
+      clearMovePreview() {},
+      updateMany: (changes) => { updates = changes; },
+      notify() {},
+      commit() {}
+    };
+    const controller = new CanvasController(svg, callbacks);
+    const event = (clientX, clientY) => ({
+      button: 0, pointerId: 1, clientX, clientY, shiftKey: false,
+      target: { closest: () => ({ dataset: { id: "box" } }) },
+      preventDefault() {}
+    });
+    controller.onPointerDown(event(40, 50));
+    controller.onPointerMove(event(45, 52));
+    controller.onPointerMove(event(50, 58));
+    frames.shift()();
+    assert.equal(previews.length, 1);
+    assert.equal(updates, null, "the model must not be rebuilt while dragging");
+
+    controller.onPointerUp(event(50, 58));
+    assert.deepEqual(updates, [{ id: "box", patch: { xMm: 20, yMm: 18 } }]);
+
+    elements = elements.map((element) => ({ ...element, ...updates[0].patch }));
+    const after = markers(elements);
+    const dx = 10, dy = 8;
+    for (const point of ["start", "end"]) {
+      assert.ok(Math.abs(after[point].xMm - (before[point].xMm + dx)) < 1e-6, `${point} X follows the object`);
+      assert.ok(Math.abs(after[point].yMm - (before[point].yMm + dy)) < 1e-6, `${point} Y follows the object`);
+    }
+    assert.deepEqual(after.origin, before.origin, "the origin stays on the machine");
+  } finally {
+    delete globalThis.requestAnimationFrame;
+    delete globalThis.cancelAnimationFrame;
+  }
+});
