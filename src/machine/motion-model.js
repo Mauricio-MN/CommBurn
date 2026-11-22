@@ -1,6 +1,7 @@
 // Virtual machine motion limits. A real controller reports its own values through $$.
 export const simulatedMachineSettings = Object.freeze({
   $11: 0.01,
+  $13: 0,
   $110: 6000,
   $111: 6000,
   $120: 500,

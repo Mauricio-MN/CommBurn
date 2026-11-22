@@ -94,6 +94,23 @@ test("the virtual machine stops acknowledging lines while its planner buffer is 
   port.close(() => {});
 });
 
+test("the virtual machine reports planner space, live feed and overrides like GRBL 1.1", async () => {
+  const port = new SimulatedSerialPort();
+  const reports = [];
+  port.on("data", (data) => {
+    const text = data.toString().trim();
+    if (text.startsWith("<")) reports.push(text);
+  });
+  port.write("G21\nG90\nG1 F600\nG1 X50 Y0\n");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  port.write("?");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const report = reports.at(-1);
+  assert.match(report, /\|Bf:14,128\|/);
+  assert.match(report, /\|FS:600,0\|Ov:100,100,100>$/);
+  port.close(() => {});
+});
+
 test("a planner feed hold freezes the running block and resumes it where it stopped", () => {
   const planner = new MotionPlanner({ limits });
   planner.add(createMotionBlock({ from: origin, to: { xMm: 10, yMm: 0 }, feedMmPerMinute: 600, rapid: false }, limits), 0);

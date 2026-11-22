@@ -53,8 +53,13 @@ export class SimulatedSerialPort extends EventEmitter {
 
   write(data) {
     if (data === "?") {
-      const position = this.livePosition(clockSeconds());
-      this.reply(`<${this.status}|MPos:${position.xMm.toFixed(3)},${position.yMm.toFixed(3)},0|WCO:${this.zero.xMm},${this.zero.yMm},0>`);
+      const now = clockSeconds();
+      const position = this.livePosition(now);
+      // Like GRBL 1.1: free planner blocks and bytes, live feed in mm/min, and 100% overrides.
+      const current = this.hold ? null : this.planner.blocks[0];
+      const feedMmPerMinute = current ? Math.round(current.maxSpeed * 60) : 0;
+      this.reply(`<${this.status}|MPos:${position.xMm.toFixed(3)},${position.yMm.toFixed(3)},0|WCO:${this.zero.xMm},${this.zero.yMm},0`
+        + `|Bf:${simulatedPlannerCapacity - this.planner.size},128|FS:${feedMmPerMinute},0|Ov:100,100,100>`);
     } else if (data === "!") {
       this.feedHold();
     } else if (data === "~") {
@@ -475,7 +480,7 @@ async function handleApi(request, response, url) {
     if (request.method === "GET" && url.pathname === "/api/job-status") {
       // While a job runs, ask for a fresh status report so the reported position stays current.
       if (activeJob) connection?.requestStatusReport();
-      sendJson(response, 200, { ...jobStatus, position: connection?.position?.work ?? null });
+      sendJson(response, 200, { ...jobStatus, position: connection?.position?.work ?? null, report: connection?.report ?? null });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/job") {
