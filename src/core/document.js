@@ -489,12 +489,27 @@ function flattenCubic(p0, p1, p2, p3, out, depth = 0) {
   flattenCubic(mid, p123, p23, p3, out, depth + 1);
 }
 
+// Parsing path data dominates job planning on large drawings, and it is repeated on every marker refresh.
+const parsedVectorPathCache = new Map();
+const PARSED_VECTOR_PATH_CACHE_LIMIT = 4096;
+
+function parsedVectorPath(pathData) {
+  let entry = parsedVectorPathCache.get(pathData);
+  if (!entry) {
+    const source = new SVGPathData(pathData);
+    const bounds = source.getBounds();
+    const commands = source.toAbs().normalizeHVZ().normalizeST().qtToC().aToC().commands;
+    entry = { bounds, commands };
+    if (parsedVectorPathCache.size >= PARSED_VECTOR_PATH_CACHE_LIMIT) parsedVectorPathCache.clear();
+    parsedVectorPathCache.set(pathData, entry);
+  }
+  return entry;
+}
+
 function flattenVectorPath(element) {
-  const source = new SVGPathData(element.pathData);
-  const bounds = source.getBounds();
+  const { bounds, commands } = parsedVectorPath(element.pathData);
   const scaleX = bounds.maxX === bounds.minX ? 1 : element.widthMm / (bounds.maxX - bounds.minX);
   const scaleY = bounds.maxY === bounds.minY ? 1 : element.heightMm / (bounds.maxY - bounds.minY);
-  const commands = source.toAbs().normalizeHVZ().normalizeST().qtToC().aToC().commands;
   const paths = [];
   let points = null;
   let current = null;

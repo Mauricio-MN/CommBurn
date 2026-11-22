@@ -555,13 +555,19 @@ function updateSelected(patch, saveHistory = true, refreshInspector = true) {
 
 // Dragging shifts the already drawn nodes, so the whole document is not re-rendered on every pointer move.
 const movePreviewBaseTransforms = new Map();
+// Node lookups are cached per drag so each pointer frame does not query the whole DOM for every object.
+const movePreviewNodes = new Map();
 // Set when a drag ends; the next model update keeps the already-shifted nodes instead of rebuilding them.
 let movePreviewPendingDrop = false;
 
 function previewMoveSelection(ids, dxMm, dyMm) {
   for (const id of ids) {
-    const node = objects.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    if (!node) continue;
+    let node = movePreviewNodes.get(id);
+    if (!node) {
+      node = objects.querySelector(`[data-id="${CSS.escape(id)}"]`);
+      if (!node) continue;
+      movePreviewNodes.set(id, node);
+    }
     if (!movePreviewBaseTransforms.has(id)) movePreviewBaseTransforms.set(id, node.getAttribute("transform") ?? "");
     const base = movePreviewBaseTransforms.get(id);
     node.setAttribute("transform", `translate(${dxMm} ${dyMm})${base ? ` ${base}` : ""}`);
@@ -571,6 +577,7 @@ function previewMoveSelection(ids, dxMm, dyMm) {
 function clearMovePreview() {
   movePreviewPendingDrop = movePreviewBaseTransforms.size > 0;
   movePreviewBaseTransforms.clear();
+  movePreviewNodes.clear();
 }
 
 function updateMany(updates, saveHistory = true) {
