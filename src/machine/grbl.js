@@ -83,9 +83,11 @@ export class GrblConnection {
   }
 
   updatePosition(report) {
+    // $13=1 makes the controller report positions in inches; everything else in this app is millimetres.
+    const unitScale = this.grblSettings.get(13) === 1 ? 25.4 : 1;
     const read = (name) => {
       const match = new RegExp(`[|<,]${name}:([+-]?\\d+(?:\\.\\d+)?),([+-]?\\d+(?:\\.\\d+)?)`).exec(report);
-      return match ? { xMm: Number(match[1]), yMm: Number(match[2]) } : null;
+      return match ? { xMm: Number(match[1]) * unitScale, yMm: Number(match[2]) * unitScale } : null;
     };
     const offset = read("WCO");
     if (offset) this.workOffset = offset;

@@ -266,3 +266,20 @@ test("GRBL job completes on [MSG:Pgm End] once the controller is no longer movin
 
   assert.equal(connection.programEnded, true);
 });
+
+test("GRBL position reports are converted from inches when $13 is set", () => {
+  const serialPort = new MockSerialPort();
+  const connection = new GrblConnection(serialPort);
+  connection.receive(Buffer.from("$13=1\r\n<Idle|MPos:1.0000,2.0000,0.0000|WCO:0.5000,0.5000,0.0000>\r\n"));
+  const rounded = (point) => ({ xMm: Number(point.xMm.toFixed(6)), yMm: Number(point.yMm.toFixed(6)) });
+  assert.deepEqual(rounded(connection.position.machine), { xMm: 25.4, yMm: 50.8 });
+  assert.deepEqual(rounded(connection.position.work), { xMm: 12.7, yMm: 38.1 });
+});
+
+test("GRBL position reports stay in millimetres when $13 is not inches", () => {
+  const serialPort = new MockSerialPort();
+  const connection = new GrblConnection(serialPort);
+  connection.receive(Buffer.from("$13=0\r\n<Idle|MPos:10.0,20.0,0.0|WCO:1.0,2.0,0.0>\r\n"));
+  assert.deepEqual(connection.position.machine, { xMm: 10, yMm: 20 });
+  assert.deepEqual(connection.position.work, { xMm: 9, yMm: 18 });
+});
