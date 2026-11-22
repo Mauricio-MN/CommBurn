@@ -17,7 +17,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test
+      - run: npm test -- --test-reporter=spec
       - name: Build Windows installer
         run: npm run dist:test
       - uses: actions/upload-artifact@v4
