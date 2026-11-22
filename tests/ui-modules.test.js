@@ -438,3 +438,22 @@ test("text creation and inspector expose bold and italic toggles", () => {
   assert.match(app, /input\.id === "object-font-bold"/);
   assert.match(app, /xMm: numberFrom\(byId\("new-x"\), "Posição X"\)/);
 });
+
+test("job reference worker announces readiness before answering requests", async () => {
+  const sent = [];
+  const listeners = [];
+  globalThis.self = {
+    postMessage: (message) => sent.push(message),
+    addEventListener: (type, listener) => listeners.push([type, listener])
+  };
+  try {
+    await import("../src/ui/job-reference-worker.js");
+    assert.deepEqual(sent[0], { ready: true });
+    const [, onMessage] = listeners.find(([type]) => type === "message");
+    onMessage({ data: { id: 4, documentModel: { widthMm: 10, heightMm: 10, origin: { xMm: 0, yMm: 0 }, layers: [], elements: [] }, settings: {} } });
+    assert.equal(sent[1].id, 4);
+    assert.equal(typeof sent[1].error, "string");
+  } finally {
+    delete globalThis.self;
+  }
+});

@@ -953,6 +953,7 @@ function drawJobMarkers(documentModel) {
 }
 
 let jobReferenceWorker = null;
+let jobReferenceWorkerReady = null;
 let jobReferenceRequest = 0;
 const pendingJobReferences = new Map();
 
@@ -966,27 +967,36 @@ function finishPendingJobReferences(result) {
 // Planning the job runs in a worker so dropping a large selection does not block the editor.
 function requestJobReference(documentModel) {
   if (!jobReferenceWorker) {
-    jobReferenceWorker = new Worker(new URL("./ui/job-reference-worker.js", import.meta.url), { type: "module" });
-    jobReferenceWorker.addEventListener("message", ({ data }) => {
+    const worker = new Worker(new URL("./ui/job-reference-worker.js", import.meta.url), { type: "module" });
+    jobReferenceWorker = worker;
+    jobReferenceWorkerReady = new Promise((resolve) => {
+      worker.addEventListener("message", function onReady({ data }) {
+        if (!data?.ready) return;
+        worker.removeEventListener("message", onReady);
+        resolve();
+      });
+    });
+    worker.addEventListener("message", ({ data }) => {
+      if (data?.ready) return;
       const done = pendingJobReferences.get(data.id);
       if (!done) return;
       pendingJobReferences.delete(data.id);
       done({ failed: Boolean(data.error), reference: data.reference ?? null });
     });
-    jobReferenceWorker.addEventListener("error", (event) => {
+    worker.addEventListener("error", (event) => {
       event.preventDefault();
-      jobReferenceWorker.terminate();
+      worker.terminate();
       jobReferenceWorker = null;
+      jobReferenceWorkerReady = null;
       finishPendingJobReferences({ failed: true, reference: null });
     });
   }
+  const id = ++jobReferenceRequest;
+  const settings = { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() };
   return new Promise((resolve) => {
-    const id = ++jobReferenceRequest;
     pendingJobReferences.set(id, resolve);
-    jobReferenceWorker.postMessage({
-      id,
-      documentModel,
-      settings: { maxSpindleSpeed: SIMULATOR_MAX_SPINDLE_SPEED, ...readJobPlacement() }
+    jobReferenceWorkerReady.then(() => {
+      if (pendingJobReferences.has(id)) jobReferenceWorker.postMessage({ id, documentModel, settings });
     });
   });
 }

@@ -1,5 +1,8 @@
 import { jobReferencePoints } from "../core/document.js";
 
+// Messages sent before the module finishes loading are lost, so the page waits for this signal.
+self.postMessage({ ready: true });
+
 self.addEventListener("message", ({ data }) => {
   try {
     const reference = jobReferencePoints(data.documentModel, data.settings);
