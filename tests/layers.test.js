@@ -214,22 +214,26 @@ test("GRBL fills closed vector paths and leaves holes unfilled", () => {
   ]);
 });
 
-test("GRBL filled vector paths must be closed", () => {
-  assert.throws(() => renderGrblJob({
+test("GRBL fill closes open SVG subpaths and skips zero-area ones", () => {
+  const fillJob = (pathData) => planGrblJob({
     widthMm: 20,
     heightMm: 20,
     layers: [{ id: "fill", operation: "fill" }],
     elements: [{
-      id: "open-path",
+      id: "path",
       type: "path",
       xMm: 1,
       yMm: 1,
       widthMm: 10,
       heightMm: 10,
-      pathData: "M 0 0 L 10 0 L 10 10 L 0 10",
+      pathData,
       layerId: "fill"
     }]
-  }, machineSettings), /requires closed vector paths/);
+  }, machineSettings);
+  const open = fillJob("M 0 0 L 10 0 L 10 10 L 0 10");
+  assert.deepEqual(open.paths, fillJob("M 0 0 L 10 0 L 10 10 L 0 10 Z").paths);
+  assert.ok(open.paths.some((path) => path.kind === "work"));
+  assert.throws(() => fillJob("M 0 0 L 10 0"), /no fillable paths/);
 });
 
 test("GRBL fill algorithms create horizontal, vertical, crosshatch, and unidirectional paths", () => {

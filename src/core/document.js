@@ -601,11 +601,18 @@ function diagonalFillPaths(element, polygons, algorithm, spacingMm) {
 }
 
 function fillVectorPaths(element, algorithm, spacingMm, polygonsOverride) {
-  const polygons = polygonsOverride ?? flattenVectorPath(element);
-  if (!polygons.length || polygons.some((points) => points.length < 4
-    || points[0][0] !== points.at(-1)[0] || points[0][1] !== points.at(-1)[1])) {
-    throw new RangeError(`GRBL fill requires closed vector paths; path ${element.id} is open or degenerate`);
-  }
+  // SVG fills implicitly close open subpaths and paint nothing for zero-area ones, so those are closed or dropped.
+  const polygons = (polygonsOverride ?? flattenVectorPath(element))
+    .map((points) => {
+      const first = points[0];
+      const last = points.at(-1);
+      return first && last && (first[0] !== last[0] || first[1] !== last[1]) ? [...points, first] : points;
+    })
+    .filter((points) => points.length >= 4 && Math.abs(points.reduce((sum, [x, y], index) => {
+      const [nx, ny] = points[(index + 1) % points.length];
+      return sum + (x * ny - nx * y);
+    }, 0)) > 1e-9);
+  if (!polygons.length) return [];
   if (DIAGONAL_FILL_ANGLES[algorithm]) return diagonalFillPaths(element, polygons, algorithm, spacingMm);
   const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
   const columnCount = Math.floor(element.widthMm / spacingMm) + 1;

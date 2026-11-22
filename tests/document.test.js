@@ -509,6 +509,21 @@ test("the start choice maps to one job mode and the head marker sits on the chos
   }
 });
 
+test("job markers resolve for an imported SVG whose fill layer holds an open path and a zero-area line", () => {
+  const input = {
+    widthMm: 100, heightMm: 80,
+    layers: [{ ...DEFAULT_LAYER, id: "engrave" }, { ...DEFAULT_LAYER, id: "fill", operation: "fill", fillAlgorithm: "horizontal-serpentine", fillSpacingMm: 1 }],
+    elements: [
+      { id: "open", type: "path", xMm: 10, yMm: 10, widthMm: 20, heightMm: 10, pathData: "M 0 0 L 20 0 L 20 10 L 0 10", layerId: "fill" },
+      { id: "line", type: "path", xMm: 40, yMm: 10, widthMm: 10, heightMm: 0, pathData: "M 0 0 L 10 0", layerId: "fill" }
+    ]
+  };
+  const settings = { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10, ...jobStartSettings("absolute") };
+  const ref = jobReferencePoints(input, settings);
+  assert.ok(ref.start && ref.end, "start and end markers must be present");
+  assert.deepEqual(ref.start, { xMm: 10, yMm: 10 }, "start is the first cut of the open path");
+});
+
 test("GRBL vector power follows junction speed only when controller laser mode is off", () => {
   const input = {
     widthMm: 100,
