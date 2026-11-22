@@ -666,7 +666,14 @@ async function machineApi(path, method = "GET", body) {
   } catch {
     result = null;
   }
-  if (!response.ok) throw new Error(result?.error ?? `Machine request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(result?.error ?? `Machine request failed (${response.status})`);
+    if (result?.code) {
+      error.code = result.code;
+      error.params = result.params;
+    }
+    throw error;
+  }
   if (result === null) throw new Error(`Machine request returned no JSON (${response.status})`);
   return result;
 }
@@ -685,10 +692,20 @@ function updateMachineControls() {
   byId("read-machine-area").disabled = !machineConnected || machineSimulation || machineBusy;
   byId("machine-safety-check").hidden = machineSimulation;
   const fontBlocked = missingFontElementIds.size > 0;
+  const dynamicPower = byId("laser-power-mode").value === "M4";
+  const dynamicBlocked = dynamicPower && machineConnected && !machineSimulation && controllerLaserMode !== 1;
+  const powerStatus = !dynamicPower ? "ui.machine.powerModeConstantHelp"
+    : machineSimulation ? "ui.machine.powerModeSimulated"
+      : !machineConnected ? "ui.machine.powerModeOffline"
+        : controllerLaserMode === 1 ? "ui.machine.powerModeReady"
+          : controllerLaserMode === 0 ? "ui.machine.powerModeDisabled" : "ui.machine.powerModeUnknown";
+  byId("laser-power-mode-status").textContent = i18n.t(powerStatus);
+  byId("machine-power-mode-status").textContent = i18n.t(powerStatus);
+  byId("laser-power-mode").disabled = machineBusy;
   byId("missing-font-status").hidden = !fontBlocked;
   byId("missing-font-status").textContent = fontBlocked ? i18n.t("ui.machine.missingFontBlocked", { count: missingFontElementIds.size }) : "";
   simulateMachineButton.disabled ||= fontBlocked;
-  startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy || fontBlocked;
+  startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy || fontBlocked || dynamicBlocked;
   startMachineButton.textContent = i18n.t(machineSimulation ? "ui.machine.simulateJob" : "ui.machine.sendJob");
   const jobActive = machineConnected && machineBusy;
   const stopping = machineJobStopRequested;
@@ -719,32 +736,24 @@ function renderActiveToolStatus() {
 }
 
 let controllerLaserMode = null;
-// Reported acceleration and junction deviation drive the corner power estimate; null when the controller reports none.
-let controllerMotion = null;
 
 function controllerJobSettings() {
-  return { controllerLaserMode, ...(controllerMotion ?? {}) };
+  return { laserPowerMode: byId("laser-power-mode").value };
 }
 
 function applyControllerSettings(settings) {
   const maxSpindleSpeed = settings?.$30;
-  if (typeof maxSpindleSpeed !== "number" || !Number.isFinite(maxSpindleSpeed) || maxSpindleSpeed <= 0) return false;
-  byId("machine-smax").value = String(maxSpindleSpeed);
   controllerLaserMode = settings?.$32 === 0 || settings?.$32 === 1 ? settings.$32 : null;
-  const accelerations = [settings?.$120, settings?.$121];
-  const junctionDeviationMm = settings?.$11;
-  const motionKnown = accelerations.every((value) => typeof value === "number" && value > 0)
-    && typeof junctionDeviationMm === "number" && junctionDeviationMm > 0;
-  controllerMotion = motionKnown
-    ? { accelerationMmPerSecond2: Math.min(...accelerations), junctionDeviationMm }
-    : null;
   const rapidLimits = [settings?.$110, settings?.$111].filter((value) => typeof value === "number" && value > 0);
   setPlaybackRapidMmPerMinute(rapidLimits.length === 2 ? Math.min(...rapidLimits) : null);
+  if (typeof maxSpindleSpeed !== "number" || !Number.isFinite(maxSpindleSpeed) || maxSpindleSpeed <= 0) return false;
+  byId("machine-smax").value = String(maxSpindleSpeed);
   return true;
 }
 
 function reportControllerSettings(result) {
-  if (applyControllerSettings(result.settings)) {
+  const valid = applyControllerSettings(result.settingsRead === false ? null : result.settings);
+  if (valid) {
     appendMachineState("ui.machine.settingsRead", { value: result.settings.$30 });
     updateMachineControls();
     return true;
@@ -794,7 +803,7 @@ async function restoreMachineConnection() {
         const result = await machineApi("/api/settings", "POST", {});
         reportControllerSettings(result);
       } catch (error) {
-        reportControllerSettings({ settingsError: formatError(error) });
+        reportControllerSettings({ settingsRead: false, settingsError: formatError(error) });
       }
     }
   } catch {
@@ -867,15 +876,31 @@ async function pollMachineJob() {
     }
     updateMachineControls();
   } catch (error) {
-    clearInterval(statusPollTimer);
-    statusPollTimer = undefined;
-    machineBusy = false;
-    machineJobPaused = false;
-    machineJobStopRequested = false;
     setMachineState("ui.machine.controllerFailure", () => ({ error: formatError(error) }));
-    updateMachineControls();
   } finally {
     machineJobPollInFlight = false;
+  }
+}
+
+let connectionPollInFlight = false;
+async function pollMachineConnection() {
+  if (!machineConnected || connectionPollInFlight) return;
+  connectionPollInFlight = true;
+  try {
+    const state = await machineApi("/api/connection-status");
+    if (!state.connected && machineConnected) {
+      machineConnected = false;
+      machineSimulation = false;
+      controllerLaserMode = null;
+      setPlaybackRapidMmPerMinute(null);
+      setMachineState("ui.machine.disconnected");
+      showNotice(i18n.t("ui.machine.disconnected"));
+      updateMachineControls();
+    }
+  } catch (error) {
+    setMachineState("ui.machine.controllerFailure", () => ({ error: formatError(error) }));
+  } finally {
+    connectionPollInFlight = false;
   }
 }
 
@@ -3511,7 +3536,7 @@ byId("read-machine-settings").addEventListener("click", async () => {
     const result = await machineApi("/api/settings", "POST", {});
     reportControllerSettings(result);
   } catch (error) {
-    reportControllerSettings({ settingsError: formatError(error) });
+    reportControllerSettings({ settingsRead: false, settingsError: formatError(error) });
   }
 });
 // $130 and $131 are the maximum travel in mm. Only the bed size changes; origin and axis direction stay user-controlled.
@@ -3548,6 +3573,8 @@ disconnectButton.addEventListener("click", async () => {
     await machineApi("/api/disconnect", "POST", {});
     machineConnected = false;
     machineSimulation = false;
+    controllerLaserMode = null;
+    setPlaybackRapidMmPerMinute(null);
     setMachineState("ui.machine.disconnected");
     updateMachineControls();
   } catch (error) {
@@ -3555,6 +3582,7 @@ disconnectButton.addEventListener("click", async () => {
   }
 });
 safetyCheckbox.addEventListener("change", updateMachineControls);
+byId("laser-power-mode").addEventListener("change", updateMachineControls);
 // Placement options do not change the document, so only the markers are redrawn and the sidebar keeps its scroll.
 function refreshPlacement() {
   keepScrollPositions(() => {
@@ -3602,6 +3630,9 @@ startMachineButton.addEventListener("click", async () => {
   try {
     if (missingFontElementIds.size > 0) throw new Error(i18n.t("ui.machine.missingFontBlocked", { count: missingFontElementIds.size }));
     if (!machineSimulation && !safetyCheckbox.checked) throw new Error(i18n.t("ui.machine.confirmSafety"));
+    if (!machineSimulation && byId("laser-power-mode").value === "M4" && controllerLaserMode !== 1) {
+      throw new Error(i18n.t(controllerLaserMode === 0 ? "ui.machine.powerModeDisabled" : "ui.machine.powerModeUnknown"));
+    }
     const documentModel = readDocument();
     await prepareRasters(documentModel);
     const settings = { maxSpindleSpeed: machineMaxSpindleSpeed(machineSimulation), ...controllerJobSettings(), ...readJobPlacement() };
@@ -3620,6 +3651,10 @@ startMachineButton.addEventListener("click", async () => {
     startMachinePolling();
     await pollMachineJob();
   } catch (error) {
+    if (error.code === "grbl.laserModeRequired" || error.code === "grbl.laserModeQueryFailed") {
+      controllerLaserMode = null;
+      updateMachineControls();
+    }
     setMachineState("ui.machine.rejected", () => ({ error: formatError(error) }));
     showNotice(error);
   }
@@ -3629,6 +3664,7 @@ await Promise.all(["CommBurn Sans", "CommBurn Serif", "CommBurn Mono"].map((fami
 renderPreview();
 updateMachineControls();
 void restoreMachineConnection();
+setInterval(pollMachineConnection, 2000);
 void loadDesktopPlugins({
   i18n,
   documentApi: (plugin) => Object.freeze({

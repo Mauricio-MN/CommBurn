@@ -71,6 +71,13 @@
             <option value="dither" data-i18n="ui.document.imageDither">Pontilhado (preto e branco com meios-tons)</option>
             <option value="threshold" data-i18n="ui.document.imageThreshold">Preto e branco simples</option>
           </select></label>
+          <label class="field" data-i18n="ui.machine.powerMode">Modo de potência do laser
+            <select id="laser-power-mode">
+              <option value="M4" data-i18n="ui.machine.powerModeDynamic">Dinâmica (M4)</option>
+              <option value="M3" data-i18n="ui.machine.powerModeConstant">Constante (M3)</option>
+            </select>
+          </label>
+          <p class="help-text" id="laser-power-mode-status" role="status"></p>
           <label class="field" data-i18n="ui.document.startMode">Posição inicial<select id="start-mode">
             <option value="absolute" data-i18n="ui.document.startAbsolute">Coordenadas absolutas</option>
             <option value="head" data-i18n="ui.document.startHead">Posição atual do laser</option>
@@ -191,6 +198,7 @@
             <input id="machine-smax" type="number" min="1" step="any" placeholder="Lido da controladora ao conectar" data-i18n-placeholder="ui.machine.powerPlaceholder">
           </label>
           <p class="help-text" data-i18n="ui.machine.powerHelp">Ao conectar, o CommBurn tenta ler $30 automaticamente. Se não conseguir, o campo fica vazio para você preencher; use o botão abaixo para tentar de novo. Se a controladora mostrar $30=1000, informe 1000. Não é uma porcentagem.</p>
+          <p class="help-text" id="machine-power-mode-status" role="status"></p>
           <div class="machine-actions">
             <button class="button button-secondary" id="connect-machine" type="button" data-i18n="ui.machine.connect">Conectar</button>
             <button class="button button-danger" id="disconnect-machine" type="button" disabled data-i18n="ui.machine.disconnect">Desconectar</button>

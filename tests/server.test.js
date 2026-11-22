@@ -81,6 +81,54 @@ test("server can be started on an ephemeral port and closed by an embedding app"
   assert.match((await settingsResponse.json()).error, /Conecte uma controladora GRBL/);
 });
 
+test("a stopped simulated job releases the controller for another job and a fresh port search", async (context) => {
+  const runningServer = await startServer({ port: 0 });
+  context.after(() => runningServer.close());
+  const request = async (path, body) => {
+    const response = await fetch(`${runningServer.url}${path}`, body === undefined ? {} : {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const result = await response.json();
+    assert.ok(response.ok, result.error);
+    return result;
+  };
+  await request("/api/simulate-connect", {});
+  const job = {
+    document: {
+      widthMm: 100, heightMm: 80,
+      elements: [{ id: "frame", type: "rect", xMm: 10, yMm: 5, widthMm: 20, heightMm: 15 }]
+    },
+    settings: { feedMmPerMinute: 300, maxSpindleSpeed: 1000, powerPercent: 10 }
+  };
+  await request("/api/job", job);
+  await request("/api/job-stop", {});
+  const deadline = Date.now() + 5000;
+  let state;
+  do {
+    state = await request("/api/connection-status");
+    if (!state.busy) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } while (Date.now() < deadline);
+  assert.equal(state.busy, false);
+  assert.equal(state.jobStatus.state, "stopped");
+  assert.equal(state.jobStatus.error, "Job stopped; controller was reset");
+  assert.equal((await request("/api/job", job)).accepted, true);
+  await request("/api/job-stop", {});
+  do {
+    state = await request("/api/connection-status");
+    if (!state.busy) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } while (Date.now() < deadline);
+  assert.equal(state.busy, false);
+  await request("/api/disconnect", {});
+  assert.equal((await request("/api/connection-status")).connected, false);
+  assert.ok(Array.isArray((await request("/api/ports")).ports));
+  assert.equal((await request("/api/simulate-connect", {})).connected, true);
+  await request("/api/disconnect", {});
+});
+
 test("desktop server lists and serves only valid local plugins", async (context) => {
   const pluginRoot = await mkdtemp(join(tmpdir(), "commburn-plugins-"));
   const pluginDirectory = join(pluginRoot, "demo-plugin");

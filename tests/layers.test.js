@@ -236,6 +236,21 @@ test("GRBL fill closes open SVG subpaths and skips zero-area ones", () => {
   assert.throws(() => fillJob("M 0 0 L 10 0"), /no fillable paths/);
 });
 
+test("self-intersecting fill contours retain both lobes alongside other subpaths", () => {
+  const plan = planGrblJob({
+    widthMm: 30, heightMm: 30,
+    layers: [{ id: "fill", operation: "fill", fillSpacingMm: 1 }],
+    elements: [{
+      id: "bowtie", type: "path", layerId: "fill", xMm: 1, yMm: 1, widthMm: 20, heightMm: 10,
+      pathData: "M0 0 L10 10 L0 10 L10 0 Z M12 0 L20 0 L20 10 L12 10 Z"
+    }]
+  }, machineSettings);
+  const work = plan.paths.filter(({ kind }) => kind === "work");
+  assert.ok(work.some(({ points }) => points[0].xMm < 11 && points[0].yMm < 6));
+  assert.ok(work.some(({ points }) => points[0].xMm < 11 && points[0].yMm > 6));
+  assert.ok(work.some(({ points }) => points[0].xMm >= 13));
+});
+
 test("GRBL fill algorithms create horizontal, vertical, crosshatch, and unidirectional paths", () => {
   const document = {
     widthMm: 40,

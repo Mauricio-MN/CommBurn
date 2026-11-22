@@ -1,5 +1,5 @@
 import { renderGrblJob } from "../core/document.js";
-import { GrblConnection } from "./grbl.js";
+import { GrblConnection, verifyDynamicLaserMode } from "./grbl.js";
 
 const baudCandidates = [115200, 230400, 57600, 250000];
 
@@ -12,7 +12,7 @@ class NativeSerialPort {
   isOpen = true;
   writeChain = Promise.resolve();
   writeError = null;
-  listeners = { data: new Set(), error: new Set() };
+  listeners = { data: new Set(), error: new Set(), close: new Set() };
   handles = [];
 
   constructor(plugin) {
@@ -75,6 +75,8 @@ class NativeSerialPort {
 export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?.UsbSerial } = {}) {
   let connection = null;
   let activeJob = false;
+  let jobTask = null;
+  let connectionCleanup = null;
   let jobStatus = { state: "idle", completed: 0, total: 0, error: null };
 
   function requirePlugin() {
@@ -83,11 +85,22 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
   }
 
   function createConnection(port) {
-    return new GrblConnection(port, {
+    const current = new GrblConnection(port, {
       onProgress: ({ completed, total }) => {
         jobStatus = { ...jobStatus, completed, total };
+      },
+      onDisconnect: () => {
+        if (connection !== current) return;
+        connection = null;
+        const task = jobTask;
+        connectionCleanup = (async () => {
+          if (task) await task;
+          await current.close();
+        })().catch((error) => console.error(`Unable to release disconnected controller: ${error.message}`))
+          .finally(() => { connectionCleanup = null; });
       }
     });
+    return current;
   }
 
   async function openPort(path, baudRate) {
@@ -112,13 +125,16 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
     } catch (error) {
       return {
         settings: currentConnection.settings,
+        settingsRead: false,
         settingsError: `Não foi possível consultar as configurações GRBL: ${error.message}`
       };
     }
   }
 
   async function connect(input) {
+    if (connectionCleanup) await connectionCleanup;
     if (connection) throw new Error("Disconnect the current controller before connecting another");
+    if (activeJob) throw new Error("Wait for the previous job to stop before connecting");
     if (typeof input.path !== "string" || !input.path) throw new TypeError("A serial port path is required");
     const detectBaud = input.baudRate === "auto";
     const baudRate = detectBaud ? baudCandidates[0] : Number(input.baudRate);
@@ -132,13 +148,16 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
         if (!detectedBaudRate) throw new Error("Não foi possível detectar o baud. Selecione manualmente uma velocidade e tente novamente.");
         connection = current;
         const { settings, settingsError } = await queryControllerSettings(current);
+        if (connection !== current) throw new Error("Serial connection closed while connecting");
         return { connected: true, path: input.path, baudRate: detectedBaudRate, autoDetected: true, settings, settingsError };
       }
       connection = current;
       const { settings, settingsError } = await queryControllerSettings(current);
+      if (connection !== current) throw new Error("Serial connection closed while connecting");
       return { connected: true, path: input.path, baudRate, autoDetected: false, settings, settingsError };
     } catch (error) {
-      if (connection !== current) await current.close().catch(() => {});
+      if (connectionCleanup) await connectionCleanup;
+      else if (connection !== current) await current.close();
       throw error;
     }
   }
@@ -155,14 +174,24 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
     const gcode = renderGrblJob(input.document, input.settings);
     activeJob = true;
     const jobConnection = connection;
+    try {
+      if ((input.settings.laserPowerMode ?? "M4") === "M4") {
+        await verifyDynamicLaserMode(jobConnection);
+        if (connection !== jobConnection) throw new Error("Serial connection closed while verifying laser mode");
+      }
+    } catch (error) {
+      activeJob = false;
+      throw error;
+    }
     const total = gcode.trim().split(/\r?\n/).length;
     jobStatus = { state: "running", completed: 0, total, error: null };
-    jobConnection.sendJob(gcode).then(() => {
+    jobTask = jobConnection.sendJob(gcode).then(() => {
       jobStatus = { ...jobStatus, state: "complete" };
     }, (error) => {
       jobStatus = { ...jobStatus, state: "stopped", error: error.message };
     }).finally(() => {
       activeJob = false;
+      jobTask = null;
     });
     return { accepted: true, lines: total };
   }
@@ -209,17 +238,17 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
         if (activeJob) connection?.requestStatusReport();
         return { ...jobStatus, position: connection?.position?.work ?? null, report: connection?.report ?? null };
       case "POST /api/job-pause":
-        if (!connection || !activeJob) throw new Error("No machine job is running");
+        if (!connection || !activeJob || !jobTask) throw new Error("No machine job is running");
         connection.pauseJob();
         jobStatus = { ...jobStatus, state: "paused" };
         return { paused: true };
       case "POST /api/job-resume":
-        if (!connection || !activeJob) throw new Error("No machine job is running");
+        if (!connection || !activeJob || !jobTask) throw new Error("No machine job is running");
         connection.resumeJob();
         jobStatus = { ...jobStatus, state: "running" };
         return { resumed: true };
       case "POST /api/job-stop":
-        if (!connection || !activeJob) throw new Error("No machine job is running");
+        if (!connection || !activeJob || !jobTask) throw new Error("No machine job is running");
         connection.stopJob();
         return { stopRequested: true };
       case "GET /api/position":

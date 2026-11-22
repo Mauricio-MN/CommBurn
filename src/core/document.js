@@ -621,17 +621,14 @@ function diagonalFillPaths(element, polygons, algorithm, spacingMm) {
 }
 
 function fillVectorPaths(element, algorithm, spacingMm, polygonsOverride) {
-  // SVG fills implicitly close open subpaths and paint nothing for zero-area ones, so those are closed or dropped.
+  // SVG fills implicitly close open subpaths; scanline intersections handle zero-area geometry.
   const polygons = (polygonsOverride ?? flattenVectorPath(element))
     .map((points) => {
       const first = points[0];
       const last = points.at(-1);
       return first && last && (first[0] !== last[0] || first[1] !== last[1]) ? [...points, first] : points;
     })
-    .filter((points) => points.length >= 4 && Math.abs(points.reduce((sum, [x, y], index) => {
-      const [nx, ny] = points[(index + 1) % points.length];
-      return sum + (x * ny - nx * y);
-    }, 0)) > 1e-9);
+    .filter((points) => points.length >= 4);
   if (!polygons.length) return [];
   if (DIAGONAL_FILL_ANGLES[algorithm]) return diagonalFillPaths(element, polygons, algorithm, spacingMm);
   const rowCount = Math.floor(element.heightMm / spacingMm) + 1;
@@ -1023,43 +1020,12 @@ export function jobReferencePoints(input, settings) {
   };
 }
 
-// With GRBL laser mode ($32=1) the controller already scales power with speed. Otherwise the planner's speed
-// at each junction is estimated from GRBL's junction-deviation rule, and power follows that speed so the dose per mm stays constant.
-const MIN_DYNAMIC_POWER_FRACTION = 0.05;
-const DEFAULT_ACCELERATION_MM_PER_S2 = 500;
-const DEFAULT_JUNCTION_DEVIATION_MM = 0.01;
-
-function dynamicPowerFractions(points, feedMmPerMinute, settings) {
-  if (settings.controllerLaserMode !== 0 || points.length < 2) return null;
-  const feedMmPerSecond = feedMmPerMinute / 60;
-  const acceleration = settings.accelerationMmPerSecond2 ?? DEFAULT_ACCELERATION_MM_PER_S2;
-  const deviation = settings.junctionDeviationMm ?? DEFAULT_JUNCTION_DEVIATION_MM;
-  const directions = points.slice(1).map((point, index) => {
-    const dx = point.xMm - points[index].xMm;
-    const dy = point.yMm - points[index].yMm;
-    const length = Math.max(Math.hypot(dx, dy), 1e-9);
-    return { x: dx / length, y: dy / length };
-  });
-  const junctionSpeeds = [feedMmPerSecond];
-  for (let index = 1; index < directions.length; index += 1) {
-    const cos = directions[index - 1].x * directions[index].x + directions[index - 1].y * directions[index].y;
-    if (cos < -0.999) {
-      junctionSpeeds.push(0);
-      continue;
-    }
-    const sinHalf = Math.sqrt(0.5 * (1 - cos));
-    const speed = sinHalf < 1e-6 ? feedMmPerSecond : Math.sqrt(acceleration * deviation * sinHalf / (1 - sinHalf));
-    junctionSpeeds.push(Math.min(feedMmPerSecond, speed));
-  }
-  junctionSpeeds.push(feedMmPerSecond);
-  return directions.map((_, index) => Math.max(
-    MIN_DYNAMIC_POWER_FRACTION,
-    Math.min(junctionSpeeds[index], junctionSpeeds[index + 1]) / feedMmPerSecond
-  ));
-}
-
 function buildGrblJob(input, settings, offset, startReference = null) {
   const document = createDocument(input);
+  const laserPowerMode = settings.laserPowerMode ?? "M4";
+  if (!["M3", "M4"].includes(laserPowerMode)) {
+    throw new CommBurnRangeError("grbl.invalidLaserPowerMode", { mode: String(laserPowerMode) }, { message: `Unsupported laser power mode: ${laserPowerMode}` });
+  }
   const rasters = settings.rasters ?? {};
   const rasterMode = settings.imageMode ?? "grayscale";
   const isRaster = (element) => element.type === "image" && rasters[element.id] !== undefined;
@@ -1151,14 +1117,12 @@ function buildGrblJob(input, settings, offset, startReference = null) {
         gcode.push("M5");
         gcode.push(`G0 X${shiftedPath.points[0].xMm} Y${shiftedPath.points[0].yMm}`);
         const pathPower = workPath.powerPercent ?? powerPercent;
-        gcode.push(`M4 S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
+        gcode.push(`${laserPowerMode} S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
         gcode.push(`G1 F${feedMmPerMinute}`);
-        const speedFractions = workPath.segmentPowerFractions ? null : dynamicPowerFractions(shiftedPath.points, feedMmPerMinute, settings);
         for (const [pointIndex, point] of shiftedPath.points.slice(1).entries()) {
           const fraction = workPath.segmentPowerFractions?.[pointIndex];
           let spindle = "";
           if (fraction !== undefined) spindle = ` S${Math.round(maxSpindleSpeed * powerPercent / 100 * fraction)}`;
-          else if (speedFractions) spindle = ` S${Math.round(maxSpindleSpeed * pathPower / 100 * speedFractions[pointIndex])}`;
           gcode.push(`G1 X${point.xMm} Y${point.yMm}${spindle}`);
         }
         paths.push(shiftedPath);

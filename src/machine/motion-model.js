@@ -1,3 +1,5 @@
+import { junctionSpeedLimit } from "../core/grbl-motion.js";
+
 // Virtual machine motion limits. A real controller reports its own values through $$.
 export const simulatedMachineSettings = Object.freeze({
   $11: 0.01,
@@ -55,14 +57,9 @@ export function createMotionBlock({ from, to, feedMmPerMinute, rapid }, limits) 
 
 // Fastest speed through the corner between two blocks, using the GRBL junction deviation rule.
 export function junctionSpeed(previous, next, limits) {
-  const cosJunctionAngle = -(previous.direction.x * next.direction.x + previous.direction.y * next.direction.y);
   const cap = Math.min(previous.maxSpeed, next.maxSpeed);
-  if (cosJunctionAngle > 0.999999) return 0;
-  if (cosJunctionAngle < -0.999999) return cap;
-  const halfSine = Math.sqrt(0.5 * (1 - cosJunctionAngle));
   const acceleration = Math.min(previous.acceleration, next.acceleration);
-  const cornering = Math.sqrt(acceleration * limits.junctionDeviationMm * halfSine / (1 - halfSine));
-  return Math.min(cap, cornering);
+  return junctionSpeedLimit(previous.direction, next.direction, acceleration, limits.junctionDeviationMm, cap);
 }
 
 // Trapezoidal move that starts and ends at the given speeds, never exceeding maxSpeed or acceleration.
@@ -88,6 +85,16 @@ export function distanceAlongBlock(block, seconds) {
   const braking = seconds - accelerationTime - cruiseTime;
   const distance = accelerationDistance + cruiseDistance + peak * braking - 0.5 * acceleration * braking ** 2;
   return Math.min(block.distanceMm, distance);
+}
+
+export function speedAlongBlock(block, seconds) {
+  const { entrySpeed, exitSpeed, peak, acceleration, cruiseDistance, duration } = block.profile;
+  const time = Math.max(0, Math.min(seconds, duration));
+  const accelerationTime = (peak - entrySpeed) / acceleration;
+  if (time <= accelerationTime) return Math.min(peak, entrySpeed + acceleration * time);
+  const cruiseTime = cruiseDistance / peak;
+  if (time <= accelerationTime + cruiseTime) return peak;
+  return Math.max(exitSpeed, peak - acceleration * (time - accelerationTime - cruiseTime));
 }
 
 // Keeps queued motion blocks like a GRBL planner: each block is timed once its successor is known.

@@ -1,4 +1,18 @@
+import { CommBurnError } from "../core/i18n.js";
+
 export const jobStoppedMessage = "Job stopped; controller was reset";
+
+export async function verifyDynamicLaserMode(connection) {
+  let settings;
+  try {
+    settings = await connection.querySettings();
+  } catch (error) {
+    throw new CommBurnError("grbl.laserModeQueryFailed", { details: error.message }, { message: `Could not verify GRBL $32: ${error.message}`, cause: error });
+  }
+  if (settings.$32 !== 1) {
+    throw new CommBurnError("grbl.laserModeRequired", {}, { message: "Dynamic power requires a controller reporting $32=1." });
+  }
+}
 
 // GRBL 1.1 separates status fields with "|" and GRBL 0.9 with ","; both start with "<State".
 const statusPattern = /^<(Idle|Run|Jog|Hold(?::\d+)?|Alarm(?::\d+)?|Door(?::\d+)?|Check|Home|Sleep|Tool|Queue)(?=[|,>])/i;
@@ -28,7 +42,7 @@ function watchdogIntervalMs(timeoutMs) {
 }
 
 export class GrblConnection {
-  constructor(serialPort, { acknowledgementTimeoutMs = 10000, onProgress = () => {} } = {}) {
+  constructor(serialPort, { acknowledgementTimeoutMs = 10000, onProgress = () => {}, onDisconnect = () => {} } = {}) {
     this.serialPort = serialPort;
     this.acknowledgementTimeoutMs = acknowledgementTimeoutMs;
     this.onProgress = onProgress;
@@ -42,14 +56,24 @@ export class GrblConnection {
     this.programEnded = false;
     this.statusWaiter = null;
     this.grblSettings = new Map();
+    this.reportUnits = null;
     this.serialError = null;
+    this.resetFailed = false;
+    this.onDisconnect = onDisconnect;
     this.handleData = (data) => this.receive(data);
     this.handleError = (error) => {
       this.serialError = error;
       this.rejectPending(error);
+      this.statusWaiter?.reject(error);
+      this.wakeJob();
+      this.onDisconnect(error);
+    };
+    this.handleClose = () => {
+      if (!this.serialError) this.handleError(new Error("Serial connection closed"));
     };
     serialPort.on("data", this.handleData);
     serialPort.on("error", this.handleError);
+    serialPort.on("close", this.handleClose);
   }
 
   receive(data) {
@@ -64,8 +88,13 @@ export class GrblConnection {
         this.status = state;
         this.updatePosition(response);
         this.updateReport(response);
-        // Any status answer shows the controller is alive, even while it reports Idle before a queued line is acknowledged.
-        if (this.pending) this.pending.lastProgressAt = Date.now();
+        if (this.pending) {
+          const now = Date.now();
+          this.pending.lastProgressAt = now;
+          if (/^Alarm/i.test(state)) this.pending.reject(new Error(`Controller entered ${state} state`));
+          else if (/^(Run|Hold|Jog|Home|Queue|Door)/i.test(state)) this.pending.idleSince = null;
+          else this.pending.idleSince ??= now;
+        }
         this.statusWaiter?.resolve(this.status);
       } else if (/^\[VER:/i.test(response)) {
         this.firmwareVersion = response.slice(5).replace(/:\]$/, "");
@@ -82,6 +111,17 @@ export class GrblConnection {
       } else {
         const setting = parseSettingLine(response);
         if (setting) {
+          if (setting[0] === 13 && (setting[1] === 0 || setting[1] === 1)) {
+            if (this.reportUnits === null && setting[1] === 1) {
+              const scalePoint = (point) => point && ({ xMm: point.xMm * 25.4, yMm: point.yMm * 25.4 });
+              this.workOffset = scalePoint(this.workOffset);
+              if (this.position) {
+                this.position = { machine: scalePoint(this.position.machine), work: scalePoint(this.position.work) };
+              }
+              if (this.report?.feedMmPerMinute != null) this.report.feedMmPerMinute *= 25.4;
+            }
+            this.reportUnits = setting[1];
+          }
           this.grblSettings.set(setting[0], setting[1]);
         } else if (/^ok$/i.test(response)) {
           this.pending?.resolve();
@@ -92,7 +132,7 @@ export class GrblConnection {
 
   updatePosition(report) {
     // $13=1 makes the controller report positions in inches; everything else in this app is millimetres.
-    const unitScale = this.grblSettings.get(13) === 1 ? 25.4 : 1;
+    const unitScale = this.reportUnits === 1 ? 25.4 : 1;
     const read = (name) => {
       const match = new RegExp(`[|<,]${name}:([+-]?\\d+(?:\\.\\d+)?),([+-]?\\d+(?:\\.\\d+)?)`).exec(report);
       return match ? { xMm: Number(match[1]) * unitScale, yMm: Number(match[2]) * unitScale } : null;
@@ -126,8 +166,8 @@ export class GrblConnection {
       const separator = field.indexOf(":");
       return separator < 0 ? [field, ""] : [field.slice(0, separator), field.slice(separator + 1)];
     }));
-    const unitScale = this.grblSettings.get(13) === 1 ? 25.4 : 1;
-    const numbers = (text) => (text ?? "").split(",").map(Number);
+    const unitScale = this.reportUnits === 1 ? 25.4 : 1;
+    const numbers = (text) => text === undefined ? [] : text.split(",").map((value) => value.trim() === "" ? NaN : Number(value));
     const buffers = numbers(fields.Bf);
     const feed = numbers(fields.FS);
     const overrides = numbers(fields.Ov);
@@ -241,10 +281,10 @@ export class GrblConnection {
     if (this.serialError) throw this.serialError;
     if (this.pending) throw new Error("A GRBL command is already awaiting acknowledgement");
     const result = new Promise((resolve, reject) => {
-      // Status replies allow brief delays, but cannot postpone a missing acknowledgement forever.
+      // Motion and hold can legitimately delay acknowledgements; repeated idle cannot.
       const pending = {
         lastProgressAt: Date.now(),
-        maximumWaitAt: Date.now() + timeoutMs + 1000,
+        idleSince: null,
         resolve: () => {
           clearInterval(pending.timer);
           this.pending = null;
@@ -260,7 +300,8 @@ export class GrblConnection {
       pending.timer = setInterval(() => {
         if (this.pending !== pending) return;
         const now = Date.now();
-        if (now - pending.lastProgressAt > timeoutMs || now >= pending.maximumWaitAt) {
+        if (now - pending.lastProgressAt > timeoutMs
+          || (pending.idleSince !== null && now - pending.idleSince > timeoutMs + 1000)) {
           pending.reject(new Error(`Timed out waiting for controller acknowledgement: ${line}`));
           return;
         }
@@ -284,6 +325,7 @@ export class GrblConnection {
 
   async sendJob(gcode) {
     if (this.busy) throw new Error("A machine job is already running");
+    if (this.resetFailed) throw new Error("Controller reset was not confirmed; disconnect and check the machine before starting another job");
     this.busy = true;
     this.cancelRequested = false;
     this.paused = false;
@@ -302,7 +344,8 @@ export class GrblConnection {
         try {
           await this.resetAfterStop();
         } catch (resetError) {
-          throw new AggregateError([error, resetError], "Job stopped and the controller reset failed");
+          this.resetFailed = true;
+          throw new AggregateError([error, resetError], `Job stopped and the controller reset failed: ${resetError.message}`);
         }
         throw error;
       }
@@ -343,10 +386,12 @@ export class GrblConnection {
 
   async waitWhilePaused() {
     while (this.paused && !this.cancelRequested) {
+      if (this.serialError) throw this.serialError;
       await new Promise((resolve) => {
         this.resumeWaiter = resolve;
       });
     }
+    if (this.serialError) throw this.serialError;
   }
 
   wakeJob() {
@@ -386,11 +431,18 @@ export class GrblConnection {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const status = await this.queryStatus({ timeoutMs: 250 });
-      if (status && /^(Idle|Hold)/.test(status)) {
+      if (status === "Idle" || status === "Hold" || status === "Hold:0") {
         this.serialPort.write("\x18");
         await new Promise((resolve, reject) => this.serialPort.drain((error) => error ? reject(error) : resolve()));
-        return;
+        while (Date.now() < deadline) {
+          const ready = await this.queryStatus({ timeoutMs: 250 });
+          if (ready === "Idle") return;
+          if (ready && /^(Alarm|Door)/.test(ready)) throw new Error(`Controller entered ${ready} state after reset`);
+          if (ready) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        throw new Error("The controller did not become idle after reset");
       }
+      if (status) await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new Error("The controller did not reach feed hold; soft reset was not sent");
   }
@@ -400,6 +452,7 @@ export class GrblConnection {
     this.statusWaiter?.reject(new Error("Serial connection closed during a status query"));
     this.serialPort.off("data", this.handleData);
     this.serialPort.off("error", this.handleError);
+    this.serialPort.off("close", this.handleClose);
     if (this.serialPort.isOpen) {
       await new Promise((resolve, reject) => this.serialPort.close((error) => error ? reject(error) : resolve()));
     }

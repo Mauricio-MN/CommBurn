@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { GrblConnection, machineAreaFromSettings } from "../src/machine/grbl.js";
+import { GrblConnection, machineAreaFromSettings, verifyDynamicLaserMode } from "../src/machine/grbl.js";
 
 class MockSerialPort extends EventEmitter {
   writes = [];
@@ -57,6 +57,15 @@ test("GRBL settings query reads and returns the configured maximum spindle speed
   assert.deepEqual(await connection.querySettings(), { "$30": 1000, "$31": 0, "$32": 1 });
   assert.deepEqual(connection.settings, { "$30": 1000, "$31": 0, "$32": 1 });
   assert.deepEqual(serialPort.writes, ["$$\n"]);
+});
+
+test("dynamic power verification requires a successful fresh $32=1 reading", async () => {
+  for (const settings of [{ $32: 0 }, {}, { $32: 2 }]) {
+    await assert.rejects(verifyDynamicLaserMode({ querySettings: async () => settings }), { code: "grbl.laserModeRequired" });
+  }
+  await assert.rejects(verifyDynamicLaserMode({ querySettings: async () => { throw new Error("timeout"); } }),
+    { code: "grbl.laserModeQueryFailed", params: { details: "timeout" } });
+  await verifyDynamicLaserMode({ querySettings: async () => ({ $32: 1 }) });
 });
 
 test("GRBL settings query returns settings even when $30 is not present", async () => {
@@ -120,9 +129,11 @@ test("GRBL sender rejects controller errors and requests feed hold", async () =>
 
 test("stopping cancels an in-flight command without waiting for its timeout and resets the controller", async () => {
   const serialPort = new MockSerialPort();
+  let reset = false;
   serialPort.write = function write(data) {
     this.writes.push(data);
-    if (data === "!" || data === "?") setImmediate(() => this.emit("data", Buffer.from("<Hold:0|MPos:0,0,0>\r\n")));
+    if (data === "\x18") reset = true;
+    if (data === "!" || data === "?") setImmediate(() => this.emit("data", Buffer.from(`<${reset ? "Idle" : "Hold:0"}|MPos:0,0,0>\r\n`)));
   };
   const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 5000 });
   const job = connection.sendJob("G21\n");
@@ -131,7 +142,7 @@ test("stopping cancels an in-flight command without waiting for its timeout and 
 
   await assert.rejects(job, /Job stopped/);
   assert.ok(serialPort.writes.includes("!"));
-  assert.equal(serialPort.writes.at(-1), "\x18");
+  assert.ok(serialPort.writes.includes("\x18"));
 });
 
 test("GRBL sender keeps waiting while the controller reports motion past the timeout", async () => {
@@ -141,14 +152,41 @@ test("GRBL sender keeps waiting while the controller reports motion past the tim
     this.writes.push(data);
     if (data !== "?") return;
     statusReplies += 1;
-    const reply = statusReplies < 15 ? "<Run|MPos:0,0,0>\r\n" : "ok\r\n";
-    setImmediate(() => this.emit("data", Buffer.from(reply)));
+    setImmediate(() => this.emit("data", Buffer.from("<Run|MPos:0,0,0>\r\n")));
   };
   const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 40 });
+  const acknowledge = setTimeout(() => serialPort.emit("data", Buffer.from("ok\r\n")), 1300);
+  try {
+    await connection.sendLine("G1 X1 Y1 F100");
+    assert.ok(statusReplies > 15);
+  } finally {
+    clearTimeout(acknowledge);
+  }
+});
 
-  await connection.sendLine("G1 X1 Y1 F100");
-
-  assert.equal(statusReplies, 15);
+test("a paused pending command can resume after the former absolute timeout", async () => {
+  const serialPort = new MockSerialPort();
+  let holding = false;
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+    if (data === "!") holding = true;
+    if (data === "~") {
+      holding = false;
+      setImmediate(() => this.emit("data", Buffer.from("ok\r\n")));
+    }
+    if (data === "?") {
+      const state = holding ? "Hold:0" : "Idle";
+      setImmediate(() => this.emit("data", Buffer.from(`<${state}|MPos:0,0,0>\r\n`)));
+    }
+  };
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 100 });
+  const job = connection.sendJob("G1 X1 F100\n");
+  while (!serialPort.writes.includes("G1 X1 F100\n")) await new Promise((resolve) => setImmediate(resolve));
+  connection.pauseJob();
+  await new Promise((resolve) => setTimeout(resolve, 1300));
+  assert.equal(connection.busy, true);
+  connection.resumeJob();
+  await job;
 });
 
 test("GRBL sender times out when the controller goes idle without acknowledging", async () => {
@@ -162,6 +200,16 @@ test("GRBL sender times out when the controller goes idle without acknowledging"
   const startedAt = Date.now();
   await assert.rejects(connection.sendLine("G1 X1 Y1 F100"), /Timed out waiting for controller acknowledgement: G1 X1 Y1 F100/);
   assert.ok(Date.now() - startedAt < 3000);
+  assert.equal(connection.pending, null);
+});
+
+test("an alarm status interrupts an unacknowledged command", async () => {
+  const serialPort = new MockSerialPort();
+  serialPort.write = function write(data) {
+    if (data === "?") setImmediate(() => this.emit("data", Buffer.from("<Alarm:1|MPos:0,0,0>\r\n")));
+  };
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 100 });
+  await assert.rejects(connection.sendLine("G1 X1 F100"), /Controller entered Alarm:1 state/);
   assert.equal(connection.pending, null);
 });
 
@@ -200,7 +248,66 @@ test("stopping a paused job sends no more lines and resets the controller", asyn
 
   await assert.rejects(job, /Job stopped/);
   assert.deepEqual(serialPort.writes.filter((write) => write.endsWith("\n")), ["G21\n"]);
-  assert.equal(serialPort.writes.at(-1), "\x18");
+  assert.ok(serialPort.writes.includes("\x18"));
+});
+
+test("stopping waits for Hold:0 and for idle after reset before allowing another job", async () => {
+  const serialPort = new MockSerialPort();
+  let queries = 0;
+  let reset = false;
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+    if (data === "\x18") reset = true;
+    if (data === "?") {
+      queries += 1;
+      const state = reset ? "Idle" : queries === 1 ? "Hold:1" : "Hold:0";
+      setImmediate(() => this.emit("data", Buffer.from(`<${state}|MPos:0,0,0>\r\n`)));
+    }
+    if (reset && data.endsWith("\n")) setImmediate(() => this.emit("data", Buffer.from("ok\r\n")));
+  };
+  const connection = new GrblConnection(serialPort);
+  const job = connection.sendJob("G21\n");
+  while (!serialPort.writes.includes("G21\n")) await new Promise((resolve) => setImmediate(resolve));
+  connection.stopJob();
+  await assert.rejects(job, /Job stopped/);
+  assert.ok(queries >= 3);
+  assert.ok(serialPort.writes.indexOf("\x18") > serialPort.writes.indexOf("?"));
+  await connection.sendJob("G21\n");
+});
+
+test("a disconnected serial port interrupts a paused job and releases its busy state", async () => {
+  const serialPort = new MockSerialPort();
+  let disconnects = 0;
+  const connection = new GrblConnection(serialPort, {
+    onDisconnect: () => { disconnects += 1; },
+    onProgress: () => connection.pauseJob()
+  });
+  const job = connection.sendJob("G21\nM5\n");
+  while (!connection.paused) await new Promise((resolve) => setImmediate(resolve));
+  serialPort.isOpen = false;
+  serialPort.emit("close");
+  await assert.rejects(job, /Serial connection closed/);
+  assert.equal(connection.busy, false);
+  assert.equal(disconnects, 1);
+});
+
+test("a failed post-stop reset prevents another job until the connection is recovered", async () => {
+  const serialPort = new MockSerialPort();
+  let reset = false;
+  serialPort.write = function write(data) {
+    this.writes.push(data);
+    if (data === "\x18") reset = true;
+    if (data === "?") {
+      const state = reset ? "Alarm" : "Hold:0";
+      setImmediate(() => this.emit("data", Buffer.from(`<${state}|MPos:0,0,0>\r\n`)));
+    }
+  };
+  const connection = new GrblConnection(serialPort);
+  const job = connection.sendJob("G21\n");
+  while (!serialPort.writes.includes("G21\n")) await new Promise((resolve) => setImmediate(resolve));
+  connection.stopJob();
+  await assert.rejects(job, /Controller entered Alarm state after reset/);
+  await assert.rejects(connection.sendJob("G21\n"), /reset was not confirmed/);
 });
 
 test("GRBL position, zero and homing are explicit commands that read or set work coordinates", async () => {
@@ -287,6 +394,40 @@ test("GRBL position reports stay in millimetres when $13 is not inches", () => {
   assert.deepEqual(connection.position.work, { xMm: 9, yMm: 18 });
 });
 
+test("late inch settings correct cached coordinates and retain units while settings are reread", async () => {
+  const serialPort = new MockSerialPort();
+  const connection = new GrblConnection(serialPort);
+  connection.receive(Buffer.from("<Idle|MPos:2,3,0|WCO:1,0.5,0|FS:10,0>\r\n"));
+  connection.receive(Buffer.from("$13=1\r\n"));
+  assert.equal(connection.report.feedMmPerMinute, 254);
+  connection.receive(Buffer.from("<Idle|MPos:2,3,0>\r\n"));
+  assert.equal(connection.position.work.xMm, 25.4);
+  assert.ok(Math.abs(connection.position.work.yMm - 63.5) < 1e-10);
+  connection.receive(Buffer.from("<Idle|MPos:2,3,0|FS:10,0>\r\n"));
+  assert.equal(connection.report.feedMmPerMinute, 254);
+  serialPort.write = function write(data) {
+    if (data === "$$\n") setImmediate(() => this.emit("data", Buffer.from("<Idle|MPos:2,3,0>\r\n$13=1\r\nok\r\n")));
+  };
+  await connection.querySettings();
+  assert.equal(connection.position.work.xMm, 25.4);
+  connection.receive(Buffer.from("$13=0\r\n<Idle|MPos:50.8,76.2,0>\r\n"));
+  assert.equal(connection.position.work.xMm, 25.4);
+});
+
+test("omitted or empty status fields are not reported as zero", () => {
+  const connection = new GrblConnection(new MockSerialPort());
+  connection.receive(Buffer.from("<Idle|MPos:0,0,0>\r\n"));
+  assert.equal(connection.report.feedMmPerMinute, null);
+  assert.equal(connection.report.plannerBlocks, null);
+  connection.receive(Buffer.from("<Run|FS:,0|Bf:,128|Ov:100,,100>\r\n"));
+  assert.equal(connection.report.feedMmPerMinute, null);
+  assert.equal(connection.report.plannerBlocks, null);
+  assert.equal(connection.report.overrides, null);
+  connection.receive(Buffer.from("<Idle|FS:0,0|Bf:0,128>\r\n"));
+  assert.equal(connection.report.feedMmPerMinute, 0);
+  assert.equal(connection.report.plannerBlocks, 0);
+});
+
 test("GRBL status reports expose planner buffer, feed, overrides and firmware lines", () => {
   const serialPort = new MockSerialPort();
   const connection = new GrblConnection(serialPort);
@@ -305,7 +446,7 @@ test("GRBL status reports expose planner buffer, feed, overrides and firmware li
   });
 });
 
-test("GRBL keeps waiting for an acknowledgement while the controller answers status queries", async () => {
+test("GRBL keeps waiting for an acknowledgement while the controller answers status queries", { timeout: 5000 }, async () => {
   class SilentPort extends MockSerialPort {
     write(data) {
       this.writes.push(data);
@@ -323,4 +464,4 @@ test("GRBL keeps waiting for an acknowledgement while the controller answers sta
     clearTimeout(acknowledge);
     connection.rejectPending(new Error("test finished"));
   }
-}, { timeout: 5000 });
+});

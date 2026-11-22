@@ -6,7 +6,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "test": "node --test --test-timeout=60000 --test-force-exit",
+    "test": "node --test",
     "start": "node server.mjs",
     "desktop": "electron .",
     "dist": "electron-builder --publish never",

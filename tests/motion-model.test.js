@@ -6,6 +6,7 @@ import {
   createMotionBlock,
   createMotionLimits,
   distanceAlongBlock,
+  speedAlongBlock,
   interpretGcodeLine,
   junctionSpeed,
   speedProfile
@@ -102,13 +103,45 @@ test("the virtual machine reports planner space, live feed and overrides like GR
     if (text.startsWith("<")) reports.push(text);
   });
   port.write("G21\nG90\nG1 F600\nG1 X50 Y0\n");
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, 120));
   port.write("?");
   await new Promise((resolve) => setTimeout(resolve, 20));
   const report = reports.at(-1);
   assert.match(report, /\|Bf:14,128\|/);
   assert.match(report, /\|FS:600,0\|Ov:100,100,100>$/);
   port.close(() => {});
+});
+
+test("simulated feed follows the acceleration, cruise and braking profile", () => {
+  const profile = speedProfile(100, 0, 0, 10, 5);
+  const block = { profile: { ...profile, acceleration: 5 } };
+  assert.equal(speedAlongBlock(block, 0), 0);
+  assert.equal(speedAlongBlock(block, 1), 5);
+  assert.equal(speedAlongBlock(block, 3), 10);
+  assert.ok(Math.abs(speedAlongBlock(block, profile.duration - 1) - 5) < 1e-9);
+  assert.equal(speedAlongBlock(block, profile.duration), 0);
+});
+
+test("simulator status sends instantaneous feed and zero on hold", async () => {
+  const port = new SimulatedSerialPort();
+  const now = performance.now() / 1000;
+  const block = createMotionBlock({
+    from: { xMm: 10, yMm: 20 }, to: { xMm: 110, yMm: 20 }, feedMmPerMinute: 6000, rapid: false
+  }, port.limits);
+  port.planner.add(block, now - 0.13);
+  port.planner.update(now - 0.1);
+  const status = () => new Promise((resolve) => {
+    port.once("data", (data) => resolve(data.toString()));
+    port.write("?");
+  });
+  try {
+    const accelerating = Number((await status()).match(/\|FS:(\d+),/)[1]);
+    assert.ok(accelerating >= 3000 && accelerating < 6000, `unexpected accelerating feed: ${accelerating}`);
+    port.write("!");
+    assert.match(await status(), /\|FS:0,0\|/);
+  } finally {
+    port.close(() => {});
+  }
 });
 
 test("a planner feed hold freezes the running block and resumes it where it stopped", () => {
@@ -159,6 +192,22 @@ test("soft reset flushes queued virtual motion without moving", async () => {
   assert.equal(port.status, "Idle");
   assert.equal(port.planner.size, 0);
   assert.deepEqual(port.position, { xMm: 10, yMm: 20 });
+  port.close(() => {});
+});
+
+test("soft reset retains the simulated head position reached before feed hold", () => {
+  const port = new SimulatedSerialPort();
+  const now = performance.now() / 1000;
+  port.planner.add(createMotionBlock({
+    from: port.position, to: { xMm: 110, yMm: 20 }, feedMmPerMinute: 600, rapid: false
+  }, port.limits), now - 1);
+  port.planner.update(now);
+  port.write("!");
+  const held = port.livePosition(performance.now() / 1000);
+  assert.ok(held.xMm > 10);
+  port.write("\x18");
+  assert.deepEqual(port.position, held);
+  assert.deepEqual(port.plannedPosition, held);
   port.close(() => {});
 });
 

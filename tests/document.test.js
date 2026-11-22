@@ -370,6 +370,10 @@ test("raster images engrave as scan lines with per-segment power", () => {
   assert.deepEqual(rows[0].points.map(({ xMm }) => xMm), [10, 11, 12, 13, 14]);
   assert.match(plan.gcode, /G1 X11 Y10\.5 S500/);
   assert.match(plan.gcode, /G1 X12 Y10\.5 S\d{3}/);
+  const constant = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, laserPowerMode: "M3" });
+  assert.match(constant.gcode, /M3 S0/);
+  assert.match(constant.gcode, /G1 X11 Y10\.5 S500/);
+  assert.match(constant.gcode, /G1 X12 Y10\.5 S\d{3}/);
   const dither = planGrblJob(image, { maxSpindleSpeed: 1000, rasters, imageMode: "threshold" });
   assert.doesNotMatch(dither.gcode, /S2\d\d/);
   assert.throws(() => planGrblJob(image, { maxSpindleSpeed: 1000, rasters: { photo: { widthPx: 4, heightPx: 2, gray: "AA==" } } }), /does not match/);
@@ -531,7 +535,7 @@ test("job markers resolve for an imported SVG whose fill layer holds an open pat
   assert.deepEqual(ref.start, { xMm: 10, yMm: 10 }, "start is the first cut of the open path");
 });
 
-test("GRBL vector power follows junction speed only when controller laser mode is off", () => {
+test("GRBL power mode is explicit and vector power is not estimated per segment", () => {
   const input = {
     widthMm: 100,
     heightMm: 100,
@@ -542,24 +546,16 @@ test("GRBL vector power follows junction speed only when controller laser mode i
       layerId: "cut"
     }]
   };
-  const sValues = (controllerLaserMode) => {
-    const plan = planGrblJob(input, { feedMmPerMinute: 1200, maxSpindleSpeed: 1000, controllerLaserMode });
-    return plan.gcode.split("\n").filter((line) => /^G1 X.* S\d+$/.test(line))
-      .map((line) => Number(line.match(/S(\d+)$/)[1]));
-  };
-
-  assert.deepEqual(sValues(1), []);
-  const compensated = sValues(0);
-  assert.ok(compensated.length > 0);
-  assert.ok(Math.min(...compensated) < 300);
-
-  const minPower = (motion) => {
-    const plan = planGrblJob(input, { feedMmPerMinute: 1200, maxSpindleSpeed: 1000, controllerLaserMode: 0, ...motion });
-    return Math.min(...plan.gcode.split("\n").filter((line) => /^G1 X.* S\d+$/.test(line))
-      .map((line) => Number(line.match(/S(\d+)$/)[1])));
-  };
-  // A stiffer controller (higher acceleration) keeps corners faster, so the power dip is shallower.
-  assert.ok(minPower({ accelerationMmPerSecond2: 2000, junctionDeviationMm: 0.01 }) > minPower({ accelerationMmPerSecond2: 100, junctionDeviationMm: 0.01 }));
+  for (const laserPowerMode of ["M3", "M4"]) {
+    for (const controllerLaserMode of [0, 1, null]) {
+      const gcode = renderGrblJob(input, { feedMmPerMinute: 1200, maxSpindleSpeed: 1000, laserPowerMode, controllerLaserMode });
+      assert.match(gcode, new RegExp(`${laserPowerMode} S\\d+`));
+      assert.doesNotMatch(gcode, /^G1 X.* S\d+$/m);
+      assert.match(gcode, /M5\nG0/);
+    }
+  }
+  assert.match(renderGrblJob(input, { maxSpindleSpeed: 1000 }), /M4 S/);
+  assert.throws(() => renderGrblJob(input, { maxSpindleSpeed: 1000, laserPowerMode: "M5" }), { code: "grbl.invalidLaserPowerMode" });
 });
 
 test("GRBL curves use tolerance-based segments without zero-length moves", () => {

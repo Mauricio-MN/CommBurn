@@ -5,8 +5,8 @@ import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SerialPort } from "serialport";
 import { renderGrblJob } from "./src/core/document.js";
-import { GrblConnection } from "./src/machine/grbl.js";
-import { MotionPlanner, createMotionBlock, createMotionLimits, distanceAlongBlock, interpretGcodeLine, simulatedMachineSettings } from "./src/machine/motion-model.js";
+import { GrblConnection, verifyDynamicLaserMode } from "./src/machine/grbl.js";
+import { MotionPlanner, createMotionBlock, createMotionLimits, distanceAlongBlock, speedAlongBlock, interpretGcodeLine, simulatedMachineSettings } from "./src/machine/motion-model.js";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const host = "127.0.0.1";
@@ -14,6 +14,7 @@ const portNumber = Number(process.env.PORT ?? 4173);
 let connection = null;
 let activeJob = false;
 let jobTask = null;
+let connectionCleanup = null;
 let jobStatus = { state: "idle", completed: 0, total: 0, error: null };
 // Job bodies carry embedded raster data for fills, so they need more room than other requests.
 const jobBodySizeLimit = 64 * 1024 * 1024;
@@ -56,8 +57,8 @@ export class SimulatedSerialPort extends EventEmitter {
       const now = clockSeconds();
       const position = this.livePosition(now);
       // Like GRBL 1.1: free planner blocks and bytes, live feed in mm/min, and 100% overrides.
-      const current = this.hold ? null : this.planner.blocks[0];
-      const feedMmPerMinute = current ? Math.round(current.maxSpeed * 60) : 0;
+      const current = this.hold ? null : this.planner.activeBlock(now);
+      const feedMmPerMinute = current ? Math.round(speedAlongBlock(current.block, current.seconds) * 60) : 0;
       this.reply(`<${this.status}|MPos:${position.xMm.toFixed(3)},${position.yMm.toFixed(3)},0|WCO:${this.zero.xMm},${this.zero.yMm},0`
         + `|Bf:${simulatedPlannerCapacity - this.planner.size},128|FS:${feedMmPerMinute},0|Ov:100,100,100>`);
     } else if (data === "!") {
@@ -93,6 +94,7 @@ export class SimulatedSerialPort extends EventEmitter {
   }
 
   softReset() {
+    this.position = this.livePosition(clockSeconds());
     this.hold = false;
     this.lines = [];
     this.planner.clear();
@@ -265,11 +267,22 @@ async function listDesktopPlugins() {
 }
 
 function createGrblConnection(serialPort) {
-  return new GrblConnection(serialPort, {
+  const current = new GrblConnection(serialPort, {
     onProgress: ({ completed, total }) => {
       jobStatus = { ...jobStatus, completed, total };
+    },
+    onDisconnect: () => {
+      if (connection !== current) return;
+      connection = null;
+      const task = jobTask;
+      connectionCleanup = (async () => {
+        if (task) await task;
+        await current.close();
+      })().catch((error) => console.error(`Unable to release disconnected controller: ${error.message}`))
+        .finally(() => { connectionCleanup = null; });
     }
   });
+  return current;
 }
 
 function attachConnection(serialPort, simulated = false, existingConnection = null) {
@@ -291,6 +304,7 @@ async function queryControllerSettings(currentConnection) {
   } catch (error) {
     return {
       settings: currentConnection.settings,
+      settingsRead: false,
       settingsError: `Não foi possível consultar as configurações GRBL: ${error.message}`
     };
   }
@@ -369,7 +383,9 @@ async function handleApi(request, response, url) {
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/connect") {
+      if (connectionCleanup) await connectionCleanup;
       if (connection) throw new Error("Disconnect the current controller before connecting another");
+      if (activeJob) throw new Error("Wait for the previous job to stop before connecting");
       const input = await readJson(request);
       if (typeof input.path !== "string" || !input.path) throw new TypeError("A serial port path is required");
       const baudCandidates = [115200, 230400, 57600, 250000];
@@ -391,6 +407,7 @@ async function handleApi(request, response, url) {
           }
           currentConnection = attachConnection(serialPort, false, currentConnection);
           const { settings, settingsError } = await queryControllerSettings(currentConnection);
+          if (connection !== currentConnection) throw new Error("Serial connection closed while connecting");
           sendJson(response, 200, {
             connected: true,
             path: input.path,
@@ -401,17 +418,21 @@ async function handleApi(request, response, url) {
           });
           return;
         } catch (error) {
-          if (connection !== currentConnection && serialPort.isOpen) await currentConnection.close();
+          if (connectionCleanup) await connectionCleanup;
+          else if (connection !== currentConnection && serialPort.isOpen) await currentConnection.close();
           throw error;
         }
       }
       currentConnection = attachConnection(serialPort);
       const { settings, settingsError } = await queryControllerSettings(currentConnection);
+      if (connection !== currentConnection) throw new Error("Serial connection closed while connecting");
       sendJson(response, 200, { connected: true, path: input.path, baudRate, autoDetected: false, settings, settingsError });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/simulate-connect") {
+      if (connectionCleanup) await connectionCleanup;
       if (connection) throw new Error("Desconecte o controlador atual antes de conectar o simulador");
+      if (activeJob) throw new Error("Wait for the previous job to stop before connecting");
       attachConnection(new SimulatedSerialPort(), true);
       sendJson(response, 200, { connected: true, simulated: true });
       return;
@@ -434,21 +455,21 @@ async function handleApi(request, response, url) {
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/job-pause") {
-      if (!connection || !activeJob) throw new Error("No machine job is running");
+      if (!connection || !activeJob || !jobTask) throw new Error("No machine job is running");
       connection.pauseJob();
       jobStatus = { ...jobStatus, state: "paused" };
       sendJson(response, 200, { paused: true });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/job-resume") {
-      if (!connection || !activeJob) throw new Error("No machine job is running");
+      if (!connection || !activeJob || !jobTask) throw new Error("No machine job is running");
       connection.resumeJob();
       jobStatus = { ...jobStatus, state: "running" };
       sendJson(response, 200, { resumed: true });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/job-stop") {
-      if (!connection || !activeJob) throw new Error("No machine job is running");
+      if (!connection || !activeJob || !jobTask) throw new Error("No machine job is running");
       connection.stopJob();
       sendJson(response, 200, { stopRequested: true });
       return;
@@ -487,12 +508,23 @@ async function handleApi(request, response, url) {
       if (!connection) throw new Error("Connect to a GRBL-compatible controller first");
       if (activeJob) throw new Error("A machine job is already running");
       const input = await readJson(request, jobBodySizeLimit);
+      if (!connection) throw new Error("Connect to a GRBL-compatible controller first");
+      if (activeJob) throw new Error("A machine job is already running");
       if (!connection.isSimulation && input.safetyConfirmed !== true) {
         throw new Error("Confirm the laser safety checklist before sending a job");
       }
       const gcode = renderGrblJob(input.document, input.settings);
       activeJob = true;
       const jobConnection = connection;
+      try {
+        if (!jobConnection.isSimulation && (input.settings.laserPowerMode ?? "M4") === "M4") {
+          await verifyDynamicLaserMode(jobConnection);
+          if (connection !== jobConnection) throw new Error("Serial connection closed while verifying laser mode");
+        }
+      } catch (error) {
+        activeJob = false;
+        throw error;
+      }
       const total = gcode.trim().split(/\r?\n/).length;
       jobStatus = { state: "running", completed: 0, total, error: null };
       sendJson(response, 202, { accepted: true, lines: total });
@@ -508,7 +540,7 @@ async function handleApi(request, response, url) {
     }
     sendJson(response, 404, { error: "API endpoint not found" });
   } catch (error) {
-    sendJson(response, 400, { error: error.message });
+    sendJson(response, 400, { error: error.message, ...(error.code ? { code: error.code, params: error.params } : {}) });
   }
 }
 
@@ -608,6 +640,7 @@ async function shutdown() {
     }
     try { await connection.close(); } catch (error) { console.error(`Unable to close controller cleanly: ${error.message}`); }
   }
+  if (connectionCleanup) await connectionCleanup;
   await new Promise((resolveClose, rejectClose) => {
     server.close((error) => error ? rejectClose(error) : resolveClose());
   });
