@@ -555,6 +555,8 @@ function updateSelected(patch, saveHistory = true, refreshInspector = true) {
 
 // Dragging shifts the already drawn nodes, so the whole document is not re-rendered on every pointer move.
 const movePreviewBaseTransforms = new Map();
+// Set when a drag ends; the next model update keeps the already-shifted nodes instead of rebuilding them.
+let movePreviewPendingDrop = false;
 
 function previewMoveSelection(ids, dxMm, dyMm) {
   for (const id of ids) {
@@ -567,15 +569,13 @@ function previewMoveSelection(ids, dxMm, dyMm) {
 }
 
 function clearMovePreview() {
-  for (const [id, base] of movePreviewBaseTransforms) {
-    const node = objects.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    if (node && base) node.setAttribute("transform", base);
-    else node?.removeAttribute("transform");
-  }
+  movePreviewPendingDrop = movePreviewBaseTransforms.size > 0;
   movePreviewBaseTransforms.clear();
 }
 
 function updateMany(updates, saveHistory = true) {
+  const dropped = movePreviewPendingDrop;
+  movePreviewPendingDrop = false;
   const patches = new Map(updates.map(({ id, patch }) => [id, patch]));
   try {
     for (const id of patches.keys()) {
@@ -590,9 +590,15 @@ function updateMany(updates, saveHistory = true) {
     );
     currentDocument = createDocument({ ...readDocument(), elements });
     if (selectedIds.length === 1) syncInspector();
-    renderPreview();
+    if (dropped) {
+      renderJobMarkers(currentDocument);
+      renderSelectionStatus();
+    } else {
+      renderPreview();
+    }
     if (saveHistory) commitHistory();
   } catch (error) {
+    if (dropped) renderPreview();
     showNotice(error);
   }
 }
