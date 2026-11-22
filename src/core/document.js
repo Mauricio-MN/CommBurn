@@ -939,7 +939,7 @@ export const WORK_COORDINATE_SYSTEMS = Object.freeze(["G54", "G55", "G56", "G57"
 
 // "absolute" keeps machine coordinates from the chosen origin; "objects" makes the job start at the
 // chosen anchor of the objects' bounding box, so the head position set by the user becomes X0 Y0.
-function planGrblJobBase(input, settings, startReference = null) {
+function planGrblJobBase(input, settings, startReference = null, absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 }, startReference)) {
   const startFrom = settings.startFrom ?? "absolute";
   if (!START_FROM_MODES.includes(startFrom)) {
     throw new CommBurnRangeError("grbl.invalidStartFrom", { startFrom }, { message: `Unsupported start mode: ${startFrom}` });
@@ -948,7 +948,6 @@ function planGrblJobBase(input, settings, startReference = null) {
   if (!START_ANCHORS.includes(anchor)) {
     throw new CommBurnRangeError("grbl.invalidStartAnchor", { anchor }, { message: `Unsupported start anchor: ${anchor}` });
   }
-  const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 }, startReference);
   if (startFrom === "absolute") return absolute;
   const frame = machineFrame(createDocument(input));
   const stagePoints = absolute.paths.filter(({ kind }) => kind === "work")
@@ -974,7 +973,7 @@ export function planGrblJob(input, settings) {
   if (outside) {
     throw new CommBurnRangeError("grbl.outsideMachineArea", {}, { message: "The job would move the head outside the machine bed" });
   }
-  return planGrblJobBase(input, settings);
+  return planGrblJobBase(input, settings, null, absolute);
 }
 
 // Converts machine-space coordinates to stage millimetres for the machine preview.
@@ -1007,7 +1006,8 @@ export function jobReferencePoints(input, settings) {
   return {
     bounds: { minXMm: Math.min(...xs), minYMm: Math.min(...ys), maxXMm: Math.max(...xs), maxYMm: Math.max(...ys) },
     origin: unmapMachinePoint(document, offsetX, offsetY),
-    start: unflippedStart(input, settings) ?? work[0].points[0],
+    // Without mirrored axes the unflipped plan is the same plan, so it is not planned a second time.
+    start: (flipX || flipY ? unflippedStart(input, settings) : null) ?? work[0].points[0],
     end: work.at(-1).points.at(-1),
     xDirection: flipX ? -1 : 1,
     yDirection: flipY ? -1 : 1
