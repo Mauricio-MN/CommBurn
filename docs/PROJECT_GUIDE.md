@@ -58,6 +58,7 @@ Compatibilidade universal, descoberta automática por sensores, formatos proprie
 - Executar `./restart-server.sh` para reiniciar o servidor local e validar que o processo correto está atendendo a porta.
 - Abrir `index.html` em um navegador moderno para experimentar o editor sem conexão serial.
 - Executar testes com `npm test`.
+- Instalar o Chromium de teste com `npx playwright install --only-shell chromium` e executar `npm run test:browser` para a integração da interface; no Linux, instale as dependências do navegador se necessário com `npx playwright install-deps chromium`.
 - Converter um documento JSON para SVG: `node cli/commburn.mjs entrada.json saida.svg`.
 
 Consulte [o contrato de CLI e plugins](./PLUGIN_CLI_CONTRACT.md).

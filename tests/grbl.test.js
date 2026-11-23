@@ -154,8 +154,8 @@ test("GRBL sender keeps waiting while the controller reports motion past the tim
     statusReplies += 1;
     setImmediate(() => this.emit("data", Buffer.from("<Run|MPos:0,0,0>\r\n")));
   };
-  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 40 });
-  const acknowledge = setTimeout(() => serialPort.emit("data", Buffer.from("ok\r\n")), 1300);
+  const connection = new GrblConnection(serialPort, { acknowledgementTimeoutMs: 200 });
+  const acknowledge = setTimeout(() => serialPort.emit("data", Buffer.from("ok\r\n")), 1800);
   try {
     await connection.sendLine("G1 X1 Y1 F100");
     assert.ok(statusReplies > 15);
@@ -213,16 +213,21 @@ test("an alarm status interrupts an unacknowledged command", async () => {
   assert.equal(connection.pending, null);
 });
 
-test("pausing holds the next line until the job is resumed", async () => {
+test("pausing holds the next line until the job is resumed", { timeout: 5000 }, async () => {
   const serialPort = new MockSerialPort();
+  let signalPaused;
+  const paused = new Promise((resolve) => { signalPaused = resolve; });
   const connection = new GrblConnection(serialPort, {
     acknowledgementTimeoutMs: 100,
     onProgress: ({ completed }) => {
-      if (completed === 1) connection.pauseJob();
+      if (completed === 1) {
+        connection.pauseJob();
+        signalPaused();
+      }
     }
   });
   const job = connection.sendJob("G21\nM5\n");
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await Promise.race([paused, job]);
 
   assert.deepEqual(serialPort.writes.filter((write) => write.endsWith("\n")), ["G21\n"]);
   assert.equal(serialPort.writes.at(-1), "!");
@@ -234,16 +239,21 @@ test("pausing holds the next line until the job is resumed", async () => {
   assert.ok(serialPort.writes.indexOf("~") > serialPort.writes.indexOf("!"));
 });
 
-test("stopping a paused job sends no more lines and resets the controller", async () => {
+test("stopping a paused job sends no more lines and resets the controller", { timeout: 5000 }, async () => {
   const serialPort = new MockSerialPort();
+  let signalPaused;
+  const paused = new Promise((resolve) => { signalPaused = resolve; });
   const connection = new GrblConnection(serialPort, {
     acknowledgementTimeoutMs: 100,
     onProgress: ({ completed }) => {
-      if (completed === 1) connection.pauseJob();
+      if (completed === 1) {
+        connection.pauseJob();
+        signalPaused();
+      }
     }
   });
   const job = connection.sendJob("G21\nM5\n");
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await Promise.race([paused, job]);
   connection.stopJob();
 
   await assert.rejects(job, /Job stopped/);

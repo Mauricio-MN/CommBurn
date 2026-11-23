@@ -11,22 +11,17 @@ function getCenter(element) {
 }
 
 function getSelectionBounds(elements) {
-  const bounds = elements.map((element) => {
+  const bounds = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+  for (const element of elements) {
     const widthMm = element.widthMm ?? element.fontSizeMm;
     const heightMm = element.heightMm ?? element.fontSizeMm;
-    return {
-      left: element.xMm,
-      top: element.yMm - (element.type === "text" ? element.fontSizeMm : 0),
-      right: element.xMm + widthMm,
-      bottom: element.yMm - (element.type === "text" ? element.fontSizeMm : 0) + heightMm
-    };
-  });
-  return {
-    left: Math.min(...bounds.map((bound) => bound.left)),
-    top: Math.min(...bounds.map((bound) => bound.top)),
-    right: Math.max(...bounds.map((bound) => bound.right)),
-    bottom: Math.max(...bounds.map((bound) => bound.bottom))
-  };
+    const top = element.yMm - (element.type === "text" ? element.fontSizeMm : 0);
+    bounds.left = Math.min(bounds.left, element.xMm);
+    bounds.top = Math.min(bounds.top, top);
+    bounds.right = Math.max(bounds.right, element.xMm + widthMm);
+    bounds.bottom = Math.max(bounds.bottom, top + heightMm);
+  }
+  return bounds;
 }
 
 function angleBetween(center, point) {
@@ -46,7 +41,7 @@ export class CanvasController {
     svg.addEventListener("pointerdown", (event) => this.onPointerDown(event));
     svg.addEventListener("pointermove", (event) => this.onPointerMove(event));
     svg.addEventListener("pointerup", (event) => this.onPointerUp(event));
-    svg.addEventListener("pointercancel", (event) => this.onPointerUp(event));
+    svg.addEventListener("pointercancel", (event) => this.onPointerUp(event, true));
     svg.addEventListener("contextmenu", (event) => this.onContextMenu(event));
   }
 
@@ -93,7 +88,8 @@ export class CanvasController {
     if (["select", "edit"].includes(tool)) return;
     const selectedIds = this.callbacks.getSelectedIds();
     if (!selectedIds.includes(id)) return;
-    const selected = document.elements.filter((candidate) => selectedIds.includes(candidate.id));
+    const selectedSet = new Set(selectedIds);
+    const selected = document.elements.filter((candidate) => selectedSet.has(candidate.id));
     if (!["move", "size"].includes(tool) && selected.length > 1) {
       this.callbacks.notify("Rotação e distorção de vários objetos ainda não estão disponíveis.");
       return;
@@ -206,13 +202,17 @@ export class CanvasController {
     }
   }
 
-  onPointerUp(event) {
+  onPointerUp(event, cancelled = false) {
     if (!this.interaction || event.pointerId !== this.interaction.pointerId) return;
     const action = this.interaction;
-    if (action.type !== "marquee") this.flushPendingMove(action);
+    if (action.type !== "marquee") {
+      if (cancelled && action.frame != null) cancelAnimationFrame(action.frame);
+      else if (!cancelled) this.flushPendingMove(action);
+    }
     this.interaction = null;
     if (action.type === "marquee") {
       this.marquee.setAttribute("visibility", "hidden");
+      if (cancelled) return;
       if (action.moved) {
         const bounds = this.marquee.getBoundingClientRect();
         const ids = Array.from(this.svg.querySelectorAll("[data-id]"))
@@ -229,7 +229,8 @@ export class CanvasController {
       return;
     }
     if (action.tool === "move") {
-      this.callbacks.clearMovePreview();
+      this.callbacks.clearMovePreview({ cancelled });
+      if (cancelled) return;
       if (action.delta) {
         const { x, y } = action.delta;
         this.callbacks.updateMany(action.selected.map((element) => ({

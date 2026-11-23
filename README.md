@@ -19,6 +19,7 @@ Plugins independentes podem ter licenças próprias; consulte [LICENSE-PLUGINS](
 - Abra `index.html` em um navegador moderno.
 - Execute `npm install` e `npm start`; acesse `http://127.0.0.1:4173` para habilitar a conexão serial experimental com controladores compatíveis com GRBL.
 - Execute `npm test` para rodar os testes do núcleo e da CLI.
+- Para testes de integração no navegador, instale o Chromium com `npx playwright install --only-shell chromium` e execute `npm run test:browser`.
 - Exporte um documento JSON para SVG com `node cli/commburn.mjs entrada.json saida.svg`.
 - Baixe os pacotes publicados em [Releases](https://github.com/Mauricio-MN/CommBurn/releases).
 

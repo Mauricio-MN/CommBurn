@@ -118,6 +118,37 @@ test("pointer moves within one frame preview only the latest position, then comm
   }
 });
 
+test("cancelling a move restores the preview without committing a model update", () => {
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  try {
+    const element = { id: "box", type: "rect", xMm: 10, yMm: 20, widthMm: 5, heightMm: 5, layerId: "layer" };
+    const svg = {
+      querySelector: () => ({}), addEventListener() {}, setPointerCapture() {},
+      createSVGPoint: () => ({ matrixTransform() { return { x: this.x, y: this.y }; } }),
+      getScreenCTM: () => ({ inverse: () => ({}) })
+    };
+    let cleared, updates = 0, commits = 0;
+    const controller = new CanvasController(svg, {
+      getTool: () => "move", getDocument: () => ({ elements: [element], layers: [{ id: "layer" }] }),
+      getSelectedIds: () => ["box"], select() {}, previewMove() {},
+      clearMovePreview: (options) => { cleared = options; },
+      updateMany: () => { updates++; }, commit: () => { commits++; }
+    });
+    const event = { button: 0, pointerId: 1, clientX: 10, clientY: 10, shiftKey: false,
+      target: { closest: () => ({ dataset: { id: "box" } }) }, preventDefault() {} };
+    controller.onPointerDown(event);
+    controller.onPointerMove(event);
+    controller.onPointerUp(event, true);
+    assert.deepEqual(cleared, { cancelled: true });
+    assert.equal(updates, 0);
+    assert.equal(commits, 0);
+  } finally {
+    delete globalThis.requestAnimationFrame;
+    delete globalThis.cancelAnimationFrame;
+  }
+});
+
 
 test("a drag keeps the job markers on the moved object without rebuilding the model mid-drag", async () => {
   const { createDocument, jobReferencePoints } = await import("../src/core/document.js");

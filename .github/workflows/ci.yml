@@ -2,6 +2,10 @@ name: CI
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -23,3 +27,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - run: npx playwright install --only-shell chromium
+        timeout-minutes: 5
+      - run: npm run test:browser
+        timeout-minutes: 3

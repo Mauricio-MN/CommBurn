@@ -6,6 +6,7 @@ import { listSystemFontFamilies } from "./ui/font-options.js";
 import { parseProject, serializeProject } from "./core/project.js";
 import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
 import { CanvasController } from "./ui/canvas-controller.js";
+import { RasterPreview } from "./ui/raster-preview.js";
 import { DocumentHistory } from "./ui/history.js";
 import { installShortcuts, SHORTCUTS } from "./ui/shortcuts.js";
 import { connectToolbar, TOOLS } from "./ui/toolbar.js";
@@ -388,7 +389,8 @@ function resizeBoard(widthMm = currentDocument.widthMm, heightMm = currentDocume
 
 function syncInspector() {
   const inspector = byId("object-inspector");
-  const selectedElements = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
+  const selectedIdSet = new Set(selectedIds);
+  const selectedElements = currentDocument.elements.filter((element) => selectedIdSet.has(element.id));
   selectedIds = selectedElements.map((element) => element.id);
   selectedId = selectedIds.at(-1) ?? null;
   const selected = currentDocument.elements.find((element) => element.id === selectedId);
@@ -516,18 +518,21 @@ function selectObject(id) {
   const selected = currentDocument.elements.find((element) => element.id === id);
   if (selected) activeLayerId = selected.layerId;
   syncInspector();
-  renderPreview();
+  renderSelectionOnly();
 }
 
 function changeSelection(ids) {
-  selectedIds = [...new Set(ids)].filter((id) => currentDocument.elements.some((element) => element.id === id));
+  const availableIds = new Set(currentDocument.elements.map((element) => element.id));
+  const nextIds = [...new Set(ids)].filter((id) => availableIds.has(id));
+  if (nextIds.length === selectedIds.length && nextIds.every((id, index) => id === selectedIds[index])) return;
+  selectedIds = nextIds;
   selectedId = selectedIds.at(-1) ?? null;
   if (selectedIds.length === 1) {
     const selected = currentDocument.elements.find((element) => element.id === selectedId);
     if (selected) activeLayerId = selected.layerId;
   }
   syncInspector();
-  renderPreview();
+  renderSelectionOnly();
 }
 
 function selectObjectWithOptions(id, options = {}) {
@@ -554,31 +559,16 @@ function updateSelected(patch, saveHistory = true, refreshInspector = true) {
   }
 }
 
-// Dragging shifts the already drawn nodes, so the whole document is not re-rendered on every pointer move.
-const movePreviewBaseTransforms = new Map();
-// Node lookups are cached per drag so each pointer frame does not query the whole DOM for every object.
-const movePreviewNodes = new Map();
+const rasterPreview = new RasterPreview(artboard, objects);
 // Set when a drag ends; the next model update keeps the already-shifted nodes instead of rebuilding them.
 let movePreviewPendingDrop = false;
 
 function previewMoveSelection(ids, dxMm, dyMm) {
-  for (const id of ids) {
-    let node = movePreviewNodes.get(id);
-    if (!node) {
-      node = objects.querySelector(`[data-id="${CSS.escape(id)}"]`);
-      if (!node) continue;
-      movePreviewNodes.set(id, node);
-    }
-    if (!movePreviewBaseTransforms.has(id)) movePreviewBaseTransforms.set(id, node.getAttribute("transform") ?? "");
-    const base = movePreviewBaseTransforms.get(id);
-    node.setAttribute("transform", `translate(${dxMm} ${dyMm})${base ? ` ${base}` : ""}`);
-  }
+  rasterPreview.preview(ids, dxMm, dyMm);
 }
 
-function clearMovePreview() {
-  movePreviewPendingDrop = movePreviewBaseTransforms.size > 0;
-  movePreviewBaseTransforms.clear();
-  movePreviewNodes.clear();
+function clearMovePreview(options) {
+  movePreviewPendingDrop = rasterPreview.finish(options);
 }
 
 function updateMany(updates, saveHistory = true) {
@@ -586,10 +576,12 @@ function updateMany(updates, saveHistory = true) {
   movePreviewPendingDrop = false;
   const patches = new Map(updates.map(({ id, patch }) => [id, patch]));
   try {
+    const elementsById = new Map(currentDocument.elements.map((element) => [element.id, element]));
+    const layersById = new Map(currentDocument.layers.map((layer) => [layer.id, layer]));
     for (const id of patches.keys()) {
-      const element = currentDocument.elements.find((candidate) => candidate.id === id);
+      const element = elementsById.get(id);
       if (!element) throw new RangeError(`Objeto selecionado não encontrado: ${id}`);
-      if (currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked) {
+      if (layersById.get(element.layerId)?.locked) {
         throw new Error("Desbloqueie todas as camadas selecionadas antes de transformar os objetos.");
       }
     }
@@ -1089,8 +1081,29 @@ function paintJobMarkers(documentModel, reference) {
 // The origin only decides machine coordinates; the STAGE always shows the drawing the same way up.
 const STAGE_ORIGIN = { corner: "top-left", flipX: false, flipY: false };
 
+function updateSelectionControls() {
+  renderSelectionStatus();
+  const selectedIdSet = new Set(selectedIds);
+  const selected = currentDocument.elements.filter((element) => selectedIdSet.has(element.id));
+  const hasLockedLayer = selected.some((element) =>
+    currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked
+  );
+  removeButton.disabled = selected.length === 0 || hasLockedLayer;
+  byId("duplicate-selection").disabled = selected.length === 0 || hasLockedLayer;
+  renderLayers();
+  updateMachineControls();
+}
+
+function renderSelectionOnly() {
+  rasterPreview.reset();
+  const selection = new Set(selectedIds);
+  for (const node of objects.children) node.classList.toggle("selected", selection.has(node.dataset.id));
+  updateSelectionControls();
+}
+
 function renderPreview() {
   try {
+    rasterPreview.reset();
     currentDocument = readDocument();
     const { widthMm, heightMm } = currentDocument;
     artboard.setAttribute("viewBox", `0 0 ${widthMm} ${heightMm}`);
@@ -1126,15 +1139,7 @@ function renderPreview() {
     });
     objects.replaceChildren(...nodes);
     renderJobMarkers(currentDocument);
-    renderSelectionStatus();
-    const selected = currentDocument.elements.filter((element) => selectedIds.includes(element.id));
-    const hasLockedLayer = selected.some((element) =>
-      currentDocument.layers.find((layer) => layer.id === element.layerId)?.locked
-    );
-    removeButton.disabled = selected.length === 0 || hasLockedLayer;
-    byId("duplicate-selection").disabled = selected.length === 0 || hasLockedLayer;
-    renderLayers();
-    updateMachineControls();
+    updateSelectionControls();
   } catch (error) {
     showNotice(error);
   }
@@ -3234,11 +3239,7 @@ function addLayer() {
 }
 
 function flashActiveLayer() {
-  const nodes = [...objects.querySelectorAll(`[data-layer-id="${CSS.escape(activeLayerId)}"]`)];
-  for (const node of nodes) node.classList.remove("layer-glow");
-  // Forces a reflow so the animation restarts when the same layer is selected again.
-  void objects.getBoundingClientRect();
-  for (const node of nodes) node.classList.add("layer-glow");
+  void rasterPreview.flash(activeLayerId);
 }
 
 const layersPanel = new LayersPanel(byId("layers-list"), {
@@ -3248,7 +3249,7 @@ const layersPanel = new LayersPanel(byId("layers-list"), {
     selectedId = null;
     selectedIds = [];
     syncInspector();
-    renderPreview();
+    renderSelectionOnly();
     flashActiveLayer();
   },
   onAdd: addLayer,

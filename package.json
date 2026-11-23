@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "test:browser": "node --test browser-tests/editor.browser.js",
     "start": "node server.mjs",
     "desktop": "electron .",
     "dist": "electron-builder --publish never",
@@ -32,7 +33,8 @@
     "@capacitor/core": "^8.6.2",
     "@commburn/capacitor-usb-serial": "file:plugins/capacitor-usb-serial",
     "electron": "^45.2.3",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "playwright": "^1.65.1"
   },
   "main": "electron-main.mjs",
   "desktopName": "CommBurn",

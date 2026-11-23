@@ -159,6 +159,7 @@ span.origin-dot { display: block; width: 8px; height: 8px; border: 0; background
 .stage-background-field input { width: 28px; height: 22px; padding: 0; border: 1px solid #c9d2df; border-radius: 4px; background: none; cursor: pointer; }
 .artboard [data-id] { cursor: pointer; pointer-events: all; }
 .artboard [data-id].selected { filter: drop-shadow(0 0 1.5px #3978eb) drop-shadow(0 0 3px rgb(57 120 235 / 70%)); }
+.artboard .raster-selection { filter: drop-shadow(0 0 1.5px #3978eb) drop-shadow(0 0 3px rgb(57 120 235 / 70%)); pointer-events: none; }
 .artboard [data-id].missing-font { animation: missing-font-blink 1s steps(1, end) infinite; }
 @keyframes missing-font-blink {
   50% { filter: drop-shadow(0 0 3px #e53935) drop-shadow(0 0 6px rgb(229 57 53 / 80%)); }
@@ -194,6 +195,7 @@ span.origin-dot { display: block; width: 8px; height: 8px; border: 0; background
   100% { filter: drop-shadow(0 0 0 transparent); }
 }
 .artboard .layer-glow { animation: layer-glow-pulse .9s ease-out 1; }
+.artboard > image.layer-glow { pointer-events: none; }
 .layer-header { display: flex; min-width: 0; align-items: center; gap: 6px; margin-bottom: 8px; }
 .layer-select { display: flex; flex: 1; min-width: 0; align-items: center; gap: 7px; padding: 3px; color: #344158; text-align: left; background: transparent; border: 0; font-size: 11px; font-weight: 700; }
 .layer-select > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
