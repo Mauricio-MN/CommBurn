@@ -568,7 +568,9 @@ function previewMoveSelection(ids, dxMm, dyMm) {
 }
 
 function clearMovePreview(options) {
+  const hadMove = Boolean(rasterPreview.move);
   movePreviewPendingDrop = rasterPreview.finish(options);
+  if (hadMove) void rasterPreview.showSelection(selectedIds);
 }
 
 function updateMany(updates, saveHistory = true) {
@@ -1098,6 +1100,7 @@ function renderSelectionOnly() {
   rasterPreview.reset();
   const selection = new Set(selectedIds);
   for (const node of objects.children) node.classList.toggle("selected", selection.has(node.dataset.id));
+  void rasterPreview.showSelection(selectedIds);
   updateSelectionControls();
 }
 
@@ -1138,6 +1141,7 @@ function renderPreview() {
       return imported;
     });
     objects.replaceChildren(...nodes);
+    void rasterPreview.showSelection(selectedIds);
     renderJobMarkers(currentDocument);
     updateSelectionControls();
   } catch (error) {
@@ -3407,7 +3411,10 @@ languageSelect.addEventListener("change", () => {
   applyInterfaceLocale();
 });
 applyInterfaceLocale();
-new ResizeObserver(() => resizeBoard()).observe(stage);
+new ResizeObserver(() => {
+  resizeBoard();
+  rasterPreview.updateSelectionScale();
+}).observe(stage);
 
 function renderZoomControls() {
   zoomResetButton.textContent = zoomPercent(viewZoom);
@@ -3428,6 +3435,7 @@ function setViewZoom(level, anchor = null) {
   };
   viewZoom = nextZoom;
   resizeBoard();
+  rasterPreview.updateSelectionScale();
   renderZoomControls();
   const after = artboard.getBoundingClientRect();
   stage.scrollLeft += scrollDeltaToKeepAnchor(point.x, { start: before.left, size: before.width }, { start: after.left, size: after.width });

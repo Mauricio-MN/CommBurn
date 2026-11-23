@@ -8,3 +8,4 @@
 - [x] Manter uma alternativa vetorial quando a geração da imagem não for possível.
 - [x] Cobrir cache, invalidação, arrasto, cancelamento e preservação do modelo por testes; verificar a interface no navegador.
 - [x] Automatizar a integração no navegador com uma árvore SVG recursiva de 1.024 objetos, comparações do projeto e limites de tempo.
+- [x] Substituir filtros individuais de seleções grandes por um brilho raster temporário e verificar a rolagem da sidebar sem modificar o projeto.

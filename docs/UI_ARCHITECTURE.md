@@ -12,7 +12,7 @@ Este guia descreve os limites atuais da interface e como acrescentar ferramentas
 - `src/ui/plugins.js`: carregador desktop local API v1 para os slots de extensão documentados.
 - `src/ui/toolbar.js`: catálogo de ferramentas, atalhos visuais e estado ativo.
 - `src/ui/canvas-controller.js`: seleção, conversão de coordenadas SVG/mm e interações de ponteiro.
-- `src/ui/raster-preview.js`: cache limitado de imagens temporárias para brilho de camada e prévia de arrasto.
+- `src/ui/raster-preview.js`: cache limitado de imagens temporárias para brilho de camada, brilho de seleção e prévia de arrasto.
 - `src/ui/selection.js`: operações puras para substituir, alternar e combinar conjuntos selecionados.
 - `src/ui/layers-panel.js`: interface delegada de camadas e configurações de operação.
 - `src/ui/history.js`: snapshots imutáveis para desfazer/refazer.
@@ -46,7 +46,7 @@ Importação vetorial recusa scripts, atributos de evento, referências externas
 
 Na ferramenta Selecionar (`V`), Shift+clique alterna objetos na seleção e arrastar no espaço vazio cria uma caixa de seleção. O conjunto selecionado pode ser movido, redimensionado proporcionalmente em torno do centro do conjunto, duplicado, removido e copiado/colado; `Ctrl+C` copia sem modificar o original e `Ctrl+V` cola com deslocamento de 5 mm na camada ativa, mesmo se os objetos copiados vierem de outra camada. Campos de texto mantêm os atalhos nativos do navegador. Uma operação em objetos de camadas bloqueadas é recusada; colar exige uma camada ativa desbloqueada. Rotação e distorção continuam disponíveis para um objeto por vez. Cada cartão de camada tem ação para duplicar a configuração da camada e todos os seus objetos na mesma posição; a cópia começa desbloqueada.
 
-O brilho de camada usa um raster temporário em cache; seleções com 20 ou mais objetos usam rasters temporários no arrasto quando possível. Trechos intercalados mantêm a ordem de desenho; seleções muito intercaladas, fontes web da página indisponíveis no SVG isolado ou falhas de rasterização usam a prévia vetorial. O cache é limitado, varia com a aparência e a escala e não integra o documento nem as exportações. Os vetores permanecem editáveis, o modelo é atualizado somente ao soltar, e cancelar restaura a prévia.
+O brilho de camada usa um raster temporário em cache; seleções com 20 ou mais objetos usam um brilho raster único e rasters temporários no arrasto quando possível. Trechos intercalados mantêm a ordem de desenho; seleções muito intercaladas, fontes web da página indisponíveis no SVG isolado ou falhas de rasterização usam a prévia vetorial. O cache é limitado, varia com a aparência e a escala e não integra o documento nem as exportações. Os vetores permanecem editáveis, o modelo é atualizado somente ao soltar, e cancelar restaura a prévia.
 
 `npm run test:browser` automatiza essas interações no Chromium: uma árvore SVG recursiva de cinco níveis contém 1.024 quadrados e verifica raster, preservação do projeto, movimento, desfazer e cancelamento. Um segundo cenário verifica seleção intercalada e ordem visual. As esperas têm limites explícitos e a verificação não depende de inspeção manual de imagens.
 

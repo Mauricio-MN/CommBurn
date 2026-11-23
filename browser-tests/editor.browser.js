@@ -69,6 +69,36 @@ async function layerGlow(page) {
   });
 }
 
+async function scrollSidebarWithoutRedraw(page) {
+  await page.locator(".stage").evaluate(async (stage) => {
+    window.testStageMutations = 0;
+    window.testStageResizes = 0;
+    window.testStageObserver = new MutationObserver((records) => {
+      window.testStageMutations += records.filter((record) => {
+        const element = record.target.nodeType === Node.ELEMENT_NODE ? record.target : record.target.parentElement;
+        return !element?.closest("#job-markers");
+      }).length;
+    });
+    window.testStageObserver.observe(stage, { attributes: true, characterData: true, childList: true, subtree: true });
+    window.testStageResizeObserver = new ResizeObserver(() => { window.testStageResizes += 1; });
+    window.testStageResizeObserver.observe(stage);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    window.testStageResizes = 0;
+    window.testStageMutations = 0;
+  });
+  const sidebar = page.locator(".sidebar");
+  await sidebar.evaluate((element) => { element.scrollTop = 0; });
+  const box = await sidebar.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 100);
+  for (let index = 0; index < 5; index += 1) await page.mouse.wheel(0, 250);
+  await page.waitForFunction(() => document.querySelector(".sidebar").scrollTop > 0, null, { timeout: ACTION_TIMEOUT_MS });
+  assert.deepEqual(await page.evaluate(() => {
+    window.testStageObserver.disconnect();
+    window.testStageResizeObserver.disconnect();
+    return { mutations: window.testStageMutations, resizes: window.testStageResizes };
+  }), { mutations: 0, resizes: 0 }, "scrolling must not modify or resize the stage");
+}
+
 async function startDrag(page) {
   await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press("Control+A");
@@ -128,6 +158,8 @@ test("recursive SVG stays editable through layer glow, raster drag, undo and can
     if (message.type() === "error" && url !== `${server.url}/favicon.ico`) errors.push(`${message.text()} (${url})`);
   });
   await page.goto(server.url, { waitUntil: "load", timeout: ACTION_TIMEOUT_MS });
+  assert.equal(await page.locator("#objects [data-id]").count(), 0);
+  await scrollSidebarWithoutRedraw(page);
   await page.locator("#svg-file-input").setInputFiles({
     name: "recursive-tree.svg", mimeType: "image/svg+xml", buffer: Buffer.from(fixtureSvg())
   });
@@ -143,6 +175,59 @@ test("recursive SVG stays editable through layer glow, raster drag, undo and can
   const firstGlow = await layerGlow(page);
   assert.ok(firstGlow.opaque > 0, "layer raster must contain visible pixels");
   assert.deepEqual(await saveDocument(page), original, "glow must not alter the editable project");
+
+  const beforeSelection = await page.locator("#artboard").screenshot({ animations: "disabled" });
+  assert.equal(await page.locator("#objects [data-id].selected").count(), 0);
+  await scrollSidebarWithoutRedraw(page);
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press("Control+A");
+  await page.locator("#artboard > .selection-glow").waitFor({ state: "attached" });
+  const selectionState = await page.locator("#artboard").evaluate((svg) => ({
+    selected: svg.querySelectorAll("#objects [data-id].selected").length,
+    filtered: [...svg.querySelectorAll("#objects [data-id].selected")]
+      .filter((node) => getComputedStyle(node).filter !== "none").length,
+    overlays: svg.querySelectorAll(":scope > .selection-glow").length,
+    behind: Boolean(svg.querySelector(".selection-glow + #objects"))
+  }));
+  assert.deepEqual(selectionState, { selected: OBJECT_COUNT, filtered: 0, overlays: 1, behind: true });
+  const afterSelection = await page.locator("#artboard").screenshot({ animations: "disabled" });
+  const changedPixels = await page.evaluate(async ([before, after]) => {
+    const read = async (data) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0);
+      return context.getImageData(0, 0, image.width, image.height).data;
+    };
+    const [a, b] = await Promise.all([read(before), read(after)]);
+    let bluePixels = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      if (b[i + 2] > b[i] + 10 && b[i + 2] - b[i] > a[i + 2] - a[i] + 5) bluePixels += 1;
+    }
+    return bluePixels;
+  }, [beforeSelection.toString("base64"), afterSelection.toString("base64")]);
+  assert.ok(changedPixels > 50, "selection glow must visibly add blue pixels");
+  await scrollSidebarWithoutRedraw(page);
+  assert.equal(await page.locator("#artboard > .selection-glow").count(), 1);
+  assert.equal(await page.locator("#objects [data-id].selected").count(), OBJECT_COUNT);
+  const blurBeforeZoom = Number(await page.locator("#artboard defs filter feGaussianBlur").getAttribute("stdDeviation"));
+  await page.locator("#zoom-in").click();
+  const blurAfterZoom = Number(await page.locator("#artboard defs filter feGaussianBlur").getAttribute("stdDeviation"));
+  assert.ok(blurAfterZoom < blurBeforeZoom, "glow width must adapt to zoom");
+  await page.locator("#zoom-reset").click();
+  assert.deepEqual(await saveDocument(page), original, "sidebar scrolling must not change the document");
+
+  await page.locator("#add-document-tab").click();
+  assert.equal(await page.locator("#objects [data-id]").count(), 0);
+  assert.equal(await page.locator("#artboard > .selection-glow").count(), 0);
+  await scrollSidebarWithoutRedraw(page);
+  await page.locator('[data-tab-id="tab-1"]').click();
+  await page.locator("#artboard > .selection-glow").waitFor({ state: "attached" });
+  assert.equal(await page.locator("#objects [data-id].selected").count(), OBJECT_COUNT);
 
   const { dx, dy } = await startDrag(page);
   assert.ok(dx > 0 && dy > 0);

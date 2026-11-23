@@ -103,8 +103,43 @@ async function rasterize(source, width, height) {
   }
 }
 
+function updateGlowScale(artboard, image, filter, blur) {
+  const matrix = artboard.getScreenCTM();
+  if (!matrix) throw new Error("Cannot render selection glow on a detached artboard");
+  const scale = Math.max(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d));
+  if (!(scale > 0)) throw new Error("Cannot render selection glow on an unscaled artboard");
+  const pad = 18 / scale;
+  filter.setAttribute("x", Number(image.getAttribute("x")) - pad);
+  filter.setAttribute("y", Number(image.getAttribute("y")) - pad);
+  filter.setAttribute("width", Number(image.getAttribute("width")) + 2 * pad);
+  filter.setAttribute("height", Number(image.getAttribute("height")) + 2 * pad);
+  blur.setAttribute("stdDeviation", 2 / scale);
+}
+
+function addSelectionGlow(artboard, image) {
+  const defs = document.createElementNS(SVG_NS, "defs");
+  const filter = document.createElementNS(SVG_NS, "filter");
+  filter.id = `selection-glow-${crypto.randomUUID()}`;
+  filter.setAttribute("filterUnits", "userSpaceOnUse");
+  const blur = document.createElementNS(SVG_NS, "feGaussianBlur");
+  blur.setAttribute("in", "SourceAlpha");
+  updateGlowScale(artboard, image, filter, blur);
+  const flood = document.createElementNS(SVG_NS, "feFlood");
+  flood.setAttribute("flood-color", "#3978eb");
+  flood.setAttribute("flood-opacity", "0.85");
+  const composite = document.createElementNS(SVG_NS, "feComposite");
+  composite.setAttribute("operator", "in");
+  blur.setAttribute("result", "blur");
+  composite.setAttribute("in2", "blur");
+  filter.append(blur, flood, composite);
+  defs.append(filter);
+  image.setAttribute("filter", `url(#${filter.id})`);
+  artboard.append(defs);
+  return defs;
+}
+
 export class RasterPreview {
-  constructor(artboard, objects, { makeSnapshot = snapshot, render = rasterize } = {}) {
+  constructor(artboard, objects, { makeSnapshot = snapshot, render = rasterize, selectionGlow = addSelectionGlow } = {}) {
     this.artboard = artboard;
     this.objects = objects;
     this.makeSnapshot = makeSnapshot;
@@ -113,6 +148,50 @@ export class RasterPreview {
     this.move = null;
     this.flashVersion = 0;
     this.flashNode = null;
+    this.selectionGlow = selectionGlow;
+    this.selectionVersion = 0;
+    this.selectionImage = null;
+    this.selectionDefs = null;
+  }
+
+  clearSelection({ keepOptimized = false } = {}) {
+    this.selectionVersion += 1;
+    this.selectionImage?.remove();
+    this.selectionDefs?.remove();
+    this.selectionImage = null;
+    this.selectionDefs = null;
+    if (!keepOptimized) this.artboard.classList.remove("rasterized-selection");
+  }
+
+  updateSelectionScale() {
+    if (!this.selectionImage || !this.selectionDefs) return;
+    const filter = this.selectionDefs.querySelector("filter");
+    const blur = filter.querySelector("feGaussianBlur");
+    const matrix = this.artboard.getScreenCTM();
+    if (!matrix || !(Math.max(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d)) > 0)) return;
+    updateGlowScale(this.artboard, this.selectionImage, filter, blur);
+  }
+
+  async showSelection(ids) {
+    this.clearSelection();
+    const selected = new Set(ids);
+    const nodes = [...this.objects.children].filter((node) =>
+      selected.has(node.dataset.id) && !node.classList.contains("missing-font"));
+    if (nodes.length < MIN_RASTER_SELECTION || nodes.some(needsPageFont)) return;
+    const version = this.selectionVersion;
+    this.artboard.classList.add("rasterized-selection");
+    try {
+      const image = await this.imageFor(nodes);
+      if (version !== this.selectionVersion) return;
+      this.selectionDefs = this.selectionGlow(this.artboard, image);
+      this.selectionImage = image;
+      image.classList.add("selection-glow");
+      this.objects.before(image);
+    } catch (error) {
+      if (version !== this.selectionVersion) return;
+      this.clearSelection();
+      console.error("Could not rasterize selection glow:", error);
+    }
   }
 
   async imageFor(nodes) {
@@ -170,6 +249,7 @@ export class RasterPreview {
 
   preview(ids, dx, dy) {
     if (!this.move) {
+      this.clearSelection({ keepOptimized: true });
       this.flashVersion += 1;
       this.flashNode?.remove();
       this.flashNode = null;
@@ -229,6 +309,7 @@ export class RasterPreview {
 
   reset() {
     this.finish({ cancelled: true });
+    this.clearSelection();
     this.flashVersion += 1;
     this.flashNode?.remove();
     this.flashNode = null;

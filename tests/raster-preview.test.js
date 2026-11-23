@@ -4,10 +4,11 @@ import { RasterPreview, rasterDimensions, selectionRuns } from "../src/ui/raster
 
 function fakeNode(id, layer = "a") {
   const attributes = new Map();
+  const classes = new Set();
   return {
     dataset: { id, layerId: layer },
     style: { visibility: "" },
-    classList: { add() {}, remove() {} },
+    classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
     getAttribute: (name) => attributes.get(name) ?? null,
     setAttribute: (name, value) => attributes.set(name, value),
     removeAttribute: (name) => attributes.delete(name),
@@ -20,13 +21,20 @@ function fakeNode(id, layer = "a") {
 function setup(nodes, render) {
   const oldDocument = globalThis.document;
   globalThis.document = { createElementNS: () => fakeNode("image") };
-  const objects = { children: nodes, after(image) { image.attached = true; }, getBoundingClientRect() { return {}; } };
-  const preview = new RasterPreview({}, objects, {
+  const objects = {
+    children: nodes,
+    before(image) { image.attached = true; image.behindObjects = true; },
+    after(image) { image.attached = true; },
+    getBoundingClientRect() { return {}; }
+  };
+  const artboard = fakeNode("artboard");
+  const preview = new RasterPreview(artboard, objects, {
     makeSnapshot: (_artboard, group) => ({
       source: group.map((node) => `${node.dataset.id}:${node.getAttribute("transform") ?? ""}`).join(","),
       x: 2, y: 3, width: 10, height: 5, pixelWidth: 100, pixelHeight: 50
     }),
-    render
+    render,
+    selectionGlow: () => fakeNode("defs")
   });
   return { preview, restore: () => { globalThis.document = oldDocument; } };
 }
@@ -38,6 +46,91 @@ test("raster selection preserves contiguous drawing order and caps image size", 
   assert.ok(size.width <= 4096 && size.width * size.height <= 4_000_000);
   assert.ok(Math.abs(size.width / size.height - 2) < 0.01);
   assert.throws(() => rasterDimensions(0, 100), RangeError);
+});
+
+test("large selections use one glow and restore individual filters when cleared", async () => {
+  const nodes = Array.from({ length: 25 }, (_, index) => fakeNode(String(index)));
+  const { preview, restore } = setup(nodes, async () => "data:image/png;base64,abc");
+  try {
+    await preview.showSelection(nodes.map((node) => node.dataset.id));
+    assert.ok(preview.artboard.classList.contains("rasterized-selection"));
+    assert.ok(preview.selectionImage.attached);
+    assert.ok(preview.selectionImage.behindObjects);
+    assert.equal(preview.selectionImage.getAttribute("href"), "data:image/png;base64,abc");
+    const image = preview.selectionImage;
+    preview.clearSelection();
+    assert.equal(image.removed, true);
+    assert.equal(preview.artboard.classList.contains("rasterized-selection"), false);
+    await preview.showSelection(["0"]);
+    assert.equal(preview.selectionImage, null);
+  } finally { restore(); }
+});
+
+test("obsolete selection images cannot reappear after deselect", async () => {
+  const nodes = Array.from({ length: 20 }, (_, index) => fakeNode(String(index)));
+  let resolveRender;
+  const { preview, restore } = setup(nodes, () => new Promise((resolve) => { resolveRender = resolve; }));
+  try {
+    const pending = preview.showSelection(nodes.map((node) => node.dataset.id));
+    preview.clearSelection();
+    resolveRender("data:image/png;base64,abc");
+    await pending;
+    assert.equal(preview.selectionImage, null);
+    assert.equal(preview.artboard.classList.contains("rasterized-selection"), false);
+  } finally { restore(); }
+});
+
+test("a pending selection glow cannot reappear during a drag", async () => {
+  const nodes = Array.from({ length: 20 }, (_, index) => fakeNode(String(index)));
+  let resolveRender;
+  const { preview, restore } = setup(nodes, () => new Promise((resolve) => { resolveRender = resolve; }));
+  try {
+    const ids = nodes.map((node) => node.dataset.id);
+    const pending = preview.showSelection(ids);
+    preview.preview(ids, 2, 3);
+    resolveRender("data:image/png;base64,abc");
+    await pending;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(preview.selectionImage, null);
+    assert.equal(preview.move.images.length, 1);
+    preview.finish({ cancelled: true });
+    await preview.showSelection(ids);
+    assert.ok(preview.selectionImage);
+  } finally { restore(); }
+});
+
+test("selection glow failures restore vector filters", async () => {
+  const nodes = Array.from({ length: 20 }, (_, index) => fakeNode(String(index)));
+  const originalError = console.error;
+  const errors = [];
+  console.error = (...args) => errors.push(args);
+  const { preview, restore } = setup(nodes, async () => { throw new Error("unavailable"); });
+  try {
+    await preview.showSelection(nodes.map((node) => node.dataset.id));
+    assert.equal(preview.artboard.classList.contains("rasterized-selection"), false);
+    assert.equal(preview.selectionImage, null);
+    assert.equal(errors.length, 1);
+  } finally {
+    console.error = originalError;
+    restore();
+  }
+});
+
+test("selection glow preserves missing-font warnings and falls back for page fonts", async () => {
+  const nodes = Array.from({ length: 22 }, (_, index) => fakeNode(String(index)));
+  nodes[0].classList.add("missing-font");
+  const { preview, restore } = setup(nodes, async () => "data:image/png;base64,abc");
+  try {
+    const ids = nodes.map((node) => node.dataset.id);
+    await preview.showSelection(ids);
+    assert.ok(preview.selectionImage);
+    assert.ok(nodes[0].classList.contains("missing-font"));
+    nodes[1].localName = "text";
+    nodes[1].setAttribute("font-family", "CommBurn Sans");
+    await preview.showSelection(ids);
+    assert.equal(preview.selectionImage, null);
+    assert.equal(preview.artboard.classList.contains("rasterized-selection"), false);
+  } finally { restore(); }
 });
 
 test("raster bounds include wide strokes beyond SVG geometry bounds", async () => {
