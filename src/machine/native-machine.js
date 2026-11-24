@@ -66,8 +66,10 @@ class NativeSerialPort {
   }
 
   close(callback) {
-    this.releaseListeners();
-    this.plugin.close().then(() => callback?.(null), (error) => callback?.(error));
+    this.plugin.close().then(() => {
+      this.releaseListeners();
+      callback?.(null);
+    }, (error) => callback?.(error));
   }
 }
 
@@ -170,6 +172,7 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
   async function startJob(input) {
     if (!connection) throw new Error("Connect to a GRBL-compatible controller first");
     if (activeJob) throw new Error("A machine job is already running");
+    connection.assertReadyForJob();
     if (input.safetyConfirmed !== true) throw new Error("Confirm the laser safety checklist before sending a job");
     const gcode = renderGrblJob(input.document, input.settings);
     activeJob = true;
@@ -214,6 +217,7 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
           connected: Boolean(connection),
           simulated: false,
           busy: activeJob,
+          resetFailed: Boolean(connection?.resetFailed),
           settings: connection?.settings ?? null,
           jobStatus
         };
@@ -236,7 +240,7 @@ export function createNativeMachineApi({ plugin = globalThis.Capacitor?.Plugins?
         return startJob(body);
       case "GET /api/job-status":
         if (activeJob) connection?.requestStatusReport();
-        return { ...jobStatus, position: connection?.position?.work ?? null, report: connection?.report ?? null };
+        return { ...jobStatus, resetFailed: Boolean(connection?.resetFailed), position: connection?.position?.work ?? null, report: connection?.report ?? null };
       case "POST /api/job-pause":
         if (!connection || !activeJob || !jobTask) throw new Error("No machine job is running");
         connection.pauseJob();

@@ -92,7 +92,7 @@ export default Object.freeze({
       workSystem: "Memória de ponto zero da máquina",
       workSystemDefault: "Usar a que a máquina já está usando",
       showMarkers: "Mostrar começo e fim do trabalho no desenho",
-      coordinatesHelp: "Antes de iniciar, leve a cabeça do laser ao canto escolhido e marque-o como ponto zero na máquina. O CommBurn não lê sensores: você controla onde é o zero e o sentido dos eixos."
+      coordinatesHelp: "Em coordenadas absolutas, defina o zero no controlador. Na posição atual, coloque a cabeça no ponto escolhido do desenho: o trabalho usa movimentos relativos sem alterar o zero. Confira manualmente se toda a trajetória cabe na máquina; o CommBurn não lê sensores."
     },
     layers: {
       title: "Camadas de trabalho",
@@ -240,6 +240,10 @@ export default Object.freeze({
       serialPort: "Porta / caminho serial",
       serialPlaceholder: "/dev/ttyACM0 ou COM3",
       refreshPorts: "Atualizar portas",
+      discoveredPorts: "Portas encontradas",
+      choosePort: "Selecione uma porta encontrada",
+      portsUpdated: "Lista de portas seriais atualizada.",
+      resetFailed: "Não foi possível confirmar a parada após o reset. Verifique a máquina e use a parada de emergência física se necessário; desconecte antes de escolher outra porta.",
       baudRate: "Velocidade da comunicação serial (baud)",
       autoDetect: "Detectar automaticamente",
       baudHelp: "É a velocidade de comunicação pelo cabo; CommBurn e controladora precisam usar o mesmo valor. 115200 é comum. A detecção automática testa velocidades conhecidas com uma consulta de estado que não move a máquina. Se não encontrar, selecione uma velocidade do manual.",
@@ -273,6 +277,8 @@ export default Object.freeze({
       areaInvalid: "A controladora não informou valores válidos de $130/$131. Informe o tamanho da mesa manualmente.",
       simulateConnect: "Conectar simulador GRBL (sem hardware)",
       preview: "Pré-visualizar processo GRBL",
+      returnToJob: "Voltar ao trabalho em andamento",
+      liveViewUnavailable: "A visualização do trabalho em andamento não está disponível nesta sessão; o envio continua na controladora.",
       disconnected: "Desconectado",
       safety: "Confirme que a área está desimpedida, o material está correto e a exaustão e proteção ocular são adequadas. Isso não substitui a parada de emergência física.",
       sendJob: "Enviar trajetórias à máquina",
@@ -498,6 +504,7 @@ export default Object.freeze({
       duplicateId: "ID de objeto duplicado: {id}."
     },
     grbl: {
+      resetNotConfirmed: "O reset da controladora não foi confirmado. Verifique a máquina e desconecte antes de iniciar outro trabalho.",
       invalidLaserPowerMode: "Modo de potência do laser não suportado: {mode}.",
       laserModeRequired: "Potência dinâmica exige que a controladora informe $32=1. Confira a configuração ou selecione M3.",
       laserModeQueryFailed: "Não foi possível verificar o modo laser da controladora ($32): {details}",

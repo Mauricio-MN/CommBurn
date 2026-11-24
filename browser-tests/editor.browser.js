@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright";
 import { startServer } from "../server.mjs";
-import { renderSvg } from "../src/core/document.js";
+import { renderGrblJob, renderSvg } from "../src/core/document.js";
 import { serializeProject } from "../src/core/project.js";
 
 const DEPTH = 5;
@@ -263,6 +263,7 @@ test("interleaved selection uses separate raster runs without moving other objec
   await context.addInitScript(() => {
     Object.defineProperty(window, "showSaveFilePicker", { value: undefined, configurable: true });
   });
+
   const page = await context.newPage();
   page.setDefaultTimeout(ACTION_TIMEOUT_MS);
   await page.goto(server.url, { waitUntil: "load", timeout: ACTION_TIMEOUT_MS });
@@ -330,4 +331,173 @@ test("interleaved selection uses separate raster runs without moving other objec
     const { xMm: ignoredX2, yMm: ignoredY2, ...afterRest } = after;
     assert.deepEqual(afterRest, beforeRest, `${before.id} data`);
   }
+});
+
+test("failed reset permits disconnect and choosing another discovered port", { timeout: 30_000 }, async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  let connected = true;
+  let failed = true;
+  let busy = true;
+  let connectedPath = "COM3";
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    let response;
+    if (path === "/api/connection-status") response = { connected, simulated: false, busy, resetFailed: failed && !busy, settings: null, jobStatus: { state: "running", completed: 1, total: 3 } };
+    else if (path === "/api/job-status") {
+      busy = false;
+      response = { state: "stopped", completed: 1, total: 3, resetFailed: true, error: "Job stopped and the controller reset failed: The controller did not become idle after reset" };
+    }
+    else if (path === "/api/disconnect") { connected = false; failed = false; response = { connected: false }; }
+    else if (path === "/api/ports") response = { ports: [{ path: "COM3" }, { path: "COM4" }], warning: null };
+    else if (path === "/api/connect") {
+      connectedPath = request.postDataJSON().path;
+      connected = true;
+      response = { connected: true, path: connectedPath, baudRate: 115200, settings: { $30: 1000, $32: 1 } };
+    } else if (path === "/api/plugins") response = { plugins: [] };
+    else return route.continue();
+    await route.fulfill({ json: response });
+  });
+  await page.goto(server.url, { waitUntil: "load" });
+  await page.locator("#machine-state").getByText(/reset|parada/i).waitFor();
+  assert.equal(await page.locator("#disconnect-machine").isEnabled(), true);
+  assert.equal(await page.locator("#serial-path").isDisabled(), true);
+  assert.equal(await page.locator("#start-machine-job").isDisabled(), true);
+  await page.reload({ waitUntil: "load" });
+  await page.locator("#machine-state").getByText(/reset|parada/i).waitFor();
+  assert.equal(await page.locator("#disconnect-machine").isEnabled(), true);
+  assert.equal(await page.locator("#start-machine-job").isDisabled(), true);
+  await page.locator("#disconnect-machine").click();
+  await page.waitForFunction(() => !document.querySelector("#serial-path").disabled);
+  await page.locator("#serial-path").fill("COM3");
+  await page.locator("#refresh-ports").click();
+  await page.waitForFunction(() => document.querySelectorAll("#discovered-ports option").length === 3);
+  assert.deepEqual(await page.locator("#discovered-ports option").evaluateAll((nodes) => nodes.map((node) => node.value)), ["", "COM3", "COM4"]);
+  await page.locator("#discovered-ports").selectOption("COM4");
+  assert.equal(await page.locator("#serial-path").inputValue(), "COM4");
+  await page.locator("#connect-machine").click();
+  await page.waitForFunction(() => document.querySelector("#disconnect-machine").disabled === false);
+  assert.equal(connectedPath, "COM4");
+});
+
+test("a running job view reopens with current progress and preserves timeline review", { timeout: 30_000 }, async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  let connected = false;
+  let state = "idle";
+  let completed = 0;
+  const total = 30;
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    let response;
+    if (path === "/api/connection-status") response = { connected, simulated: connected, busy: state === "running" || state === "paused", resetFailed: false, settings: null, jobStatus: { state, completed, total } };
+    else if (path === "/api/simulate-connect") { connected = true; response = { connected: true, simulated: true }; }
+    else if (path === "/api/job") { state = "running"; response = { accepted: true, lines: total }; }
+    else if (path === "/api/job-status") response = { state, completed, total, position: null, report: null };
+    else if (path === "/api/job-pause") { state = "paused"; response = { paused: true }; }
+    else if (path === "/api/job-resume") { state = "running"; response = { resumed: true }; }
+    else if (path === "/api/plugins") response = { plugins: [] };
+    else return route.continue();
+    await route.fulfill({ json: response });
+  });
+  await page.goto(server.url, { waitUntil: "load" });
+  await page.locator("#svg-file-input").setInputFiles({
+    name: "job.commburn.json", mimeType: "application/json",
+    buffer: Buffer.from(serializeProject({
+      widthMm: 100, heightMm: 80,
+      elements: [{ id: "frame", type: "rect", xMm: 10, yMm: 5, widthMm: 20, heightMm: 15 }]
+    }))
+  });
+  await page.waitForFunction(() => document.querySelectorAll("#objects [data-id]").length === 1);
+  await page.locator("#simulate-machine").click();
+  await page.waitForFunction(() => !document.querySelector("#start-machine-job").disabled);
+  await page.locator("#start-mode").selectOption("head");
+  await page.locator('[data-anchor-point="center"]').click();
+  const jobRequest = page.waitForRequest((request) => request.url().endsWith("/api/job") && request.method() === "POST");
+  await page.locator("#start-machine-job").click();
+  const sent = (await jobRequest).postDataJSON();
+  assert.equal(sent.settings.startFrom, "objects");
+  assert.equal(sent.settings.startAnchor, "center");
+  assert.match(renderGrblJob(sent.document, sent.settings), /^G21\nG91\nG94\nM5\n/);
+  await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
+  const code = await page.locator("#machine-preview-code").textContent();
+  await page.locator("#machine-preview-dialog .dialog-close").click();
+  assert.match(await page.locator("#preview-machine-job").textContent(), /trabalho em andamento|running job/i);
+  completed = 8;
+  await page.waitForFunction(() => document.querySelector("#machine-state").textContent.includes("8/30"));
+  await page.locator("#preview-machine-job").click();
+  await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#machine-timeline-scrub").inputValue(), "8");
+  assert.equal(await page.locator("#machine-preview-code").textContent(), code);
+  await page.locator('#machine-simulation-job-controls [data-machine-job-control="pause"]').click();
+  await page.waitForFunction(() => !document.querySelector('#machine-simulation-job-controls [data-machine-job-control="resume"]').disabled);
+  await page.locator("#machine-timeline-scrub").fill("2");
+  await page.locator("#machine-preview-dialog .dialog-close").click();
+  await page.setViewportSize({ width: 1200, height: 800 });
+  completed = 15;
+  await page.waitForFunction(() => document.querySelector("#machine-state").textContent.includes("15/30"));
+  await page.locator("#preview-machine-job").click();
+  await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#machine-timeline-scrub").inputValue(), "2");
+  assert.equal(await page.locator("#machine-timeline-live").isVisible(), true);
+  assert.equal(await page.locator('#machine-simulation-job-controls [data-machine-job-control="resume"]').isEnabled(), true);
+  await page.locator("#machine-timeline-live").click();
+  assert.equal(await page.locator("#machine-timeline-scrub").inputValue(), "15");
+});
+
+test("the simulated controller keeps a paused job available after closing its view", { timeout: 30_000 }, async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  await page.goto(server.url, { waitUntil: "load" });
+  await page.locator("#svg-file-input").setInputFiles({
+    name: "simulated.commburn.json", mimeType: "application/json",
+    buffer: Buffer.from(serializeProject({
+      widthMm: 100, heightMm: 80,
+      elements: [{ id: "frame", type: "rect", xMm: 10, yMm: 5, widthMm: 20, heightMm: 15 }]
+    }))
+  });
+  await page.waitForFunction(() => document.querySelectorAll("#objects [data-id]").length === 1);
+  await page.locator("#simulate-machine").click();
+  await page.waitForFunction(() => !document.querySelector("#start-machine-job").disabled);
+  await page.locator("#start-machine-job").click();
+  await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
+  await page.locator('#machine-simulation-job-controls [data-machine-job-control="pause"]').click();
+  await page.waitForFunction(() => !document.querySelector('#machine-simulation-job-controls [data-machine-job-control="resume"]').disabled);
+  await page.locator("#machine-preview-dialog .dialog-close").click();
+  await page.locator("#preview-machine-job").click();
+  await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
+  assert.equal(await page.locator('#machine-simulation-job-controls [data-machine-job-control="resume"]').isEnabled(), true);
+  await page.locator('#machine-simulation-job-controls [data-machine-job-control="stop"]').click();
+  await page.waitForFunction(() => !document.querySelector("#disconnect-machine").disabled);
+  await page.locator("#machine-preview-dialog .dialog-close").click();
+  await page.locator("#disconnect-machine").click();
+  await page.waitForFunction(() => !document.querySelector("#simulate-machine").disabled);
+});
+
+test("a running job without its original plan is not replaced with the current document preview", { timeout: 30_000 }, async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/connection-status") {
+      return route.fulfill({ json: { connected: true, simulated: false, busy: true, resetFailed: false, settings: null, jobStatus: { state: "running", completed: 3, total: 30 } } });
+    }
+    if (path === "/api/job-status") return route.fulfill({ json: { state: "running", completed: 3, total: 30, position: null, report: null } });
+    return route.continue();
+  });
+  await page.goto(server.url, { waitUntil: "load" });
+  await page.waitForFunction(() => document.querySelector("#machine-state").textContent.includes("3/30"));
+  assert.equal(await page.locator("#preview-machine-job").isDisabled(), true);
+  await page.locator('[data-action="preview-machine"]').evaluate((button) => button.click());
+  await page.waitForFunction(() => /não está disponível|unavailable/i.test(document.querySelector("#notice-log-text").value));
+  assert.equal(await page.locator("#machine-preview-dialog").isVisible(), false);
 });

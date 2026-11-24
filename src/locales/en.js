@@ -92,7 +92,7 @@ export default Object.freeze({
       workSystem: "Machine zero-point memory",
       workSystemDefault: "Use the one the machine already uses",
       showMarkers: "Show job start and end on the drawing",
-      coordinatesHelp: "Before starting, move the laser head to the chosen corner and mark it as the zero point on the machine. CommBurn reads no sensors: you control where zero is and which way the axes run."
+      coordinatesHelp: "For absolute coordinates, set the controller zero. For current position, place the head at the chosen drawing point: the job uses relative moves without changing zero. Check manually that the whole path fits the machine; CommBurn does not read sensors."
     },
     layers: {
       title: "Work layers",
@@ -240,6 +240,10 @@ export default Object.freeze({
       serialPort: "Serial port / path",
       serialPlaceholder: "/dev/ttyACM0 or COM3",
       refreshPorts: "Refresh ports",
+      discoveredPorts: "Discovered ports",
+      choosePort: "Select a discovered port",
+      portsUpdated: "Serial port list updated.",
+      resetFailed: "Could not confirm the controller stopped after reset. Check the machine and use the physical emergency stop if necessary; disconnect before choosing another port.",
       baudRate: "Serial communication speed (baud)",
       autoDetect: "Detect automatically",
       baudHelp: "This is the cable communication speed; CommBurn and the controller must use the same value. 115200 is common. Automatic detection tests known speeds with a status query that does not move the machine. If detection fails, choose a speed from the manual.",
@@ -273,6 +277,8 @@ export default Object.freeze({
       areaInvalid: "The controller did not report valid $130/$131 values. Enter the bed size manually.",
       simulateConnect: "Connect GRBL simulator (no hardware)",
       preview: "Preview GRBL process",
+      returnToJob: "Return to the running job",
+      liveViewUnavailable: "The running job view is unavailable in this session; the controller continues processing the job.",
       disconnected: "Disconnected",
       safety: "Confirm the area is clear, the material is correct, and exhaust and eye protection are adequate. This does not replace a physical emergency stop.",
       sendJob: "Send paths to machine",
@@ -497,6 +503,7 @@ export default Object.freeze({
       duplicateId: "Duplicate object ID: {id}."
     },
     grbl: {
+      resetNotConfirmed: "Controller reset was not confirmed. Check the machine and disconnect before starting another job.",
       invalidLaserPowerMode: "Unsupported laser power mode: {mode}.",
       laserModeRequired: "Dynamic power requires the controller to report $32=1. Check its configuration or select M3.",
       laserModeQueryFailed: "Could not verify controller laser mode ($32): {details}",

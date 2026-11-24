@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { listSerialPorts, readJson, startServer } from "../server.mjs";
 import { Readable } from "node:stream";
+import { EventEmitter } from "node:events";
 
 test("JSON request bodies must not be empty", async () => {
   await assert.rejects(readJson(Readable.from([])), { message: "Request body must contain JSON" });
@@ -71,6 +72,7 @@ test("server can be started on an ephemeral port and closed by an embedding app"
     connected: false,
     simulated: false,
     busy: false,
+    resetFailed: false,
     settings: null,
     jobStatus: { state: "idle", completed: 0, total: 0, error: null }
   });
@@ -127,6 +129,67 @@ test("a stopped simulated job releases the controller for another job and a fres
   assert.ok(Array.isArray((await request("/api/ports")).ports));
   assert.equal((await request("/api/simulate-connect", {})).connected, true);
   await request("/api/disconnect", {});
+});
+
+test("a failed controller reset blocks new jobs but allows disconnect and another serial port", { timeout: 12_000 }, async (context) => {
+  const ports = [];
+  class FaultyPort extends EventEmitter {
+    constructor({ path }) {
+      super();
+      this.path = path;
+      this.isOpen = false;
+      this.writes = [];
+      this.reset = false;
+      ports.push(this);
+    }
+    open(callback) { this.isOpen = true; callback(null); }
+    drain(callback) { callback(null); }
+    close(callback) { this.isOpen = false; this.emit("close"); callback(null); }
+    write(data) {
+      this.writes.push(data);
+      if (data === "$$\n") setImmediate(() => this.emit("data", Buffer.from("$30=1000\r\n$32=1\r\nok\r\n")));
+      if (data === "\x18") this.reset = true;
+      if (data === "?") setImmediate(() => this.emit("data", Buffer.from(`<${this.reset ? "Run" : "Hold:0"}|MPos:0,0,0>\r\n`)));
+    }
+  }
+  const server = await startServer({ port: 0, serialPortFactory: (options) => new FaultyPort(options) });
+  context.after(() => server.close());
+  const request = async (path, body) => {
+    const response = await fetch(`${server.url}${path}`, body === undefined ? {} : {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  assert.equal((await request("/api/connect", { path: "COM3", baudRate: 115200 })).status, 200);
+  const job = {
+    safetyConfirmed: true,
+    document: { widthMm: 20, heightMm: 20, elements: [{ id: "r", type: "rect", xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }] },
+    settings: { maxSpindleSpeed: 1000, laserPowerMode: "M3" }
+  };
+  assert.equal((await request("/api/job", job)).status, 202);
+  assert.equal((await request("/api/job-stop", {})).status, 200);
+  const deadline = Date.now() + 7000;
+  let state;
+  do {
+    state = (await request("/api/connection-status")).body;
+    if (!state.busy) break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } while (Date.now() < deadline);
+  assert.equal(state.busy, false);
+  assert.equal(state.resetFailed, true);
+  assert.match(state.jobStatus.error, /controller did not become idle after reset/i);
+  const writes = ports[0].writes.length;
+  const rejected = await request("/api/job", job);
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.body.code, "grbl.resetNotConfirmed");
+  assert.equal(ports[0].writes.length, writes);
+  assert.equal((await request("/api/disconnect", {})).status, 200);
+  assert.equal(ports[0].isOpen, false);
+  assert.equal((await request("/api/connection-status")).body.resetFailed, false);
+  assert.ok(Array.isArray((await request("/api/ports")).body.ports));
+  assert.equal((await request("/api/connect", { path: "COM4", baudRate: 115200 })).status, 200);
+  assert.equal(ports[1].path, "COM4");
+  assert.equal((await request("/api/disconnect", {})).status, 200);
 });
 
 test("desktop server lists and serves only valid local plugins", async (context) => {

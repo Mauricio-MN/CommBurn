@@ -48,6 +48,20 @@ test("machine simulation playback maps acknowledged G-code lines to work and rap
     plan.paths.filter((path) => path.kind === "work").reduce((count, path) => count + path.points.length - 1, 0));
 });
 
+test("playback accounts for the optional work-coordinate command in relative jobs", () => {
+  const plan = planGrblJob({
+    widthMm: 30, heightMm: 20,
+    elements: [{ id: "first", type: "rect", xMm: 5, yMm: 5, widthMm: 3, heightMm: 2 }]
+  }, { maxSpindleSpeed: 1000, startFrom: "objects", workCoordinateSystem: "G55" });
+  const playback = createMachinePlayback(plan);
+  const lines = plan.gcode.trim().split("\n");
+  const firstWork = lines.findIndex((line) => line.startsWith("G1 X"));
+  const entry = playback.entries.find((item) => item.kind === "work");
+  assert.equal(entry.segmentStartLine, firstWork);
+  assert.equal(getMachinePlaybackSegments(playback.entries, 0, firstWork).filter((s) => s.kind === "work").length, 0);
+  assert.equal(getMachinePlaybackSegments(playback.entries, 0, firstWork + 1).filter((s) => s.kind === "work").length, 1);
+});
+
 test("machine simulation playback timing follows the layer feed for work time", () => {
   const job = (feedMmPerMinute) => ({
     widthMm: 30,

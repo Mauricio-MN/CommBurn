@@ -237,6 +237,7 @@ let noticeTimer;
 let machineConnected = false;
 let machineSimulation = false;
 let machineBusy = false;
+let machineResetFailed = false;
 // Text objects whose font is not installed here; they block sending until the font is changed.
 let missingFontElementIds = new Set();
 let machineSimulationPlan = null;
@@ -681,6 +682,7 @@ function updateMachineControls() {
   simulateMachineButton.disabled = machineConnected;
   disconnectButton.disabled = !machineConnected || machineBusy;
   serialPathInput.disabled = machineConnected;
+  byId("discovered-ports").disabled = machineConnected;
   byId("baud-rate").disabled = machineConnected;
   byId("read-machine-settings").disabled = !machineConnected || machineSimulation || machineBusy;
   byId("read-machine-area").disabled = !machineConnected || machineSimulation || machineBusy;
@@ -699,7 +701,7 @@ function updateMachineControls() {
   byId("missing-font-status").hidden = !fontBlocked;
   byId("missing-font-status").textContent = fontBlocked ? i18n.t("ui.machine.missingFontBlocked", { count: missingFontElementIds.size }) : "";
   simulateMachineButton.disabled ||= fontBlocked;
-  startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy || fontBlocked || dynamicBlocked;
+  startMachineButton.disabled = !machineConnected || (!machineSimulation && !safetyCheckbox.checked) || !settingsAreValid || machineBusy || machineResetFailed || fontBlocked || dynamicBlocked;
   startMachineButton.textContent = i18n.t(machineSimulation ? "ui.machine.simulateJob" : "ui.machine.sendJob");
   const jobActive = machineConnected && machineBusy;
   const stopping = machineJobStopRequested;
@@ -710,6 +712,7 @@ function updateMachineControls() {
   };
   for (const button of machineJobControlButtons) button.disabled = !jobEnabled[button.dataset.machineJobControl];
   byId("preview-machine-job").disabled = machineBusy && !machineSimulationLive;
+  byId("preview-machine-job").textContent = i18n.t(machineBusy && machineSimulationLive ? "ui.machine.returnToJob" : "ui.machine.preview");
   for (const id of ["read-position", "set-zero", "home-machine"]) byId(id).disabled = !machineConnected || machineBusy;
 }
 
@@ -778,6 +781,7 @@ async function restoreMachineConnection() {
     machineConnected = state.connected;
     machineSimulation = state.simulated;
     machineBusy = state.busy;
+    machineResetFailed = Boolean(state.resetFailed);
     if (machineBusy) {
       setMachineState(machineSimulation ? "ui.machine.simulationRunning" : "ui.machine.jobRunning", {
         completed: state.jobStatus.completed,
@@ -787,12 +791,14 @@ async function restoreMachineConnection() {
       machineJobStopRequested = false;
       startMachinePolling();
       void pollMachineJob();
+    } else if (machineConnected && machineResetFailed) {
+      setMachineState("ui.machine.resetFailed");
     } else if (machineConnected) {
       setMachineState(machineSimulation ? "ui.machine.simulatedConnected" : "ui.machine.connected");
       if (!machineSimulation && state.settings) applyControllerSettings(state.settings);
     }
     updateMachineControls();
-    if (machineConnected && !machineSimulation && !machineBusy) {
+    if (machineConnected && !machineSimulation && !machineBusy && !machineResetFailed) {
       try {
         const result = await machineApi("/api/settings", "POST", {});
         reportControllerSettings(result);
@@ -814,9 +820,19 @@ async function refreshPorts() {
     option.label = [port.path, port.manufacturer].filter(Boolean).join(" — ");
     return option;
   }));
-  if (warning) setMachineStateText(warning);
-  else if (ports.length === 0) setMachineState("ui.machine.noPorts");
-  return { warning };
+  const select = byId("discovered-ports");
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.dataset.i18n = "ui.machine.choosePort";
+  placeholder.textContent = i18n.t("ui.machine.choosePort");
+  select.replaceChildren(placeholder, ...ports.map((port) => {
+    const option = document.createElement("option");
+    option.value = port.path;
+    option.textContent = [port.path, port.manufacturer].filter(Boolean).join(" — ");
+    return option;
+  }));
+  select.value = ports.some((port) => port.path === serialPathInput.value) ? serialPathInput.value : "";
+  return { warning, count: ports.length };
 }
 
 async function pollMachineJob() {
@@ -851,6 +867,7 @@ async function pollMachineJob() {
     clearInterval(statusPollTimer);
     statusPollTimer = undefined;
     machineBusy = false;
+    machineResetFailed = Boolean(result.resetFailed);
     const stopRequested = machineJobStopRequested;
     machineJobPaused = false;
     machineJobStopRequested = false;
@@ -864,6 +881,7 @@ async function pollMachineJob() {
       showNotice(i18n.t("ui.machine.jobStopped"));
     } else if (result.state === "stopped") {
       setMachineState("ui.machine.sendInterrupted", () => ({ error: formatError(new Error(result.error)) }));
+      if (machineResetFailed) appendMachineState("ui.machine.resetFailed");
       showNotice(machineState.textContent);
     } else {
       setMachineState("ui.machine.connected");
@@ -885,6 +903,7 @@ async function pollMachineConnection() {
     if (!state.connected && machineConnected) {
       machineConnected = false;
       machineSimulation = false;
+      machineResetFailed = false;
       controllerLaserMode = null;
       setPlaybackRapidMmPerMinute(null);
       setMachineState("ui.machine.disconnected");
@@ -1541,7 +1560,7 @@ function drawMachineSimulationTo(target) {
 // Live job progress: the view follows it unless the operator is reviewing earlier commands.
 // Acknowledged lines run ahead of motion, so when the head position is known the drawing stops at the head.
 function renderMachineSimulationProgress(completed, total, state, position = null) {
-  if (!machineSimulationPlan || !prepareMachineSimulationCanvases()) return;
+  if (!machineSimulationPlan) return;
   machineSimulationTotal = Math.max(0, total);
   machineSimulationState = state;
   machineSimulationLiveLines = Math.max(0, Math.min(completed, machineSimulationTotal));
@@ -1553,7 +1572,10 @@ function renderMachineSimulationProgress(completed, total, state, position = nul
     }
     machineSimulationLiveLines = Math.min(machineSimulationLiveLines, machineSimulationMatchedLine);
   }
+  const previousLines = machineSimulationCompletedLines;
+  if (!prepareMachineSimulationCanvases()) return;
   if (machineSimulationFollowing) drawMachineSimulationTo(machineSimulationLiveLines);
+  else if (machineSimulationCompletedLines !== previousLines) drawMachineSimulationTo(previousLines);
   renderMachineSimulationView();
 }
 
@@ -1594,7 +1616,8 @@ function showMachineSimulation(machinePlan, documentModel, totalLines, { live = 
   machineSimulationPlan = plan;
   machineSimulationDocument = documentModel;
   machineSimulationPlayback = createMachinePlayback(plan).entries;
-  machineSimulationTrack = createMachineTrack(machinePlan);
+  // Relative jobs are anchored to the head, not to the controller's work-coordinate zero.
+  machineSimulationTrack = machinePlan.gcode.split(/\r?\n/).includes("G91") ? [] : createMachineTrack(machinePlan);
   machineSimulationCursor = 0;
   machineSimulationMatchedLine = 0;
   machineSimulationCompletedLines = 0;
@@ -1666,9 +1689,18 @@ function showTimelinePreview(plan, documentModel) {
 }
 
 async function showMachinePreview() {
-  if (machineBusy && machineSimulationLive) {
+  if (machineBusy) {
+    if (!machineSimulationLive || !machineSimulationPlan) {
+      showNotice(i18n.t("ui.machine.liveViewUnavailable"));
+      return;
+    }
     const dialog = byId("machine-preview-dialog");
     if (!dialog.open) dialog.showModal();
+    const previousLines = machineSimulationCompletedLines;
+    if (prepareMachineSimulationCanvases()) {
+      drawMachineSimulationTo(machineSimulationFollowing ? machineSimulationLiveLines : previousLines);
+      renderMachineSimulationView();
+    }
     return;
   }
   try {
@@ -3514,11 +3546,14 @@ document.addEventListener("keydown", (event) => {
 }, true);
 byId("refresh-ports").addEventListener("click", async () => {
   try {
-    const { warning } = await refreshPorts();
-    showNotice(warning ?? "Lista de portas seriais atualizada.");
+    const { warning, count } = await refreshPorts();
+    showNotice(warning ?? i18n.t(count ? "ui.machine.portsUpdated" : "ui.machine.noPorts"));
   } catch (error) {
     showNotice(error);
   }
+});
+byId("discovered-ports").addEventListener("change", (event) => {
+  if (event.target.value) serialPathInput.value = event.target.value;
 });
 connectButton.addEventListener("click", async () => {
   try {
@@ -3530,6 +3565,7 @@ connectButton.addEventListener("click", async () => {
     });
     machineConnected = result.connected;
     machineSimulation = false;
+    machineResetFailed = false;
     if (result.autoDetected) byId("baud-rate").value = String(result.baudRate);
     byId("machine-smax").value = "";
     setMachineState("ui.machine.connectedAt", () => ({ path: result.path, baud: i18n.t(result.autoDetected ? "ui.machine.baudDetected" : "ui.machine.baudSelected", { rate: result.baudRate }) }));
@@ -3570,6 +3606,7 @@ simulateMachineButton.addEventListener("click", async () => {
     const result = await machineApi("/api/simulate-connect", "POST", {});
     machineConnected = result.connected;
     machineSimulation = result.simulated;
+    machineResetFailed = false;
     setMachineState("ui.machine.simulatedConnected");
     updateMachineControls();
   } catch (error) {
@@ -3582,6 +3619,7 @@ disconnectButton.addEventListener("click", async () => {
     await machineApi("/api/disconnect", "POST", {});
     machineConnected = false;
     machineSimulation = false;
+    machineResetFailed = false;
     controllerLaserMode = null;
     setPlaybackRapidMmPerMinute(null);
     setMachineState("ui.machine.disconnected");

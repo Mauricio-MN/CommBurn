@@ -939,8 +939,7 @@ export function jobStartSettings(mode, anchor = "top-left") {
 }
 export const WORK_COORDINATE_SYSTEMS = Object.freeze(["G54", "G55", "G56", "G57", "G58", "G59"]);
 
-// "absolute" keeps machine coordinates from the chosen origin; "objects" makes the job start at the
-// chosen anchor of the objects' bounding box, so the head position set by the user becomes X0 Y0.
+// "absolute" uses the chosen work zero; "objects" places the drawing anchor at the current head position.
 function planGrblJobBase(input, settings, startReference = null, absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 }, startReference)) {
   const startFrom = settings.startFrom ?? "absolute";
   if (!START_FROM_MODES.includes(startFrom)) {
@@ -968,7 +967,7 @@ function planGrblJobBase(input, settings, startReference = null, absolute = buil
 
 export function planGrblJob(input, settings) {
   const document = createDocument(input);
-  // Physical head positions are absolute machine coordinates; "objects" mode only re-zeroes the work coordinates.
+  // The drawing bounds check uses document coordinates; it cannot establish the head's physical position.
   const absolute = buildGrblJob(input, settings, { xMm: 0, yMm: 0 });
   // Machine coordinates are compared with the bed through the origin frame, so centred axes can be negative.
   const frame = machineFrame(document);
@@ -1054,10 +1053,18 @@ function buildGrblJob(input, settings, offset, startReference = null) {
     throw new CommBurnRangeError("grbl.unsupportedGeometry", {}, { message: "GRBL supports rectangles, editable vector paths, and editable text in the built-in engraving fonts" });
   }
 
-  const gcode = ["G21", "G90", "G94", "M5"];
+  const relative = settings.startFrom === "objects";
+  const gcode = ["G21", relative ? "G91" : "G90", "G94", "M5"];
   if (coordinateSystem) gcode.splice(1, 0, coordinateSystem);
   const paths = [];
   let previousPoint = null;
+  let emittedPoint = { xMm: 0, yMm: 0 };
+  const moveTo = (command, point, suffix = "") => {
+    const x = relative ? Number((point.xMm - emittedPoint.xMm).toFixed(6)) : point.xMm;
+    const y = relative ? Number((point.yMm - emittedPoint.yMm).toFixed(6)) : point.yMm;
+    emittedPoint = relative ? { xMm: emittedPoint.xMm + x, yMm: emittedPoint.yMm + y } : point;
+    gcode.push(`${command} X${x} Y${y}${suffix}`);
+  };
   let travelDistanceMm = 0;
   let workDistanceMm = 0;
   const estimatedWorkTimeSecondsByOperation = { engrave: 0, cut: 0, fill: 0 };
@@ -1115,7 +1122,7 @@ function buildGrblJob(input, settings, offset, startReference = null) {
           }
         }
         gcode.push("M5");
-        gcode.push(`G0 X${shiftedPath.points[0].xMm} Y${shiftedPath.points[0].yMm}`);
+        moveTo("G0", shiftedPath.points[0]);
         const pathPower = workPath.powerPercent ?? powerPercent;
         gcode.push(`${laserPowerMode} S${Math.round(maxSpindleSpeed * pathPower / 100)}`);
         gcode.push(`G1 F${feedMmPerMinute}`);
@@ -1123,7 +1130,7 @@ function buildGrblJob(input, settings, offset, startReference = null) {
           const fraction = workPath.segmentPowerFractions?.[pointIndex];
           let spindle = "";
           if (fraction !== undefined) spindle = ` S${Math.round(maxSpindleSpeed * powerPercent / 100 * fraction)}`;
-          gcode.push(`G1 X${point.xMm} Y${point.yMm}${spindle}`);
+          moveTo("G1", point, spindle);
         }
         paths.push(shiftedPath);
         let pathDistanceMm = 0;
@@ -1146,9 +1153,10 @@ function buildGrblJob(input, settings, offset, startReference = null) {
     if (returnMm > 0) {
       paths.push({ kind: "travel", elementId: null, layerId: null, points: [shift(previousPoint), home] });
       travelDistanceMm += returnMm;
-      gcode.push(`G0 X${home.xMm} Y${home.yMm}`);
+      moveTo("G0", home);
     }
   }
+  if (relative) gcode.push("G90");
   return {
     gcode: `${gcode.join("\n")}\n`,
     paths,

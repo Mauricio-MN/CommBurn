@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SimulatedSerialPort } from "../server.mjs";
+import { planGrblJob } from "../src/core/document.js";
 import {
   MotionPlanner,
   createMotionBlock,
@@ -14,6 +15,35 @@ import {
 
 const limits = createMotionLimits();
 const origin = { xMm: 0, yMm: 0 };
+
+test("the virtual controller executes a head-relative job without changing its work zero", async () => {
+  const port = new SimulatedSerialPort();
+  const initial = { ...port.position };
+  port.zero = { xMm: 3, yMm: 4 };
+  const plan = planGrblJob({
+    widthMm: 30, heightMm: 30,
+    elements: [{ id: "shape", type: "rect", xMm: 8, yMm: 8, widthMm: 1, heightMm: 1 }]
+  }, { maxSpindleSpeed: 1000, startFrom: "objects", startAnchor: "center" });
+  const moves = [];
+  const queueMotion = port.queueMotion.bind(port);
+  port.queueMotion = (motion) => {
+    queueMotion(motion);
+    moves.push({ ...port.plannedPosition });
+  };
+  try {
+    for (const line of plan.gcode.trim().split("\n")) port.write(`${line}\n`);
+    await waitForStatus(port, "Idle");
+    const first = plan.paths.find((path) => path.kind === "work").points[0];
+    assert.ok(Math.abs(moves[0].xMm - initial.xMm - first.xMm) < 1e-6);
+    assert.ok(Math.abs(moves[0].yMm - initial.yMm - first.yMm) < 1e-6);
+    assert.ok(Math.abs(port.position.xMm - initial.xMm) < 1e-6);
+    assert.ok(Math.abs(port.position.yMm - initial.yMm) < 1e-6);
+    assert.deepEqual(port.zero, { xMm: 3, yMm: 4 });
+    assert.equal(port.modal.relative, false);
+  } finally {
+    port.close(() => {});
+  }
+});
 
 test("a move at the feed rate takes distance over speed plus acceleration ramps", () => {
   const profile = speedProfile(100, 0, 0, 10, 1000);

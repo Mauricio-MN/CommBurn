@@ -51,6 +51,43 @@ test("native machine releases a disconnected port and can search and connect aga
   await machine("/api/disconnect", "POST");
 });
 
+test("native machine rejects jobs after a failed reset and can switch ports after disconnect", async () => {
+  const plugin = fakePlugin();
+  plugin.ports.push({ path: "/dev/bus/usb/001/003" });
+  let reset = false;
+  let commandSent;
+  const command = new Promise((resolve) => { commandSent = resolve; });
+  const opened = [];
+  plugin.open = async ({ path }) => { opened.push(path); };
+  plugin.write = async ({ data }) => {
+    if (data === "$$\n") queueMicrotask(() => plugin.emit("data", { data: "$30=1000\r\nok\r\n" }));
+    else if (data === "\x18") reset = true;
+    else if (data === "?") queueMicrotask(() => plugin.emit("data", { data: `<${reset ? "Alarm" : "Hold:0"}|MPos:0,0,0>\r\n` }));
+    else if (data.endsWith("\n")) commandSent();
+  };
+  const machine = createNativeMachineApi({ plugin });
+  await machine("/api/connect", "POST", { path: plugin.ports[0].path, baudRate: 115200 });
+  const job = {
+    safetyConfirmed: true,
+    document: { widthMm: 20, heightMm: 20, elements: [{ id: "r", type: "rect", xMm: 1, yMm: 1, widthMm: 2, heightMm: 2 }] },
+    settings: { maxSpindleSpeed: 1000, laserPowerMode: "M3" }
+  };
+  await machine("/api/job", "POST", job);
+  await command;
+  await machine("/api/job-stop", "POST");
+  const deadline = Date.now() + 2000;
+  while ((await machine("/api/connection-status")).busy && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal((await machine("/api/connection-status")).resetFailed, true);
+  await assert.rejects(machine("/api/job", "POST", job), { code: "grbl.resetNotConfirmed" });
+  await machine("/api/disconnect", "POST");
+  assert.equal((await machine("/api/ports")).ports.length, 2);
+  await machine("/api/connect", "POST", { path: plugin.ports[1].path, baudRate: 115200 });
+  assert.equal(opened[1], plugin.ports[1].path);
+  await machine("/api/disconnect", "POST");
+});
+
 test("native machine API releases its serial listeners when the port fails to open", async () => {
   const plugin = fakePlugin({ openError: new Error("Dispositivo USB não encontrado.") });
   const machine = createNativeMachineApi({ plugin });

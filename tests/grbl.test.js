@@ -320,6 +320,26 @@ test("a failed post-stop reset prevents another job until the connection is reco
   await assert.rejects(connection.sendJob("G21\n"), /reset was not confirmed/);
 });
 
+test("a failed serial close retains listeners and can be retried", async () => {
+  const serialPort = new MockSerialPort();
+  let attempts = 0;
+  let disconnects = 0;
+  serialPort.close = (callback) => {
+    attempts += 1;
+    if (attempts === 1) return callback(new Error("port busy"));
+    serialPort.isOpen = false;
+    serialPort.emit("close");
+    callback(null);
+  };
+  const connection = new GrblConnection(serialPort, { onDisconnect: () => { disconnects += 1; } });
+  await assert.rejects(connection.close(), /port busy/);
+  assert.equal(serialPort.listenerCount("data"), 1);
+  assert.equal(serialPort.listenerCount("error"), 1);
+  await connection.close();
+  assert.equal(serialPort.listenerCount("data"), 0);
+  assert.equal(disconnects, 0);
+});
+
 test("GRBL position, zero and homing are explicit commands that read or set work coordinates", async () => {
   const serialPort = new MockSerialPort();
   const baseWrite = serialPort.write.bind(serialPort);

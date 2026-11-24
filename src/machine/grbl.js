@@ -59,6 +59,7 @@ export class GrblConnection {
     this.reportUnits = null;
     this.serialError = null;
     this.resetFailed = false;
+    this.closing = false;
     this.onDisconnect = onDisconnect;
     this.handleData = (data) => this.receive(data);
     this.handleError = (error) => {
@@ -69,7 +70,7 @@ export class GrblConnection {
       this.onDisconnect(error);
     };
     this.handleClose = () => {
-      if (!this.serialError) this.handleError(new Error("Serial connection closed"));
+      if (!this.closing && !this.serialError) this.handleError(new Error("Serial connection closed"));
     };
     serialPort.on("data", this.handleData);
     serialPort.on("error", this.handleError);
@@ -325,7 +326,7 @@ export class GrblConnection {
 
   async sendJob(gcode) {
     if (this.busy) throw new Error("A machine job is already running");
-    if (this.resetFailed) throw new Error("Controller reset was not confirmed; disconnect and check the machine before starting another job");
+    this.assertReadyForJob();
     this.busy = true;
     this.cancelRequested = false;
     this.paused = false;
@@ -357,6 +358,14 @@ export class GrblConnection {
       throw error;
     } finally {
       this.busy = false;
+    }
+  }
+
+  assertReadyForJob() {
+    if (this.resetFailed) {
+      throw new CommBurnError("grbl.resetNotConfirmed", {}, {
+        message: "Controller reset was not confirmed; disconnect and check the machine before starting another job"
+      });
     }
   }
 
@@ -450,11 +459,16 @@ export class GrblConnection {
   async close() {
     if (this.busy) throw new Error("Cannot disconnect while a machine job is running; request feed hold first");
     this.statusWaiter?.reject(new Error("Serial connection closed during a status query"));
-    this.serialPort.off("data", this.handleData);
-    this.serialPort.off("error", this.handleError);
-    this.serialPort.off("close", this.handleClose);
-    if (this.serialPort.isOpen) {
-      await new Promise((resolve, reject) => this.serialPort.close((error) => error ? reject(error) : resolve()));
+    this.closing = true;
+    try {
+      if (this.serialPort.isOpen) {
+        await new Promise((resolve, reject) => this.serialPort.close((error) => error ? reject(error) : resolve()));
+      }
+      this.serialPort.off("data", this.handleData);
+      this.serialPort.off("error", this.handleError);
+      this.serialPort.off("close", this.handleClose);
+    } finally {
+      this.closing = false;
     }
   }
 }

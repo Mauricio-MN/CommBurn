@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg, stageToMachine, unlockedElementIds } from "../src/core/document.js";
+import { interpretGcodeLine } from "../src/machine/motion-model.js";
 import { DEFAULT_LAYER } from "../src/core/layers.js";
 
 const onePixelPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/6ioAAAAASUVORK5CYII=";
@@ -101,7 +102,78 @@ test("GRBL job returns the laser head to its start point after the last cut with
   assert.doesNotMatch(absolute, /\$H|G28/);
   assert.match(absolute, /M5\nG0 X0 Y0\n$/);
   const head = renderGrblJob(base, { ...settings, ...jobStartSettings("head", "center") });
-  assert.match(head, /M5\nG0 X0 Y0\n$/);
+  assert.match(head, /^G21\nG91\nG94\nM5/m);
+  assert.match(head, /M5\nG0 X[^ ]+ Y[^\n]+\nG90\n$/);
+});
+
+test("head-position jobs execute from the physical start, not the controller work zero", () => {
+  const document = {
+    widthMm: 100, heightMm: 80,
+    elements: [
+      { id: "a", type: "rect", xMm: 30, yMm: 20, widthMm: 10, heightMm: 6 },
+      { id: "b", type: "rect", xMm: 50, yMm: 25, widthMm: 4, heightMm: 3 }
+    ]
+  };
+  for (const corner of ["top-left", "bottom-right", "center"]) {
+    for (const anchor of ["top-left", "center", "bottom-right"]) {
+      for (const flipX of [false, true]) {
+        const input = { ...document, origin: { corner, flipX } };
+        const plan = planGrblJob(input, { maxSpindleSpeed: 1000, ...jobStartSettings("head", anchor), workCoordinateSystem: "G55" });
+        const initial = { xMm: 175, yMm: 82 };
+        let current = { ...initial };
+        let modal = { motion: "G0", relative: false, feedMmPerMinute: undefined };
+        const moves = [];
+        for (const line of plan.gcode.trim().split("\n")) {
+          const parsed = interpretGcodeLine(line, modal);
+          modal = parsed.modal;
+          if (!parsed.motion) continue;
+          current = {
+            xMm: modal.relative ? current.xMm + (parsed.motion.x ?? 0) : parsed.motion.x ?? current.xMm,
+            yMm: modal.relative ? current.yMm + (parsed.motion.y ?? 0) : parsed.motion.y ?? current.yMm
+          };
+          moves.push({ ...current });
+        }
+        const expected = plan.paths.flatMap((path) => path.kind === "work" ? path.points : []);
+        if (plan.paths.at(-1)?.kind === "travel") expected.push(plan.paths.at(-1).points.at(-1));
+        assert.equal(moves.length, expected.length, `${corner} ${anchor} flipX=${flipX}`);
+        expected.forEach((point, index) => {
+          assert.ok(Math.abs(moves[index].xMm - initial.xMm - point.xMm) < 1e-5);
+          assert.ok(Math.abs(moves[index].yMm - initial.yMm - point.yMm) < 1e-5);
+        });
+        assert.ok(Math.abs(current.xMm - initial.xMm) < 1e-5 && Math.abs(current.yMm - initial.yMm) < 1e-5);
+        assert.equal(modal.relative, false);
+        assert.doesNotMatch(plan.gcode, /G10|G92|\$H/);
+      }
+    }
+  }
+});
+
+test("relative deltas do not accumulate rounding errors over a long path", () => {
+  const pathData = `M 0 0 ${Array.from({ length: 600 }, (_, i) =>
+    `L ${((i + 1) / 17).toFixed(8)} ${((i % 7) / 13).toFixed(8)}`).join(" ")}`;
+  const plan = planGrblJob({
+    widthMm: 100, heightMm: 100,
+    elements: [{ id: "path", type: "path", xMm: 20, yMm: 20, widthMm: 600 / 17, heightMm: 6 / 13, pathData }]
+  }, { maxSpindleSpeed: 1000, ...jobStartSettings("head", "center") });
+  let modal = { motion: "G0", relative: false, feedMmPerMinute: undefined };
+  const current = { xMm: 0, yMm: 0 };
+  const moves = [];
+  for (const line of plan.gcode.trim().split("\n")) {
+    const parsed = interpretGcodeLine(line, modal);
+    modal = parsed.modal;
+    if (!parsed.motion) continue;
+    current.xMm += parsed.motion.x ?? 0;
+    current.yMm += parsed.motion.y ?? 0;
+    moves.push({ ...current });
+  }
+  const expected = plan.paths.flatMap((path) =>
+    path.kind === "work" ? path.points : path.elementId === null ? [path.points.at(-1)] : []);
+  assert.equal(moves.length, expected.length);
+  expected.forEach((point, index) => {
+    assert.ok(Math.abs(moves[index].xMm - point.xMm) <= 0.00000051);
+    assert.ok(Math.abs(moves[index].yMm - point.yMm) <= 0.00000051);
+  });
+  assert.ok(Math.abs(current.xMm) < 1e-9 && Math.abs(current.yMm) < 1e-9);
 });
 
 test("GRBL exports text and rejects out-of-area geometry and invalid machine settings", () => {

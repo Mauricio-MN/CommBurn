@@ -30,7 +30,8 @@ export function groupMachinePreviewPaths(paths) {
 
 export function createMachinePlayback(plan) {
   const entries = [];
-  let completedLines = 4;
+  const header = plan.gcode?.trim().split(/\r?\n/) ?? [];
+  let completedLines = 4 + (/^G5[4-9]$/.test(header[1] ?? "") ? 1 : 0);
   for (const path of plan.paths) {
     if (path.kind === "travel") {
       entries.push({ kind: "travel", path, endLine: completedLines + 2 });

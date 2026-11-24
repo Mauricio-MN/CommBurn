@@ -19,6 +19,7 @@ let jobStatus = { state: "idle", completed: 0, total: 0, error: null };
 // Job bodies carry embedded raster data for fills, so they need more room than other requests.
 const jobBodySizeLimit = 64 * 1024 * 1024;
 let desktopPluginDirectory = null;
+let createSerialPort = (options) => new SerialPort(options);
 
 const simulatedPlannerCapacity = 15;
 const clockSeconds = () => performance.now() / 1000;
@@ -373,6 +374,7 @@ async function handleApi(request, response, url) {
         connected: Boolean(connection),
         simulated: Boolean(connection?.isSimulation),
         busy: activeJob,
+        resetFailed: Boolean(connection?.resetFailed),
         settings: connection?.settings ?? null,
         jobStatus
       });
@@ -394,7 +396,7 @@ async function handleApi(request, response, url) {
       if (!detectBaud && (!Number.isSafeInteger(baudRate) || baudRate < 1200 || baudRate > 1000000)) {
         throw new RangeError("Baud rate must be an integer between 1200 and 1000000");
       }
-      const serialPort = new SerialPort({ path: input.path, baudRate, autoOpen: false });
+      const serialPort = createSerialPort({ path: input.path, baudRate, autoOpen: false });
       await new Promise((resolveOpen, rejectOpen) => serialPort.open((error) => error ? rejectOpen(error) : resolveOpen()));
       let currentConnection;
       if (detectBaud) {
@@ -501,7 +503,7 @@ async function handleApi(request, response, url) {
     if (request.method === "GET" && url.pathname === "/api/job-status") {
       // While a job runs, ask for a fresh status report so the reported position stays current.
       if (activeJob) connection?.requestStatusReport();
-      sendJson(response, 200, { ...jobStatus, position: connection?.position?.work ?? null, report: connection?.report ?? null });
+      sendJson(response, 200, { ...jobStatus, resetFailed: Boolean(connection?.resetFailed), position: connection?.position?.work ?? null, report: connection?.report ?? null });
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/job") {
@@ -510,6 +512,7 @@ async function handleApi(request, response, url) {
       const input = await readJson(request, jobBodySizeLimit);
       if (!connection) throw new Error("Connect to a GRBL-compatible controller first");
       if (activeJob) throw new Error("A machine job is already running");
+      connection.assertReadyForJob();
       if (!connection.isSimulation && input.safetyConfirmed !== true) {
         throw new Error("Confirm the laser safety checklist before sending a job");
       }
@@ -610,8 +613,9 @@ const server = createServer(async (request, response) => {
   }
 });
 
-export function startServer({ port = portNumber, pluginDirectory = null } = {}) {
+export function startServer({ port = portNumber, pluginDirectory = null, serialPortFactory = (options) => new SerialPort(options) } = {}) {
   desktopPluginDirectory = pluginDirectory;
+  createSerialPort = serialPortFactory;
   return new Promise((resolveStart, rejectStart) => {
     const onError = (error) => {
       server.off("listening", onListening);

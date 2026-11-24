@@ -97,7 +97,7 @@
             <option value="G57">G57</option><option value="G58">G58</option><option value="G59">G59</option>
           </select></label></details>
           <label class="toggle"><input id="show-job-markers" type="checkbox" checked><span class="toggle-track"></span> <span data-i18n="ui.document.showMarkers">Mostrar origem, início e fim no desenho</span></label>
-          <p class="help-text" data-i18n="ui.document.coordinatesHelp">Método manual: o G-code usa coordenadas absolutas (G90) a partir da origem escolhida aqui. Antes de executar, posicione a cabeça do laser nesse canto e defina-o como zero (X0 Y0) no controlador. O CommBurn não lê sensores nem fins de curso. O desenho do texto permanece legível.</p>
+          <p class="help-text" data-i18n="ui.document.coordinatesHelp">Em coordenadas absolutas, defina o zero no controlador. Na posição atual, coloque a cabeça no ponto escolhido do desenho: o trabalho usa movimentos relativos sem alterar o zero. Confira manualmente se toda a trajetória cabe na máquina; o CommBurn não lê sensores.</p>
         </section>
 
         <section class="panel layers-panel" data-ui-module="layers" data-extension-slot="layers" aria-labelledby="layers-title">
@@ -190,6 +190,9 @@
           <label class="field" data-i18n="ui.machine.serialPort">Porta / caminho serial
             <span class="port-row"><input id="serial-path" list="serial-port-options" placeholder="/dev/ttyACM0 ou COM3" data-i18n-placeholder="ui.machine.serialPlaceholder"><datalist id="serial-port-options"></datalist><button class="button button-secondary" id="refresh-ports" type="button" aria-label="Atualizar portas" data-i18n-aria-label="ui.machine.refreshPorts">↻</button></span>
           </label>
+          <label class="field" data-i18n="ui.machine.discoveredPorts">Portas encontradas
+            <select id="discovered-ports"><option value="" data-i18n="ui.machine.choosePort">Selecione uma porta encontrada</option></select>
+          </label>
           <label class="field" data-i18n="ui.machine.baudRate">Velocidade da comunicação serial (baud)
             <select id="baud-rate"><option value="115200">115200</option><option value="230400">230400</option><option value="57600">57600</option><option value="250000">250000</option><option value="auto" data-i18n="ui.machine.autoDetect">Detectar automaticamente</option></select>
           </label>
@@ -206,7 +209,6 @@
           <button class="button button-secondary full-width" id="read-machine-settings" type="button" disabled data-i18n="ui.machine.readSettings">Ler configuração da potência novamente</button>
           <button class="button button-secondary full-width" id="read-machine-area" type="button" disabled data-i18n="ui.machine.readArea">Usar área de trabalho da máquina ($130/$131)</button>
           <button class="button button-secondary full-width" id="simulate-machine" type="button" data-i18n="ui.machine.simulateConnect">Conectar simulador GRBL (sem hardware)</button>
-          <button class="button button-secondary full-width" id="preview-machine-job" type="button" data-i18n="ui.machine.preview">Pré-visualizar processo GRBL</button>
           <div class="machine-actions">
             <button class="button button-secondary" id="read-position" type="button" disabled data-i18n="ui.machine.readPosition">Ler posição</button>
             <button class="button button-secondary" id="set-zero" type="button" disabled data-i18n="ui.machine.setZero">Definir zero aqui</button>
@@ -218,6 +220,7 @@
           <label class="safety-check" id="machine-safety-check"><input id="safety-confirmed" type="checkbox"><span data-i18n="ui.machine.safety">Confirme: área desimpedida, material correto, exaustão e proteção ocular adequadas. Sei que isto não substitui a parada de emergência física.</span></label>
           <p class="help-text" id="missing-font-status" role="alert" hidden></p>
           <button class="button button-primary full-width" id="start-machine-job" type="button" disabled data-i18n="ui.machine.sendJob">Enviar contornos à máquina</button>
+          <button class="button button-secondary full-width" id="preview-machine-job" type="button" data-i18n="ui.machine.preview">Pré-visualizar processo GRBL</button>
           <div class="machine-job-controls" role="group" aria-label="Controle do trabalho" data-i18n-aria-label="ui.machine.jobControls">
             <button class="button button-secondary full-width" id="pause-machine-job" type="button" data-machine-job-control="pause" disabled data-i18n="ui.machine.pause">Pausar trabalho</button>
             <button class="button button-secondary full-width" id="resume-machine-job" type="button" data-machine-job-control="resume" disabled data-i18n="ui.machine.resume">Retomar trabalho</button>
