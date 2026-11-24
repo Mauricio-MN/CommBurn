@@ -2,12 +2,12 @@
 
 ## Versão atual
 
-O envelope persistido é JSON UTF-8 no formato `commburn-project`. A versão 3 declara a unidade canônica e aceita `fontWeight` (`normal` ou `bold`) e `fontStyle` (`normal` ou `italic`) em textos:
+O envelope persistido é JSON UTF-8 no formato `commburn-project`. A versão 4 acrescenta padrões de preenchimento vetorial à lista de algoritmos da camada:
 
 ```json
 {
   "format": "commburn-project",
-  "version": 3,
+  "version": 4,
   "units": "mm",
   "document": {}
 }
@@ -22,6 +22,8 @@ A versão do formato editável é independente da versão do aplicativo em `pack
 A conversão v1→v2 acrescenta `units: "mm"` ao envelope. Não transforma nem arredonda a geometria. A fixture v1 em `tests/fixtures/project-v1.json` é o contrato de compatibilidade para arquivos já existentes.
 
 A conversão v2→v3 apenas avança a versão. Textos antigos não têm `fontWeight` nem `fontStyle`; eles são lidos como `normal`, então a aparência não muda. A fixture v2 está em `tests/fixtures/project-v2.json`.
+
+A conversão v3→v4 apenas avança a versão: algoritmos existentes mantêm seus valores e comportamento. A fixture v3 está em `tests/fixtures/project-v3.json`.
 
 ## TABUS
 

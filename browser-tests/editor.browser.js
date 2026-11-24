@@ -69,6 +69,123 @@ async function layerGlow(page) {
   });
 }
 
+test("sidebar navigation and compact layers keep settings accessible across screen sizes", { timeout: 30_000 }, async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  await page.goto(server.url, { waitUntil: "load" });
+  await page.locator("#svg-file-input").setInputFiles({
+    name: "layers.commburn.json", mimeType: "application/json",
+    buffer: Buffer.from(serializeProject({
+      widthMm: 100, heightMm: 80,
+      layers: [{ id: "cut", name: "Cut", operation: "cut", powerPercent: 40 }, { id: "fill", name: "Fill", operation: "fill", powerPercent: 20 }],
+      elements: [
+        { id: "a", type: "rect", xMm: 5, yMm: 5, widthMm: 10, heightMm: 10, layerId: "cut" },
+        { id: "b", type: "rect", xMm: 30, yMm: 10, widthMm: 10, heightMm: 10, layerId: "fill" }
+      ]
+    }))
+  });
+  const cut = page.locator('#layers-list [data-layer-id="cut"]');
+  const fill = page.locator('#layers-list [data-layer-id="fill"]');
+  await cut.waitFor();
+  assert.equal(await cut.locator(".layer-settings").isVisible(), true);
+  assert.equal(await fill.locator(".layer-settings").isVisible(), false);
+  assert.match(await fill.locator(".layer-summary").textContent(), /20%/);
+  assert.equal(await fill.locator('[data-layer-property="enabled"]').isVisible(), true);
+  await fill.locator("[data-layer-select]").click();
+  assert.equal(await cut.locator(".layer-settings").isVisible(), false);
+  assert.equal(await fill.locator(".layer-settings").isVisible(), true);
+  const algorithm = fill.locator('[data-layer-property="fillAlgorithm"]');
+  assert.equal(await algorithm.locator("option").count(), 11);
+  await algorithm.selectOption("vertical-unidirectional");
+  assert.equal(await fill.locator('[data-layer-property="fillAlgorithm"]').inputValue(), "vertical-unidirectional");
+  await page.locator("#language-select").selectOption("en");
+  assert.match(await fill.locator(".layer-summary").textContent(), /Fill/);
+  assert.match(await page.locator(".sidebar-nav").getAttribute("aria-label"), /section/i);
+  await page.locator('.sidebar-nav a[href="#machine-panel"]').click();
+  assert.ok(await page.locator(".sidebar").evaluate((sidebar) => sidebar.scrollTop > 0));
+  assert.equal(await page.locator("#machine-panel").isVisible(), true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.sidebar-nav a[href="#sidebar-layers"]').click();
+  assert.equal(await fill.locator('[data-layer-property="fillAlgorithm"]').isVisible(), true);
+  const overflow = await page.locator(".sidebar").evaluate((sidebar) => sidebar.scrollWidth - sidebar.clientWidth);
+  assert.ok(overflow <= 1, `sidebar overflows horizontally by ${overflow}px`);
+});
+
+test("decorative fill choices generate the same preview and G-code as the saved project", { timeout: 30_000 }, async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  t.after(() => context.close());
+  await context.addInitScript(() => {
+    Object.defineProperty(window, "showSaveFilePicker", { value: undefined, configurable: true });
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  await page.goto(server.url, { waitUntil: "load" });
+  await page.locator("#svg-file-input").setInputFiles({
+    name: "pattern.commburn.json", mimeType: "application/json",
+    buffer: Buffer.from(serializeProject({
+      widthMm: 50, heightMm: 40,
+      layers: [{ id: "fill", operation: "fill", fillSpacingMm: 2 }],
+      elements: [{ id: "box", type: "rect", xMm: 5, yMm: 5, widthMm: 20, heightMm: 20, layerId: "fill" }]
+    }))
+  });
+  const selector = page.locator('[data-layer-property="fillAlgorithm"]');
+  await selector.waitFor({ state: "visible" });
+  for (const algorithm of ["inset", "squares", "zigzag", "hilbert"]) {
+    await selector.selectOption(algorithm);
+    await page.locator("#preview-machine-job").click();
+    await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
+    const gcode = await page.locator("#machine-preview-code").textContent();
+    assert.ok(await page.locator("#machine-path-preview path").count() > 0, algorithm);
+    await page.locator("#machine-preview-dialog .dialog-close").click();
+    const saved = await saveDocument(page);
+    assert.equal(saved.layers[0].fillAlgorithm, algorithm);
+    assert.equal(gcode, renderGrblJob(saved, {
+      maxSpindleSpeed: 1000, laserPowerMode: "M4", startFrom: "absolute", startAnchor: "top-left"
+    }));
+  }
+});
+
+test("changing layer order retains job markers and preview with an unfillable object", { timeout: 30_000 }, async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  t.after(() => context.close());
+  await context.addInitScript(() => {
+    Object.defineProperty(window, "showSaveFilePicker", { value: undefined, configurable: true });
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(server.url, { waitUntil: "load" });
+  const documentModel = {
+    widthMm: 100, heightMm: 60,
+    layers: [{ id: "fill", operation: "fill", fillSpacingMm: 1 }],
+    elements: [
+      { id: "far", type: "rect", xMm: 60, yMm: 20, widthMm: 4, heightMm: 4, layerId: "fill" },
+      { id: "line", type: "path", xMm: 1, yMm: 1, widthMm: 10, heightMm: 0, pathData: "M0 0 L10 0", layerId: "fill" },
+      { id: "near", type: "rect", xMm: 5, yMm: 5, widthMm: 4, heightMm: 4, layerId: "fill" }
+    ]
+  };
+  await page.locator("#svg-file-input").setInputFiles({
+    name: "ordering.commburn.json", mimeType: "application/json",
+    buffer: Buffer.from(serializeProject(documentModel))
+  });
+  const marker = page.locator('#job-markers circle[fill="#1f9d55"]');
+  await page.waitForFunction(() => Number(document.querySelector('#job-markers circle[fill="#1f9d55"]')?.getAttribute("cx")) === 60);
+  await page.locator('[data-layer-property="objectOrder"]').selectOption("nearest");
+  await page.waitForFunction(() => Number(document.querySelector('#job-markers circle[fill="#1f9d55"]')?.getAttribute("cx")) === 5);
+  assert.equal(await marker.count(), 1);
+  await page.locator("#preview-machine-job").click();
+  await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
+  assert.match(await page.locator("#machine-preview-code").textContent(), /G1 X/);
+  assert.deepEqual(errors, []);
+  await page.locator("#machine-preview-dialog .dialog-close").click();
+  const saved = await saveDocument(page);
+  assert.equal(saved.layers[0].objectOrder, "nearest");
+  assert.deepEqual(saved.elements.map(({ id }) => id), ["far", "line", "near"]);
+});
+
 async function scrollSidebarWithoutRedraw(page) {
   await page.locator(".stage").evaluate(async (stage) => {
     window.testStageMutations = 0;

@@ -1,7 +1,7 @@
 import { CommBurnTypeError } from "./i18n.js";
 
 export const PROJECT_FORMAT = "commburn-project";
-export const CURRENT_PROJECT_VERSION = 3;
+export const CURRENT_PROJECT_VERSION = 4;
 
 const CONVERSIONS = new Map([
   [1, (project) => ({
@@ -13,6 +13,10 @@ const CONVERSIONS = new Map([
   [2, (project) => ({
     ...project,
     version: 3
+  })],
+  [3, (project) => ({
+    ...project,
+    version: 4
   })]
 ]);
 

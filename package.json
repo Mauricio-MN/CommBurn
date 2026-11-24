@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@jodit/image-editor": "^0.2.5",
+    "clipper2-ts": "2.0.1-19",
     "imagetracerjs": "^1.2.6",
     "opentype.js": "^2.0.0",
     "serialport": "^13.0.0",

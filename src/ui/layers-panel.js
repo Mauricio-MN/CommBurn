@@ -16,7 +16,11 @@ const FILL_ALGORITHMS = [
   { value: "horizontal-unidirectional", labelKey: "ui.layers.algorithm.unidirectional" },
   { value: "vertical-unidirectional", labelKey: "ui.layers.algorithm.verticalUnidirectional" },
   { value: "diagonal-serpentine", labelKey: "ui.layers.algorithm.diagonal" },
-  { value: "diagonal-crosshatch", labelKey: "ui.layers.algorithm.diagonalCrosshatch" }
+  { value: "diagonal-crosshatch", labelKey: "ui.layers.algorithm.diagonalCrosshatch" },
+  { value: "inset", labelKey: "ui.layers.algorithm.inset" },
+  { value: "squares", labelKey: "ui.layers.algorithm.squares" },
+  { value: "zigzag", labelKey: "ui.layers.algorithm.zigzag" },
+  { value: "hilbert", labelKey: "ui.layers.algorithm.hilbert" }
 ];
 const RASTER_FILL_ALGORITHMS = FILL_ALGORITHMS.filter((value) => ["horizontal-serpentine", "vertical-serpentine", "horizontal-unidirectional", "vertical-unidirectional"].includes(value.value));
 const OBJECT_ORDERS = [
@@ -87,8 +91,16 @@ export class LayersPanel {
 
       const settings = document.createElement("div");
       settings.className = "layer-settings";
+      settings.hidden = layer.id !== activeLayerId;
       const layerElements = elements.filter((element) => element.layerId === layer.id);
       const rasterOnly = layerElements.length > 0 && layerElements.every((element) => element.type === "image");
+      const summary = document.createElement("p");
+      summary.className = "layer-summary";
+      summary.textContent = t("ui.layers.summary", {
+        operation: t(`ui.layers.operation.${rasterOnly ? "raster" : layer.operation}`),
+        power: layer.powerPercent,
+        feed: layer.feedMmPerMinute
+      });
       const operationSelect = rasterOnly
         ? this.createSelect("operation", "raster", [{ value: "raster", labelKey: "ui.layers.operation.raster" }])
         : this.createSelect("operation", layer.operation, OPERATIONS);
@@ -97,9 +109,11 @@ export class LayersPanel {
         operationSelect.title = t("ui.layers.rasterLocked");
       }
       settings.append(
+        this.createGroupHeading("ui.layers.identity"),
         this.createField("ui.layers.operationType", operationSelect),
         this.createField("ui.layers.name", this.createInput("name", layer.name, "text")),
         this.createField("ui.layers.color", this.createInput("color", layer.color, "color")),
+        this.createGroupHeading("ui.layers.parameters"),
         this.createField("ui.layers.feed", this.createInput("feedMmPerMinute", layer.feedMmPerMinute, "number", { min: "0.1", step: "0.1" })),
         this.createField("ui.layers.power", this.createInput("powerPercent", layer.powerPercent, "number", { min: "0.1", max: "100", step: "0.1" })),
         this.createField("ui.layers.passes", this.createInput("passes", layer.passes, "number", { min: "1", max: "100", step: "1" }))
@@ -107,11 +121,10 @@ export class LayersPanel {
       const fillField = this.createField("ui.layers.fillSpacing", this.createInput("fillSpacingMm", layer.fillSpacingMm, "number", { min: "0.05", step: "0.05" }));
       fillField.hidden = layer.operation !== "fill" && !rasterOnly;
       fillField.dataset.fillSetting = "";
-      settings.append(fillField);
-  const algorithmField = this.createField("ui.layers.fillAlgorithm", this.createSelect("fillAlgorithm", layer.fillAlgorithm, rasterOnly ? RASTER_FILL_ALGORITHMS : FILL_ALGORITHMS));
-  algorithmField.hidden = layer.operation !== "fill" && !rasterOnly;
-  algorithmField.dataset.fillSetting = "";
-  settings.append(algorithmField);
+      const algorithmField = this.createField("ui.layers.fillAlgorithm", this.createSelect("fillAlgorithm", layer.fillAlgorithm, rasterOnly ? RASTER_FILL_ALGORITHMS : FILL_ALGORITHMS));
+      algorithmField.hidden = layer.operation !== "fill" && !rasterOnly;
+      algorithmField.dataset.fillSetting = "";
+      settings.append(this.createGroupHeading("ui.layers.pathSettings"), fillField, algorithmField);
       settings.append(this.createField("ui.layers.objectOrder", this.createSelect("objectOrder", layer.objectOrder, OBJECT_ORDERS)));
 
       const switches = document.createElement("div");
@@ -121,7 +134,7 @@ export class LayersPanel {
         this.createToggle("visible", "ui.layers.visible", layer.visible),
         this.createToggle("locked", "ui.layers.locked", layer.locked)
       );
-      item.append(header, settings, switches);
+      item.append(header, summary, settings, switches);
       list.append(item);
     }
     this.root.replaceChildren(list);
@@ -131,10 +144,18 @@ export class LayersPanel {
     this.t = t;
   }
 
+  createGroupHeading(key) {
+    const heading = document.createElement("h3");
+    heading.className = "layer-group-heading";
+    heading.textContent = this.t(key);
+    return heading;
+  }
+
   createField(labelKey, control) {
     const labelText = this.t(labelKey);
     const label = document.createElement("label");
     label.className = "field layer-field";
+    label.dataset.property = control.dataset.layerProperty;
     control.title = this.t("ui.layers.fieldDescription", { label: labelText });
     control.setAttribute("aria-description", control.title);
     label.append(document.createTextNode(labelText), control);

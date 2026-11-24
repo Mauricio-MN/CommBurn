@@ -591,6 +591,7 @@ const server = createServer(async (request, response) => {
     && !/^\/src\/[a-zA-Z0-9_/-]+\.(?:js|css)$/.test(requestedPath)
     && !/^\/src\/core\/fonts\/(?:DejaVuSans|DejaVuSerif|DejaVuSansMono)(?:-(?:Bold|Oblique|BoldOblique))?\.woff$/.test(requestedPath)
     && !/^\/node_modules\/svg-pathdata\/lib\/[a-zA-Z0-9_.-]+\.js$/.test(requestedPath)
+    && requestedPath !== "/node_modules/clipper2-ts/dist/clipper2.min.mjs"
     && requestedPath !== "/node_modules/opentype.js/dist/opentype.mjs"
     && requestedPath !== "/node_modules/@jodit/image-editor/dist/jodit-image-editor.js"
     && requestedPath !== "/node_modules/imagetracerjs/imagetracer_v1.2.6.js") {

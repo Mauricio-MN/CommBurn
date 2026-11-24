@@ -47,7 +47,7 @@ test("version 1 editable projects migrate to the current version without visual 
   assert.equal(serializedAgain.units, "mm");
 });
 
-test("version 2 editable projects migrate to version 3 with regular text and identical SVG", async () => {
+test("version 2 editable projects migrate with regular text and identical SVG", async () => {
   const legacySource = await readFile(new URL("./fixtures/project-v2.json", import.meta.url), "utf8");
   const legacyEnvelope = JSON.parse(legacySource);
   const convertedDocument = parseProject(legacySource);
@@ -57,7 +57,18 @@ test("version 2 editable projects migrate to version 3 with regular text and ide
   assert.equal(convertedDocument.elements[0].fontStyle, "normal");
   assert.deepEqual(convertedDocument, expectedDocument);
   assert.equal(renderSvg(convertedDocument), renderSvg(expectedDocument));
-  assert.equal(JSON.parse(serializeProject(convertedDocument)).version, 3);
+  assert.equal(JSON.parse(serializeProject(convertedDocument)).version, CURRENT_PROJECT_VERSION);
+});
+
+test("version 3 projects migrate without changing model, SVG, or fill settings", async () => {
+  const source = await readFile(new URL("./fixtures/project-v3.json", import.meta.url), "utf8");
+  const envelope = JSON.parse(source);
+  const expected = createDocument(envelope.document);
+  const migrated = parseProject(source);
+  assert.equal(convertProjectEnvelope(envelope).version, 4);
+  assert.deepEqual(migrated, expected);
+  assert.equal(renderSvg(migrated), renderSvg(expected));
+  assert.deepEqual(parseProject(serializeProject(migrated)), expected);
 });
 
 test("bold and italic text round-trips through the project format", () => {

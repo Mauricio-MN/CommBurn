@@ -94,9 +94,14 @@ export default Object.freeze({
       showMarkers: "Show job start and end on the drawing",
       coordinatesHelp: "For absolute coordinates, set the controller zero. For current position, place the head at the chosen drawing point: the job uses relative moves without changing zero. Check manually that the whole path fits the machine; CommBurn does not read sensors."
     },
+    sidebar: { label: "Work tools", navigation: "Jump to section", tools: "Tools", layers: "Layers", create: "Create", area: "Area", machine: "Machine" },
     layers: {
       title: "Work layers",
       description: "Independent operation, power, and feed",
+      summary: "{operation} · {power}% · {feed} mm/min",
+      identity: "Layer",
+      parameters: "Laser settings",
+      pathSettings: "Path",
       add: "+ New layer",
       addTooltip: "Add an engraving, cutting, or fill layer.",
       help: "Disabled layers are not sent; hidden layers are not displayed.",
@@ -131,7 +136,11 @@ export default Object.freeze({
         unidirectional: "Horizontal unidirectional",
         verticalUnidirectional: "Vertical unidirectional",
         diagonal: "Diagonal serpentine (45°)",
-        diagonalCrosshatch: "Diagonal crosshatch (45° + 135°)"
+        diagonalCrosshatch: "Diagonal crosshatch (45° + 135°)",
+        inset: "Inset contours",
+        squares: "Squares",
+        zigzag: "Zigzag",
+        hilbert: "Hilbert curve"
       },
       order: { document: "List order", nearest: "Nearest first", centerOut: "Center outward" }
     },
@@ -503,6 +512,11 @@ export default Object.freeze({
       duplicateId: "Duplicate object ID: {id}."
     },
     grbl: {
+      patternTooComplex: "The fill pattern for {id} is too complex. Increase the spacing or simplify the shape.",
+      patternPrecision: "The fill spacing or geometry for {id} is below the supported precision (0.000001 mm).",
+      patternClippingFailed: "Could not clip the fill pattern for {id}.",
+      patternNoCoverage: "The fill pattern does not reach {id}. Reduce the spacing or choose another pattern.",
+      unsupportedRasterPattern: "The fill pattern is not supported for raster image {id}.",
       resetNotConfirmed: "Controller reset was not confirmed. Check the machine and disconnect before starting another job.",
       invalidLaserPowerMode: "Unsupported laser power mode: {mode}.",
       laserModeRequired: "Dynamic power requires the controller to report $32=1. Check its configuration or select M3.",

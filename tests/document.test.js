@@ -460,6 +460,9 @@ test("raster layers honour vertical and unidirectional fill algorithms", () => {
     layers: [{ id: "L1", name: "Img", operation: "engrave", color: "#000000", feedMmPerMinute: 1000, powerPercent: 50, passes: 1, fillSpacingMm: 1, fillAlgorithm, objectOrder: "document", enabled: true, visible: true, locked: false }],
     elements: [{ id: "photo", type: "image", xMm: 10, yMm: 10, widthMm: 4, heightMm: 2, layerId: "L1", imageDataUri: "data:image/png;base64,iVBORw0KGgo=" }]
   });
+  assert.throws(() => planGrblJob(rasterDocument("hilbert"), { maxSpindleSpeed: 1000, rasters }), {
+    code: "grbl.unsupportedRasterPattern"
+  });
   const scanOf = (fillAlgorithm) => planGrblJob(rasterDocument(fillAlgorithm), { maxSpindleSpeed: 1000, rasters, imageMode: "grayscale" })
     .paths.filter(({ kind }) => kind === "work");
   const vertical = scanOf("vertical-unidirectional");

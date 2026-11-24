@@ -82,6 +82,18 @@ test("CommBurn SVG round-trip restores layer colors, operations, parameters, and
   assert.match(renderSvg(imported), /data-color="#123abc"/);
 });
 
+test("SVG round-trip preserves decorative fill algorithms", () => {
+  for (const fillAlgorithm of ["inset", "squares", "zigzag", "hilbert"]) {
+    const document = {
+      widthMm: 30, heightMm: 30,
+      layers: [{ id: "fill", name: "Fill", operation: "fill", fillAlgorithm }],
+      elements: [{ id: "box", type: "rect", xMm: 2, yMm: 2, widthMm: 10, heightMm: 10, layerId: "fill" }]
+    };
+    const imported = importSvg(renderSvg(document), { idPrefix: "restored" });
+    assert.equal(imported.layers.find((layer) => layer.name === "Fill").fillAlgorithm, fillAlgorithm);
+  }
+});
+
 test("SVG can be imported entirely into the explicitly selected active layer", () => {
   const source = renderSvg({
     widthMm: 50,

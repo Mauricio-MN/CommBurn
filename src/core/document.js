@@ -2,6 +2,7 @@ import { DEFAULT_LAYER, normalizeLayers } from "./layers.js";
 import { CommBurnRangeError, CommBurnTypeError } from "./i18n.js";
 import { createTextOutlinePathData } from "./text-to-path.js";
 import { decodeRaster, rasterLevels, rasterRowRuns } from "./raster-engrave.js";
+import { patternFillPaths } from "./pattern-fill.js";
 import { SVGPathData } from "../../node_modules/svg-pathdata/lib/SVGPathData.module.js";
 
 const ORIGIN_POINTS = new Set(["top-left", "top-center", "top-right", "left-center", "center", "right-center", "bottom-left", "bottom-center", "bottom-right"]);
@@ -760,6 +761,11 @@ function rasterScanLines(levels, widthPx, heightPx, vertical) {
 }
 
 function createImageWorkPaths(document, layer, element, raster, mode) {
+  if (["inset", "squares", "zigzag", "hilbert"].includes(layer.fillAlgorithm)) {
+    throw new CommBurnRangeError("grbl.unsupportedRasterPattern", { id: element.id }, {
+      message: `Fill pattern is not supported for raster image ${element.id}`
+    });
+  }
   const decoded = decodeRaster(element.id, raster);
   const { levels, maxLevel } = rasterLevels(decoded, mode);
   const pixelWidth = element.widthMm / decoded.widthPx;
@@ -818,7 +824,9 @@ function createElementWorkPaths(document, layer, element) {
     [geometryElement.xMm, geometryElement.yMm]
   ];
   const sourcePaths = layer.operation === "fill"
-    ? geometryElement.type === "rect" && DIAGONAL_FILL_ANGLES[layer.fillAlgorithm]
+    ? ["inset", "squares", "zigzag", "hilbert"].includes(layer.fillAlgorithm)
+      ? patternFillPaths(geometryElement, geometryElement.type === "rect" ? [outline] : flattenVectorPath(geometryElement), layer.fillAlgorithm, layer.fillSpacingMm)
+    : geometryElement.type === "rect" && DIAGONAL_FILL_ANGLES[layer.fillAlgorithm]
       ? fillVectorPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm, [outline])
     : geometryElement.type === "rect"
       ? fillPaths(geometryElement, layer.fillAlgorithm, layer.fillSpacingMm)
@@ -890,7 +898,7 @@ function orderLayerElements(document, layer, elements, workByElement, startPoint
     throw new RangeError(`Layer ${layer.name} has too many objects for nearest-neighbor ordering; use document order or center-out`);
   }
 
-  const remaining = [...elements];
+  const remaining = elements.filter((element) => workByElement.get(element.id).length > 0);
   const ordered = [];
   let current = startPoint ?? { xMm: 0, yMm: 0 };
   while (remaining.length > 0) {

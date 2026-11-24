@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, planGrblJob, renderGrblJob, renderSvg } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg } from "../src/core/document.js";
+import { parseProject, serializeProject } from "../src/core/project.js";
+import { interpretGcodeLine } from "../src/machine/motion-model.js";
 
 const machineSettings = { maxSpindleSpeed: 1000 };
 
@@ -281,6 +283,99 @@ test("GRBL fill algorithms create horizontal, vertical, crosshatch, and unidirec
   assert.match(crosshatch.gcode, /M5\nG0 X/);
 });
 
+test("decorative vector fills clip every work segment to the shape and around holes", () => {
+  for (const algorithm of ["inset", "squares", "zigzag", "hilbert"]) {
+    const input = {
+      widthMm: 40, heightMm: 40,
+      layers: [{ id: "fill", operation: "fill", fillSpacingMm: 2, fillAlgorithm: algorithm, powerPercent: 35 }],
+      elements: [{
+        id: "shape", type: "path", xMm: 5, yMm: 5, widthMm: 20, heightMm: 20,
+        pathData: "M0 0 L20 0 L20 20 L0 20 Z M8 8 L12 8 L12 12 L8 12 Z", layerId: "fill"
+      }]
+    };
+    const plan = planGrblJob(input, machineSettings);
+    const work = plan.paths.filter(({ kind }) => kind === "work");
+    assert.ok(work.length > 0, algorithm);
+    const expected = work.flatMap(({ points }) => points);
+    const actual = [];
+    let modal = { motion: "G0", relative: false, feedMmPerMinute: undefined };
+    for (const line of plan.gcode.trim().split("\n")) {
+      const parsed = interpretGcodeLine(line, modal);
+      modal = parsed.modal;
+      if (parsed.motion) {
+        if (parsed.motion.rapid) assert.ok(plan.gcode.includes(`M5\n${line}`), `${algorithm}: rapid must be laser-off`);
+        else actual.push({ xMm: parsed.motion.x, yMm: parsed.motion.y });
+      }
+    }
+    assert.deepEqual(actual, work.flatMap(({ points }) => points.slice(1).map(({ xMm, yMm }) => ({ xMm, yMm }))), algorithm);
+    assert.match(plan.gcode, /M4 S350/);
+    for (const path of work) {
+      for (let index = 1; index < path.points.length; index += 1) {
+        const a = path.points[index - 1], b = path.points[index];
+        for (let step = 0; step <= 20; step += 1) {
+          const x = a.xMm + (b.xMm - a.xMm) * step / 20;
+          const y = a.yMm + (b.yMm - a.yMm) * step / 20;
+          assert.ok(x >= 5 - 1e-6 && x <= 25 + 1e-6 && y >= 5 - 1e-6 && y <= 25 + 1e-6, algorithm);
+          assert.ok(!(x > 13 + 1e-6 && x < 17 - 1e-6 && y > 13 + 1e-6 && y < 17 - 1e-6), algorithm);
+        }
+      }
+    }
+    assert.ok(expected.length > 1);
+    const restored = parseProject(serializeProject(input));
+    assert.equal(restored.layers[0].fillAlgorithm, algorithm);
+    assert.equal(renderSvg(restored), renderSvg(input));
+  }
+});
+
+test("decorative fills reject unsafe complexity and patterns that miss a nonempty shape", () => {
+  const document = {
+    widthMm: 40, heightMm: 40,
+    layers: [{ id: "fill", operation: "fill", fillAlgorithm: "hilbert", fillSpacingMm: 0.001 }],
+    elements: [{ id: "shape", type: "rect", xMm: 5, yMm: 5, widthMm: 20, heightMm: 20, layerId: "fill" }]
+  };
+  assert.throws(() => planGrblJob(document, machineSettings), { code: "grbl.patternTooComplex" });
+  document.layers[0].fillSpacingMm = 1e-8;
+  assert.throws(() => planGrblJob(document, machineSettings), { code: "grbl.patternPrecision" });
+  document.layers[0].fillSpacingMm = 100;
+  assert.throws(() => planGrblJob(document, machineSettings), { code: "grbl.patternNoCoverage" });
+});
+
+test("decorative patterns follow object rotation and relative job placement", () => {
+  for (const algorithm of ["inset", "squares", "zigzag", "hilbert"]) {
+    const document = {
+      widthMm: 60, heightMm: 60,
+      origin: { corner: "bottom-right", flipX: true },
+      layers: [{ id: "fill", operation: "fill", fillAlgorithm: algorithm, fillSpacingMm: 2 }],
+      elements: [{ id: "shape", type: "rect", xMm: 10, yMm: 10, widthMm: 20, heightMm: 10, rotationDeg: 90, layerId: "fill" }]
+    };
+    const plan = planGrblJob(document, { ...machineSettings, startFrom: "objects", startAnchor: "center" });
+    const work = planToDocumentSpace(document, plan).paths.filter(({ kind }) => kind === "work");
+    assert.ok(work.length > 0, algorithm);
+    for (const { points } of work) for (const { xMm, yMm } of points) {
+      assert.ok(xMm >= 15 - 1e-6 && xMm <= 25 + 1e-6 && yMm >= 5 - 1e-6 && yMm <= 25 + 1e-6, algorithm);
+    }
+    assert.match(plan.gcode, /^G21\nG91\n/);
+    assert.match(plan.gcode, /G90\n$/);
+  }
+});
+
+test("decorative patterns cover both lobes of a self-intersection and a separate region", () => {
+  for (const algorithm of ["inset", "squares", "zigzag", "hilbert"]) {
+    const plan = planGrblJob({
+      widthMm: 30, heightMm: 30,
+      layers: [{ id: "fill", operation: "fill", fillSpacingMm: 1, fillAlgorithm: algorithm }],
+      elements: [{
+        id: "shape", type: "path", layerId: "fill", xMm: 1, yMm: 1, widthMm: 20, heightMm: 10,
+        pathData: "M0 0 L10 10 L0 10 L10 0 Z M12 0 L20 0 L20 10 L12 10 Z"
+      }]
+    }, machineSettings);
+    const points = plan.paths.filter(({ kind }) => kind === "work").flatMap(({ points }) => points);
+    assert.ok(points.some(({ xMm, yMm }) => xMm < 11 && yMm < 5.9), algorithm);
+    assert.ok(points.some(({ xMm, yMm }) => xMm < 11 && yMm > 6.1), algorithm);
+    assert.ok(points.some(({ xMm }) => xMm > 13), algorithm);
+  }
+});
+
 test("GRBL object ordering supports nearest-next and center-out, and reports rapid travel", () => {
   const base = {
     widthMm: 100,
@@ -311,6 +406,29 @@ test("GRBL object ordering supports nearest-next and center-out, and reports rap
   assert.equal(renderGrblJob({ ...base, layers: [{ id: "engrave" }] }, machineSettings), planGrblJob({
     ...base, layers: [{ id: "engrave" }]
   }, machineSettings).gcode);
+});
+
+test("nearest ordering handles objects without fill paths without losing the remaining job", () => {
+  const document = {
+    widthMm: 100, heightMm: 60,
+    layers: [{ id: "fill", operation: "fill", fillSpacingMm: 1 }],
+    elements: [
+      { id: "far", type: "rect", xMm: 60, yMm: 20, widthMm: 4, heightMm: 4, layerId: "fill" },
+      { id: "line", type: "path", xMm: 1, yMm: 1, widthMm: 10, heightMm: 0, pathData: "M0 0 L10 0", layerId: "fill" },
+      { id: "near", type: "rect", xMm: 5, yMm: 5, widthMm: 4, heightMm: 4, layerId: "fill" }
+    ]
+  };
+  for (const objectOrder of ["document", "center-out", "nearest"]) {
+    const input = { ...document, layers: [{ ...document.layers[0], objectOrder }] };
+    const plan = planGrblJob(input, machineSettings);
+    const ids = [...new Set(plan.paths.filter(({ kind }) => kind === "work").map(({ elementId }) => elementId))];
+    assert.deepEqual(new Set(ids), new Set(["far", "near"]));
+    if (objectOrder === "nearest") assert.deepEqual(ids, ["near", "far"]);
+    assert.ok(jobReferencePoints(input, machineSettings)?.start);
+    assert.equal(createDocument(input).elements.length, 3);
+  }
+  const empty = { ...document, layers: [{ ...document.layers[0], objectOrder: "nearest" }], elements: [document.elements[1]] };
+  assert.throws(() => planGrblJob(empty, machineSettings), /no fillable paths/);
 });
 
 test("layer fill and object-order algorithms reject unknown values", () => {

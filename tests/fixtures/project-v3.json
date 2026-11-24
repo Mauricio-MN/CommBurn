@@ -1,0 +1,16 @@
+{
+  "format": "commburn-project",
+  "version": 3,
+  "units": "mm",
+  "document": {
+    "widthMm": 60,
+    "heightMm": 30,
+    "layers": [
+      { "id": "fill", "operation": "fill", "fillSpacingMm": 0.5, "fillAlgorithm": "diagonal-crosshatch" }
+    ],
+    "elements": [
+      { "id": "shape", "type": "rect", "xMm": 2, "yMm": 3, "widthMm": 15, "heightMm": 10, "layerId": "fill" },
+      { "id": "text", "type": "text", "xMm": 5, "yMm": 25, "text": "Test", "fontSizeMm": 4, "fontWeight": "bold", "fontStyle": "italic", "layerId": "fill" }
+    ]
+  }
+}

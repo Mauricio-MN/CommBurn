@@ -94,9 +94,14 @@ export default Object.freeze({
       showMarkers: "Mostrar começo e fim do trabalho no desenho",
       coordinatesHelp: "Em coordenadas absolutas, defina o zero no controlador. Na posição atual, coloque a cabeça no ponto escolhido do desenho: o trabalho usa movimentos relativos sem alterar o zero. Confira manualmente se toda a trajetória cabe na máquina; o CommBurn não lê sensores."
     },
+    sidebar: { label: "Ferramentas do trabalho", navigation: "Ir para seção", tools: "Ferramentas", layers: "Camadas", create: "Criar", area: "Área", machine: "Máquina" },
     layers: {
       title: "Camadas de trabalho",
       description: "Operação, potência e avanço independentes",
+      summary: "{operation} · {power}% · {feed} mm/min",
+      identity: "Camada",
+      parameters: "Parâmetros do laser",
+      pathSettings: "Trajetória",
       add: "+ Nova camada",
       addTooltip: "Adicionar uma camada de gravação, corte ou preenchimento.",
       help: "Camadas desativadas não são enviadas; camadas ocultas não aparecem no desenho.",
@@ -131,7 +136,11 @@ export default Object.freeze({
         unidirectional: "Horizontal unidirecional",
         verticalUnidirectional: "Vertical unidirecional",
         diagonal: "Diagonal serpentina (45°)",
-        diagonalCrosshatch: "Diagonal cruzada (45° + 135°)"
+        diagonalCrosshatch: "Diagonal cruzada (45° + 135°)",
+        inset: "Contornos internos",
+        squares: "Quadrados",
+        zigzag: "Zigue-zague",
+        hilbert: "Curva de Hilbert"
       },
       order: { document: "Ordem da lista", nearest: "Mais próximo primeiro", centerOut: "Centro para bordas" }
     },
@@ -504,6 +513,11 @@ export default Object.freeze({
       duplicateId: "ID de objeto duplicado: {id}."
     },
     grbl: {
+      patternTooComplex: "O padrão de preenchimento de {id} é complexo demais. Aumente o espaçamento ou simplifique a forma.",
+      patternPrecision: "O espaçamento ou a geometria de {id} está abaixo da precisão suportada para padrões (0,000001 mm).",
+      patternClippingFailed: "Não foi possível recortar o padrão de preenchimento de {id}.",
+      patternNoCoverage: "O padrão não alcança {id}. Reduza o espaçamento ou escolha outro padrão.",
+      unsupportedRasterPattern: "O padrão de preenchimento não é compatível com a imagem raster {id}.",
       resetNotConfirmed: "O reset da controladora não foi confirmado. Verifique a máquina e desconecte antes de iniciar outro trabalho.",
       invalidLaserPowerMode: "Modo de potência do laser não suportado: {mode}.",
       laserModeRequired: "Potência dinâmica exige que a controladora informe $32=1. Confira a configuração ou selecione M3.",

@@ -35,11 +35,24 @@
     </header>
 
     <main class="workspace">
-      <aside class="sidebar" aria-label="Ferramentas do trabalho">
+      <aside class="sidebar" aria-label="Ferramentas do trabalho" data-i18n-aria-label="ui.sidebar.label">
+        <nav class="sidebar-nav" aria-label="Ir para seção" data-i18n-aria-label="ui.sidebar.navigation">
+          <a href="#action-toolbar" data-i18n="ui.sidebar.tools">Ferramentas</a>
+          <a href="#sidebar-layers" data-i18n="ui.sidebar.layers">Camadas</a>
+          <a href="#sidebar-create" data-i18n="ui.sidebar.create">Criar</a>
+          <a href="#sidebar-area" data-i18n="ui.sidebar.area">Área</a>
+          <a href="#machine-panel" data-i18n="ui.sidebar.machine">Máquina</a>
+        </nav>
         <section class="panel tool-panel" data-ui-module="action-toolbar" data-extension-slot="toolbar-tools">
           <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌘</span><div><h2 data-i18n="ui.action.title">Ação</h2><p data-i18n="ui.action.description">Escolha como interagir com os objetos</p></div></div>
           <div class="tool-grid" id="action-toolbar" role="toolbar" aria-label="Ferramentas de objeto" data-i18n-aria-label="ui.action.toolbar"></div>
           <p class="tool-status" id="tool-status" role="status" data-i18n="ui.action.selectStatus">Selecionar: clique, arraste uma caixa ou use Shift+clique.</p>
+        </section>
+        <section class="panel layers-panel" id="sidebar-layers" data-ui-module="layers" data-extension-slot="layers" aria-labelledby="layers-title">
+          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">▤</span><div><h2 id="layers-title" data-i18n="ui.layers.title">Camadas de trabalho</h2><p data-i18n="ui.layers.description">Operação, potência e avanço independentes</p></div></div>
+          <div class="layers-list" id="layers-list" aria-label="Lista de camadas" data-i18n-aria-label="ui.layers.list"></div>
+          <button class="button button-secondary full-width layer-add" id="add-layer" type="button" data-tooltip="Adicionar uma camada de gravação, corte ou preenchimento." data-i18n-title="ui.layers.addTooltip" data-i18n="ui.layers.add">+ Nova camada</button>
+          <p class="help-text" data-i18n="ui.layers.help">Camadas desativadas não são enviadas; camadas ocultas não aparecem no desenho.</p>
         </section>
         <section class="panel" data-ui-module="svg-import" data-extension-slot="document-settings">
           <div class="panel-heading"><span class="section-icon icon-violet" aria-hidden="true">↥</span><div><h2 data-i18n="ui.import.title">Importar vetor ou imagem</h2><p data-i18n="ui.import.description">SVG editável por cor ou na camada atual</p></div></div>
@@ -47,7 +60,7 @@
           <button class="button button-secondary full-width" type="button" data-action="import-svg" data-tooltip="Importe SVG como vetores editáveis por cor ou na camada atual." data-i18n-title="ui.import.tooltip" data-i18n="ui.import.button">Importar arquivo</button>
         </section>
 
-        <section class="panel" data-ui-module="document-settings" data-extension-slot="document-settings">
+        <section class="panel" id="sidebar-area" data-ui-module="document-settings" data-extension-slot="document-settings">
           <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">▦</span><div><h1 data-i18n="ui.document.title">Área de trabalho</h1><p data-i18n="ui.document.description">Dimensões reais do material</p></div></div>
           <div class="field-row">
             <label class="field" data-i18n="ui.document.width">Largura<span class="input-with-unit"><input id="width" type="number" min="0.1" step="0.1" value="180"><span>mm</span></span></label>
@@ -100,14 +113,7 @@
           <p class="help-text" data-i18n="ui.document.coordinatesHelp">Em coordenadas absolutas, defina o zero no controlador. Na posição atual, coloque a cabeça no ponto escolhido do desenho: o trabalho usa movimentos relativos sem alterar o zero. Confira manualmente se toda a trajetória cabe na máquina; o CommBurn não lê sensores.</p>
         </section>
 
-        <section class="panel layers-panel" data-ui-module="layers" data-extension-slot="layers" aria-labelledby="layers-title">
-          <div class="panel-heading"><span class="section-icon icon-orange" aria-hidden="true">▤</span><div><h2 id="layers-title" data-i18n="ui.layers.title">Camadas de trabalho</h2><p data-i18n="ui.layers.description">Operação, potência e avanço independentes</p></div></div>
-          <div class="layers-list" id="layers-list" aria-label="Lista de camadas" data-i18n-aria-label="ui.layers.list"></div>
-          <button class="button button-secondary full-width layer-add" id="add-layer" type="button" data-tooltip="Adicionar uma camada de gravação, corte ou preenchimento." data-i18n-title="ui.layers.addTooltip" data-i18n="ui.layers.add">+ Nova camada</button>
-          <p class="help-text" data-i18n="ui.layers.help">Camadas desativadas não são enviadas; camadas ocultas não aparecem no desenho.</p>
-        </section>
-
-        <section class="panel" data-ui-module="object-defaults" data-extension-slot="object-creation">
+        <section class="panel" id="sidebar-create" data-ui-module="object-defaults" data-extension-slot="object-creation">
           <div class="panel-heading"><span class="section-icon icon-blue" aria-hidden="true">⌖</span><div><h2 data-i18n="ui.creation.startPosition">Posição inicial</h2><p data-i18n="ui.creation.startPositionDescription">Usada ao criar texto ou forma</p></div></div>
           <div class="field-row">
             <label class="field" data-i18n="ui.creation.x">X<span class="input-with-unit"><input id="new-x" type="number" step="0.1" value="10"><span>mm</span></span></label>

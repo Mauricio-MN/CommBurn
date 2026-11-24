@@ -12,6 +12,8 @@ const files = [
   "mouse-cursor-presentation.svg",
   ["node_modules/svgson/dist/svgson.umd.js", "vendor/svgson.js"],
   ["node_modules/opentype.js/dist/opentype.mjs", "node_modules/opentype.js/dist/opentype.mjs"],
+  ["node_modules/clipper2-ts/dist/clipper2.min.mjs", "node_modules/clipper2-ts/dist/clipper2.min.mjs"],
+  ["node_modules/clipper2-ts/LICENSE", "node_modules/clipper2-ts/LICENSE"],
   ["node_modules/@jodit/image-editor/dist/jodit-image-editor.js", "node_modules/@jodit/image-editor/dist/jodit-image-editor.js"],
   ["node_modules/imagetracerjs/imagetracer_v1.2.6.js", "node_modules/imagetracerjs/imagetracer_v1.2.6.js"]
 ];
