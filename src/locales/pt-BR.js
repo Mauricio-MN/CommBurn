@@ -60,7 +60,8 @@ export default Object.freeze({
       button: "Importar arquivo",
       confirm: "Importar SVG",
       cancel: "Cancelar importação",
-      styleIgnored: "{count} configuração(ões) de estilo do SVG não foram aplicadas (filtros, gradientes, elementos ocultos ou propriedades sem suporte)."
+      styleIgnored: "{count} configuração(ões) de estilo do SVG não foram aplicadas (filtros, gradientes, elementos ocultos ou propriedades sem suporte).",
+      missingFonts: "Fonte(s) não instalada(s) neste computador: {fonts}. As fontes não são incorporadas ao arquivo; o texto aparece com uma fonte genérica até você escolher outra."
     },
     document: {
       title: "Área de trabalho",

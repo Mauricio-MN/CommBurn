@@ -4,6 +4,17 @@ const SAMPLE_TEXT = "mmmmmmmmmmlli0WgyQ@#";
 const cache = new Map();
 let measureContext = null;
 
+// Distinct font names, in document order, used by the text objects whose ids are in missingIds.
+export function missingFontFamilies(elements, missingIds) {
+  const families = [];
+  for (const element of elements) {
+    if (element.type === "text" && missingIds.has(element.id) && !families.includes(element.fontFamily)) {
+      families.push(element.fontFamily);
+    }
+  }
+  return families;
+}
+
 // A name is installed when it renders differently from every generic fallback. Browsers
 // do not expose installed system fonts without permission, so this measures glyph widths.
 export function isFontInstalled(name) {

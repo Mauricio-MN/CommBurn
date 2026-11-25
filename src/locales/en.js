@@ -60,7 +60,8 @@ export default Object.freeze({
       button: "Import file",
       confirm: "Import SVG",
       cancel: "Cancel import",
-      styleIgnored: "{count} SVG style setting(s) were not applied (filters, gradients, hidden elements, or unsupported properties)."
+      styleIgnored: "{count} SVG style setting(s) were not applied (filters, gradients, hidden elements, or unsupported properties).",
+      missingFonts: "Font(s) not installed on this computer: {fonts}. Fonts are not embedded in the file; the text shows in a generic font until you choose another."
     },
     document: {
       title: "Work area",

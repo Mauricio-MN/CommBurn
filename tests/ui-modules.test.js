@@ -427,6 +427,65 @@ test("system font listing reports unsupported, failed, and sorted de-duplicated 
   );
 });
 
+test("font fields clear on focus to list every option and restore untouched values without a change", async () => {
+  const { showAllFontOptionsOnFocus } = await import("../src/ui/font-options.js");
+  const input = new EventTarget();
+  input.value = "Arial";
+  showAllFontOptionsOnFocus(input);
+  let changes = 0;
+  input.addEventListener("change", () => { changes += 1; });
+
+  input.dispatchEvent(new Event("focus"));
+  assert.equal(input.value, "");
+  // Clearing makes the browser report an empty change: it is swallowed and the font is kept.
+  input.dispatchEvent(new Event("change"));
+  assert.equal(input.value, "Arial");
+  assert.equal(changes, 0);
+  input.dispatchEvent(new Event("blur"));
+  assert.equal(input.value, "Arial");
+
+  input.dispatchEvent(new Event("focus"));
+  input.value = "Verdana";
+  input.dispatchEvent(new Event("change"));
+  assert.equal(changes, 1);
+  input.dispatchEvent(new Event("blur"));
+  assert.equal(input.value, "Verdana");
+
+  input.dispatchEvent(new Event("focus"));
+  input.dispatchEvent(new Event("blur"));
+  assert.equal(input.value, "Verdana");
+});
+
+test("missing font families are listed once per name, only for text objects that lack the font", async () => {
+  const { missingFontFamilies } = await import("../src/font-availability.js");
+  const elements = [
+    { id: "a", type: "text", fontFamily: "Zapfino" },
+    { id: "b", type: "text", fontFamily: "Zapfino" },
+    { id: "c", type: "text", fontFamily: "Arial" },
+    { id: "d", type: "rect" },
+    { id: "e", type: "text", fontFamily: "Papyrus" }
+  ];
+  assert.deepEqual(missingFontFamilies(elements, new Set(["a", "b", "d", "e"])), ["Zapfino", "Papyrus"]);
+  assert.deepEqual(missingFontFamilies(elements, new Set()), []);
+});
+
+test("desktop permission requests are granted only to the local server origin", async () => {
+  const { isTrustedPermissionRequest } = await import("../src/core/desktop-permissions.mjs");
+  const origin = "http://127.0.0.1:4173";
+  assert.equal(isTrustedPermissionRequest("http://127.0.0.1:4173/", origin), true);
+  assert.equal(isTrustedPermissionRequest("http://127.0.0.1:4173", origin), true);
+  assert.equal(isTrustedPermissionRequest("http://127.0.0.1:9999/", origin), false);
+  assert.equal(isTrustedPermissionRequest("https://example.com/", origin), false);
+  assert.equal(isTrustedPermissionRequest("", origin), false);
+  assert.equal(isTrustedPermissionRequest(undefined, origin), false);
+});
+
+test("loading a project or SVG warns about fonts missing on this computer", () => {
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /Projeto CommBurn carregado e validado\.\$\{missingFontNotice\(\)\}/);
+  assert.match(app, /\$\{imageNotice\}\$\{missingFontNotice\(\)\}/);
+});
+
 test("text creation and inspector expose bold and italic toggles", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   for (const id of ["new-font-bold", "new-font-italic", "object-font-bold", "object-font-italic", "load-system-fonts", "font-list-status"]) {

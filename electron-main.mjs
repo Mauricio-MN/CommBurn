@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startServer } from "./server.mjs";
 import { syncBundledPlugins } from "./src/core/bundled-plugins.mjs";
+import { isTrustedPermissionRequest } from "./src/core/desktop-permissions.mjs";
 
 const PROJECT_SAVE_LIMIT_BYTES = 50 * 1024 * 1024;
 const savedProjectPaths = new Set();
@@ -63,6 +64,14 @@ function createWindow() {
   mainWindow.setMenuBarVisibility(false);
 
   const trustedOrigin = new URL(serverHandle.url).origin;
+  // Explicitly allows the local origin (including "local-fonts" for the installed font list).
+  const { session } = mainWindow.webContents;
+  session.setPermissionRequestHandler((_webContents, _permission, callback, details) => {
+    callback(isTrustedPermissionRequest(details.requestingUrl, trustedOrigin));
+  });
+  session.setPermissionCheckHandler((_webContents, _permission, requestingOrigin) => (
+    isTrustedPermissionRequest(requestingOrigin, trustedOrigin)
+  ));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };

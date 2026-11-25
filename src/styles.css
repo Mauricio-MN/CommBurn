@@ -80,6 +80,7 @@ button, summary, select { cursor: pointer; }
 .sidebar :is(#action-toolbar, #sidebar-layers, #sidebar-create, #sidebar-area, #machine-panel) { scroll-margin-block: 12px; }
 .panel { min-width: 0; padding: 15px; background: #fff; border: 1px solid #e3e9f1; border-radius: 12px; box-shadow: 0 2px 8px rgb(35 51 82 / 4%); }
 .field[hidden] { display: none; }
+.button[hidden] { display: none; }
 .machine-panel[hidden] { display: none; }
 .tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
 .tool-button { display: grid; min-width: 0; min-height: 67px; justify-items: center; align-content: center; gap: 4px; padding: 7px 4px; color: #5e6b80; background: #fff; border: 1px solid #e8edf4; border-radius: 8px; font-size: 10px; }

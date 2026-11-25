@@ -1,8 +1,8 @@
 import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderSvg, unlockedElementIds } from "./core/document.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
-import { isFontInstalled } from "./font-availability.js";
-import { listSystemFontFamilies } from "./ui/font-options.js";
+import { isFontInstalled, missingFontFamilies } from "./font-availability.js";
+import { listSystemFontFamilies, showAllFontOptionsOnFocus } from "./ui/font-options.js";
 import { parseProject, serializeProject } from "./core/project.js";
 import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
 import { CanvasController } from "./ui/canvas-controller.js";
@@ -169,13 +169,18 @@ const fontOptionsList = byId("font-family-options");
 const fontListStatus = byId("font-list-status");
 
 // Installed fonts need a user gesture and browser permission; the typed-name flow stays available either way.
+let systemFontsState = "idle";
 async function loadSystemFonts() {
+  if (systemFontsState === "loading") return;
+  systemFontsState = "loading";
   const { status, families } = await listSystemFontFamilies(window);
   if (status !== "loaded") {
+    systemFontsState = "idle";
     fontListStatus.hidden = false;
     fontListStatus.textContent = i18n.t(status === "unsupported" ? "ui.creation.systemFontsUnsupported" : "ui.creation.systemFontsDenied");
     return;
   }
+  systemFontsState = "loaded";
   fontListStatus.hidden = true;
   fontOptionsList.querySelectorAll("option[data-system-font]").forEach((option) => option.remove());
   for (const family of families) {
@@ -186,6 +191,19 @@ async function loadSystemFonts() {
   }
 }
 byId("load-system-fonts").addEventListener("click", loadSystemFonts);
+// The desktop app lists installed fonts on the first click in a font field (the gesture the browser
+// API requires), so it needs no button. Fonts are never embedded in project or SVG files.
+if (window.commburnDesktop) {
+  byId("load-system-fonts").hidden = true;
+  for (const input of [fontFamilyInput, byId("object-font")]) {
+    input.addEventListener("pointerdown", () => {
+      if (systemFontsState === "idle") void loadSystemFonts();
+    });
+  }
+}
+// Must run before the editor's own "change" listeners are registered.
+showAllFontOptionsOnFocus(fontFamilyInput);
+showAllFontOptionsOnFocus(byId("object-font"));
 
 // Blank input falls back to the generic sans-serif family, matching the default in new projects.
 function normalizeFontFamily(value) {
@@ -2131,7 +2149,13 @@ async function importSvgFile(file) {
     : `SVG importado: ${imported.elements.length} objeto(s) editável(is), em milímetros.`;
   showNotice(`${styleCount
     ? `${importNotice} ${i18n.t("ui.import.styleIgnored", { count: styleCount })}`
-    : importNotice}${imageNotice}`);
+    : importNotice}${imageNotice}${missingFontNotice()}`);
+}
+
+// Fonts are never embedded in project or SVG files, so loading one that uses a font this computer lacks is warned about.
+function missingFontNotice() {
+  const families = missingFontFamilies(currentDocument.elements, missingFontElementIds);
+  return families.length ? ` ${i18n.t("ui.import.missingFonts", { fonts: families.join(", ") })}` : "";
 }
 
 async function importProjectFile(file) {
@@ -2154,7 +2178,7 @@ async function importProjectFile(file) {
   syncInspector();
   renderPreview();
   renderSaveState();
-  showNotice("Projeto CommBurn carregado e validado.");
+  showNotice(`Projeto CommBurn carregado e validado.${missingFontNotice()}`);
 }
 
 function imageBlobFromDataUri(dataUri) {
