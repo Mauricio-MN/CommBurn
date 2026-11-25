@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDocument, jobReferencePoints, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg } from "../src/core/document.js";
+import { createDocument, jobReferencePoints, jobStartSettings, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg } from "../src/core/document.js";
 import { parseProject, serializeProject } from "../src/core/project.js";
 import { interpretGcodeLine } from "../src/machine/motion-model.js";
 import { patternFillPaths } from "../src/core/pattern-fill.js";
@@ -485,6 +485,26 @@ test("GRBL object ordering supports nearest-next and center-out, and reports rap
   assert.equal(renderGrblJob({ ...base, layers: [{ id: "engrave" }] }, machineSettings), planGrblJob({
     ...base, layers: [{ id: "engrave" }]
   }, machineSettings).gcode);
+});
+
+test("center-out radiates from the head when the job starts from the objects", () => {
+  const base = {
+    widthMm: 100,
+    heightMm: 60,
+    layers: [{ id: "engrave", objectOrder: "center-out" }],
+    elements: [
+      { id: "edge", type: "rect", xMm: 80, yMm: 40, widthMm: 4, heightMm: 4, layerId: "engrave" },
+      { id: "near-origin", type: "rect", xMm: 5, yMm: 5, widthMm: 4, heightMm: 4, layerId: "engrave" },
+      { id: "center", type: "rect", xMm: 48, yMm: 28, widthMm: 4, heightMm: 4, layerId: "engrave" }
+    ]
+  };
+  const orderedIds = (anchor) => planGrblJob(base, { ...machineSettings, ...jobStartSettings("objects", anchor) })
+    .paths.filter((path) => path.kind === "work").map((path) => path.elementId)
+    .filter((id, index, list) => index === 0 || list[index - 1] !== id);
+
+  // The head sits under the chosen anchor, so the nearest object to that corner comes first.
+  assert.deepEqual(orderedIds("bottom-right"), ["edge", "center", "near-origin"]);
+  assert.deepEqual(orderedIds("top-left"), ["near-origin", "center", "edge"]);
 });
 
 test("nearest ordering handles objects without fill paths without losing the remaining job", () => {

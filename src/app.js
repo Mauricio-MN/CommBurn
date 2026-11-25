@@ -1,4 +1,5 @@
 import { createDocument, jobReferencePoints, jobStartSettings, machineFrame, planGrblJob, planToDocumentSpace, renderSvg, unlockedElementIds } from "./core/document.js";
+import { pathAspectRatio, restoreProportionPatch } from "./core/aspect.js";
 import { createI18n } from "./core/i18n.js";
 import { importTracedImageSvg } from "./core/image-trace.js";
 import { isFontInstalled, missingFontFamilies } from "./font-availability.js";
@@ -450,6 +451,7 @@ function syncInspector() {
   byId("inspector-kind").textContent = `${i18n.t(`ui.inspector.type.${selected.type}`)} · ${selected.id}`;
   byId("shape-properties").hidden = isText;
   byId("object-lock-ratio-field").hidden = isText;
+  byId("restore-ratio").hidden = !["path", "image", "svg-image"].includes(selected.type);
   byId("object-text").value = isText ? selected.text : "";
   byId("object-font").value = selected.fontFamily ?? "sans-serif";
   byId("object-font-bold").checked = selected.fontWeight === "bold";
@@ -3445,6 +3447,30 @@ installShortcuts({
 byId("shortcut-help").addEventListener("click", showShortcuts);
 byId("shortcuts-dialog").querySelector(".dialog-close").addEventListener("click", () => byId("shortcuts-dialog").close());
 byId("open-path-editor").addEventListener("click", openPathEditor);
+// Natural pixel size of an embedded raster or SVG image, read from its data URI.
+async function loadNaturalRatio(uri) {
+  const image = new Image();
+  image.src = uri;
+  await image.decode();
+  return image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : null;
+}
+
+async function restoreSelectedProportion() {
+  const element = currentDocument.elements.find((item) => item.id === selectedId);
+  if (!element) return;
+  let ratio = null;
+  if (element.type === "path") ratio = pathAspectRatio(element.pathData);
+  else if (element.type === "image") ratio = await loadNaturalRatio(element.imageDataUri);
+  else if (element.type === "svg-image") ratio = await loadNaturalRatio(element.svgDataUri);
+  const patch = restoreProportionPatch(element, ratio);
+  if (element.type === "image") patch.preserveAspectRatio = "none";
+  updateSelected(patch);
+}
+
+byId("restore-ratio").addEventListener("click", () => {
+  void restoreSelectedProportion().catch((error) => showNotice(error));
+});
+
 byId("edit-image").addEventListener("click", () => {
   void openImageEditor().catch((error) => showNotice(error));
 });

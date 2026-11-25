@@ -235,6 +235,7 @@ export default Object.freeze({
       positionX: "Posição X",
       positionY: "Posição Y",
       lockRatio: "Manter proporção ao redimensionar",
+      restoreRatio: "Restaurar proporção",
       rotation: "Rotação",
       skewX: "Inclinação X",
       skewY: "Inclinação Y",
@@ -554,6 +555,9 @@ export default Object.freeze({
       invalidObjectOrder: "A camada {id} tem uma ordem de objetos não compatível: {order}.",
       invalidFlags: "As opções de habilitação, visibilidade e bloqueio da camada {id} devem ser booleanas.",
       invalidColor: "A cor da camada {id} deve usar seis dígitos hexadecimais."
+    },
+    aspect: {
+      noNaturalRatio: "O objeto {id} não tem uma proporção original para restaurar."
     },
     imageTrace: {
       invalidDimension: "{label} deve ser um número finito maior que zero.",

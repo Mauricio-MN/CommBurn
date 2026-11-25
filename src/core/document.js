@@ -868,45 +868,58 @@ function startClosedPathNear(points, head) {
   return [...loop.slice(best), ...loop.slice(0, best), loop[best]];
 }
 
-function orderLayerElements(document, layer, elements, workByElement, startPoint) {
+// Orders are measured in machine coordinates, the same space as the head position.
+// "center-out" radiates from the head when the job starts from the objects (the head sits under the chosen anchor)
+// and from the document centre when it starts from the machine origin.
+function orderLayerElements(document, layer, elements, workByElement, startPoint, startsFromHead = false) {
   if (layer.objectOrder === "document") return elements;
-  const distanceFromCenter = (element) => {
-    let centerX = element.xMm + element.widthMm / 2;
-    let centerY = element.yMm + element.heightMm / 2;
-    if (!Number.isFinite(centerX) || !Number.isFinite(centerY)) {
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      for (const { points } of workByElement.get(element.id)) {
-        for (const point of points) {
-          minX = Math.min(minX, point.xMm);
-          maxX = Math.max(maxX, point.xMm);
-          minY = Math.min(minY, point.yMm);
-          maxY = Math.max(maxY, point.yMm);
-        }
+  const head = startPoint ?? { xMm: 0, yMm: 0 };
+  const workCenter = (element) => {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const { points } of workByElement.get(element.id)) {
+      for (const point of points) {
+        minX = Math.min(minX, point.xMm);
+        maxX = Math.max(maxX, point.xMm);
+        minY = Math.min(minY, point.yMm);
+        maxY = Math.max(maxY, point.yMm);
       }
-      centerX = (minX + maxX) / 2;
-      centerY = (minY + maxY) / 2;
     }
-    return Math.hypot(centerX - document.widthMm / 2, centerY - document.heightMm / 2);
+    return Number.isFinite(minX) ? { xMm: (minX + maxX) / 2, yMm: (minY + maxY) / 2 } : null;
   };
   if (layer.objectOrder === "center-out") {
-    return [...elements].sort((a, b) => distanceFromCenter(a) - distanceFromCenter(b));
+    const { xMm, yMm } = mapMachinePoint(document, document.widthMm / 2, document.heightMm / 2);
+    const reference = startsFromHead ? head : { xMm, yMm };
+    const distances = new Map(elements.map((element) => {
+      const center = workCenter(element);
+      return [element.id, center ? distanceBetween(reference, center) : Infinity];
+    }));
+    return [...elements].sort((a, b) => distances.get(a.id) - distances.get(b.id));
   }
   if (elements.length > 2000) {
     throw new RangeError(`Layer ${layer.name} has too many objects for nearest-neighbor ordering; use document order or center-out`);
   }
 
+  // A closed contour starts at the vertex nearest the head (see startClosedPathNear), so that vertex is its entry point.
+  const entryDistance = (element, from) => {
+    const [first] = workByElement.get(element.id);
+    const { points } = first;
+    const closed = first.operation !== "fill" && points.length > 3 && distanceBetween(points[0], points.at(-1)) <= 1e-9;
+    if (!closed) return distanceBetween(from, points[0]);
+    let best = Infinity;
+    for (let index = 0; index < points.length - 1; index += 1) best = Math.min(best, distanceBetween(from, points[index]));
+    return best;
+  };
   const remaining = elements.filter((element) => workByElement.get(element.id).length > 0);
   const ordered = [];
-  let current = startPoint ?? { xMm: 0, yMm: 0 };
+  let current = head;
   while (remaining.length > 0) {
     let nearestIndex = 0;
     let nearestDistance = Infinity;
     for (let index = 0; index < remaining.length; index += 1) {
-      const firstPoint = workByElement.get(remaining[index].id)[0].points[0];
-      const distance = distanceBetween(current, firstPoint);
+      const distance = entryDistance(remaining[index], current);
       if (distance < nearestDistance) {
         nearestDistance = distance;
         nearestIndex = index;
@@ -1102,7 +1115,7 @@ function buildGrblJob(input, settings, offset, startReference = null) {
       throw new RangeError(`Layer ${layer.name} has no fillable paths at the selected spacing`);
     }
     const initialHead = startReference ?? { xMm: offset.xMm, yMm: offset.yMm };
-    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint ?? initialHead);
+    const orderedElements = orderLayerElements(document, layer, layerElements, workByElement, previousPoint ?? initialHead, relative);
     for (const element of orderedElements) {
       for (const sourceWorkPath of workByElement.get(element.id)) {
         const head = previousPoint ?? initialHead;

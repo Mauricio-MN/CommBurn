@@ -235,6 +235,7 @@ export default Object.freeze({
       positionX: "Position X",
       positionY: "Position Y",
       lockRatio: "Keep proportions when resizing",
+      restoreRatio: "Restore proportions",
       rotation: "Rotation",
       skewX: "Skew X",
       skewY: "Skew Y",
@@ -553,6 +554,9 @@ export default Object.freeze({
       invalidObjectOrder: "Layer {id} has unsupported object order: {order}.",
       invalidFlags: "Layer {id} enabled, visible, and locked settings must be boolean.",
       invalidColor: "Layer {id} color must be a six-digit hexadecimal value."
+    },
+    aspect: {
+      noNaturalRatio: "Object {id} has no original proportions to restore."
     },
     imageTrace: {
       invalidDimension: "{label} must be a finite number greater than zero.",
