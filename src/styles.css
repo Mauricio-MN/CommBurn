@@ -214,6 +214,7 @@ span.origin-dot { display: block; width: 8px; height: 8px; border: 0; background
 .layer-remove { color: #a35c64; border: 1px solid #eadde0; font-size: 17px; }
 .layer-remove:disabled { opacity: .45; cursor: not-allowed; }
 .layer-summary { margin: 4px 3px 0; color: #59697f; font-size: 10px; line-height: 1.4; }
+.layer-adaptive-hint { grid-column: 1 / -1; margin: 0 3px; color: #59697f; font-size: 11px; line-height: 1.4; }
 .layer-settings { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 2px 0 0; }
 .layer-settings[hidden] { display: none; }
 .layer-group-heading { grid-column: 1 / -1; margin: 10px 0 0; padding-top: 8px; color: #66758a; border-top: 1px solid #dfe6f0; font-size: 10px; font-weight: 750; letter-spacing: .03em; text-transform: uppercase; }

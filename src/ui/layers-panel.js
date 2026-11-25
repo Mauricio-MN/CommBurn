@@ -124,7 +124,11 @@ export class LayersPanel {
       const algorithmField = this.createField("ui.layers.fillAlgorithm", this.createSelect("fillAlgorithm", layer.fillAlgorithm, rasterOnly ? RASTER_FILL_ALGORITHMS : FILL_ALGORITHMS));
       algorithmField.hidden = layer.operation !== "fill" && !rasterOnly;
       algorithmField.dataset.fillSetting = "";
-      settings.append(this.createGroupHeading("ui.layers.pathSettings"), fillField, algorithmField);
+      const adaptiveHint = document.createElement("p");
+      adaptiveHint.className = "layer-adaptive-hint";
+      adaptiveHint.textContent = t("ui.layers.adaptivePatternHint");
+      adaptiveHint.hidden = layer.operation !== "fill" || rasterOnly;
+      settings.append(this.createGroupHeading("ui.layers.pathSettings"), fillField, algorithmField, adaptiveHint);
       settings.append(this.createField("ui.layers.objectOrder", this.createSelect("objectOrder", layer.objectOrder, OBJECT_ORDERS)));
 
       const switches = document.createElement("div");

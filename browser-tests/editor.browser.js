@@ -96,12 +96,15 @@ test("sidebar navigation and compact layers keep settings accessible across scre
   await fill.locator("[data-layer-select]").click();
   assert.equal(await cut.locator(".layer-settings").isVisible(), false);
   assert.equal(await fill.locator(".layer-settings").isVisible(), true);
+  await page.locator("#language-select").selectOption("pt-BR");
+  assert.match(await fill.locator(".layer-adaptive-hint").textContent(), /0,05 mm/);
   const algorithm = fill.locator('[data-layer-property="fillAlgorithm"]');
   assert.equal(await algorithm.locator("option").count(), 11);
   await algorithm.selectOption("vertical-unidirectional");
   assert.equal(await fill.locator('[data-layer-property="fillAlgorithm"]').inputValue(), "vertical-unidirectional");
   await page.locator("#language-select").selectOption("en");
   assert.match(await fill.locator(".layer-summary").textContent(), /Fill/);
+  assert.match(await fill.locator(".layer-adaptive-hint").textContent(), /0\.05 mm/);
   assert.match(await page.locator(".sidebar-nav").getAttribute("aria-label"), /section/i);
   await page.locator('.sidebar-nav a[href="#machine-panel"]').click();
   assert.ok(await page.locator(".sidebar").evaluate((sidebar) => sidebar.scrollTop > 0));
@@ -127,7 +130,10 @@ test("decorative fill choices generate the same preview and G-code as the saved 
     buffer: Buffer.from(serializeProject({
       widthMm: 50, heightMm: 40,
       layers: [{ id: "fill", operation: "fill", fillSpacingMm: 2 }],
-      elements: [{ id: "box", type: "rect", xMm: 5, yMm: 5, widthMm: 20, heightMm: 20, layerId: "fill" }]
+      elements: [
+        { id: "box", type: "rect", xMm: 5, yMm: 5, widthMm: 20, heightMm: 20, layerId: "fill" },
+        { id: "small", type: "rect", xMm: 30, yMm: 5, widthMm: 1.28, heightMm: 0.23, layerId: "fill" }
+      ]
     }))
   });
   const selector = page.locator('[data-layer-property="fillAlgorithm"]');

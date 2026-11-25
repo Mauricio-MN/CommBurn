@@ -5,6 +5,7 @@ const PRECISION = 6;
 const MAX_POINTS = 100000;
 const MAX_OFFSET_PASSES = 10000;
 const MAX_GEOMETRY_WORK = 2000000;
+const MIN_ADAPTIVE_SPACING = 0.05;
 
 function tooComplex(id) {
   return new CommBurnRangeError("grbl.patternTooComplex", { id, limit: MAX_POINTS }, {
@@ -32,7 +33,41 @@ function hilbertPoint(index, size) {
   return [x, y];
 }
 
+function checkClippingWork(id, polygons, candidates, minY, maxY) {
+  // Count potentially interacting edges by Y band instead of assuming every pair overlaps.
+  const bucketCount = 256;
+  const buckets = new Uint32Array(bucketCount);
+  const bucket = (y) => maxY === minY ? 0 : Math.max(0, Math.min(bucketCount - 1, Math.floor((y - minY) / (maxY - minY) * bucketCount)));
+  let work = 0;
+  for (const polygon of polygons) {
+    for (let index = 0; index < polygon.length; index += 1) {
+      const a = polygon[index], b = polygon[(index + 1) % polygon.length];
+      const first = bucket(Math.min(a[1], b[1])), last = bucket(Math.max(a[1], b[1]));
+      for (let row = first; row <= last; row += 1) {
+        if (++work > MAX_GEOMETRY_WORK) throw tooComplex(id);
+        buckets[row] += 1;
+      }
+    }
+  }
+  for (const path of candidates) {
+    for (let index = 1; index < path.length; index += 1) {
+      const a = path[index - 1], b = path[index];
+      const low = Math.min(a[1], b[1]), high = Math.max(a[1], b[1]);
+      if (high < minY || low > maxY) continue;
+      const first = bucket(low), last = bucket(high);
+      for (let row = first; row <= last; row += 1) {
+        work += buckets[row];
+        if (work > MAX_GEOMETRY_WORK) throw tooComplex(id);
+      }
+    }
+  }
+}
+
 export function patternFillPaths(element, polygons, algorithm, spacing) {
+  return generatePattern(element, polygons, algorithm, spacing, Math.min(spacing, MIN_ADAPTIVE_SPACING));
+}
+
+function generatePattern(element, polygons, algorithm, spacing, minimumSpacing) {
   const coordinates = polygons.flat();
   if (!coordinates.length) return [];
   if (spacing < 10 ** -PRECISION) {
@@ -60,6 +95,9 @@ export function patternFillPaths(element, polygons, algorithm, spacing) {
   const region = polygons.map((path) => path.map(([x, y]) => ({ x, y })));
   const requireCoverage = (paths) => {
     if (paths.length === 0 && unionD(region, FillRule.EvenOdd, PRECISION).length > 0) {
+      if (spacing > minimumSpacing) {
+        return generatePattern(element, polygons, algorithm, Math.max(minimumSpacing, spacing / 2), minimumSpacing);
+      }
       throw new CommBurnRangeError("grbl.patternNoCoverage", { id: element.id }, {
         message: `Fill pattern does not reach ${element.id}; reduce spacing or choose another pattern`
       });
@@ -118,7 +156,9 @@ export function patternFillPaths(element, polygons, algorithm, spacing) {
     throw new CommBurnRangeError("layers.invalidFillAlgorithm", { id: element.id, algorithm });
   }
   const candidatePoints = candidates.reduce((sum, path) => sum + path.length, 0);
-  if (candidatePoints * coordinates.length > MAX_GEOMETRY_WORK) throw tooComplex(element.id);
+  if (candidatePoints * coordinates.length > MAX_GEOMETRY_WORK) {
+    checkClippingWork(element.id, polygons, candidates, minY, maxY);
+  }
   const clipper = new ClipperD(PRECISION);
   clipper.addClipPaths(region);
   clipper.addOpenSubjectPaths(candidates.map((path) => path.map(([x, y]) => ({ x, y }))));

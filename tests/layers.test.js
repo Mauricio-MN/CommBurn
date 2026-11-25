@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createDocument, jobReferencePoints, planGrblJob, planToDocumentSpace, renderGrblJob, renderSvg } from "../src/core/document.js";
 import { parseProject, serializeProject } from "../src/core/project.js";
 import { interpretGcodeLine } from "../src/machine/motion-model.js";
+import { patternFillPaths } from "../src/core/pattern-fill.js";
 
 const machineSettings = { maxSpindleSpeed: 1000 };
 
@@ -336,8 +337,86 @@ test("decorative fills reject unsafe complexity and patterns that miss a nonempt
   assert.throws(() => planGrblJob(document, machineSettings), { code: "grbl.patternTooComplex" });
   document.layers[0].fillSpacingMm = 1e-8;
   assert.throws(() => planGrblJob(document, machineSettings), { code: "grbl.patternPrecision" });
-  document.layers[0].fillSpacingMm = 100;
+  document.layers[0].fillAlgorithm = "inset";
+  document.layers[0].fillSpacingMm = 1;
+  document.elements[0].widthMm = 0.01;
+  document.elements[0].heightMm = 0.01;
   assert.throws(() => planGrblJob(document, machineSettings), { code: "grbl.patternNoCoverage" });
+});
+
+test("decorative fills adapt missed small shapes without changing the saved spacing", () => {
+  for (const algorithm of ["inset", "squares", "zigzag", "hilbert"]) {
+    const input = {
+      widthMm: 20, heightMm: 20,
+      layers: [{ id: "fill", operation: "fill", fillSpacingMm: 1, fillAlgorithm: algorithm }],
+      elements: [{ id: "small", type: "rect", xMm: 5, yMm: 5, widthMm: 1.28, heightMm: 0.23, layerId: "fill" }]
+    };
+    const before = createDocument(input);
+    const plan = planGrblJob(input, machineSettings);
+    const work = plan.paths.filter(({ kind }) => kind === "work");
+    assert.ok(work.length, algorithm);
+    for (const { points } of work) for (const { xMm, yMm } of points) {
+      assert.ok(xMm >= 5 - 1e-6 && xMm <= 6.28 + 1e-6, algorithm);
+      assert.ok(yMm >= 5 - 1e-6 && yMm <= 5.23 + 1e-6, algorithm);
+    }
+    assert.deepEqual(createDocument(input), before, algorithm);
+    assert.equal(parseProject(serializeProject(input)).layers[0].fillSpacingMm, 1, algorithm);
+    const moves = [];
+    let modal = { motion: "G0", relative: false, feedMmPerMinute: undefined };
+    for (const line of plan.gcode.trim().split("\n")) {
+      const parsed = interpretGcodeLine(line, modal);
+      modal = parsed.modal;
+      if (parsed.motion && !parsed.motion.rapid) moves.push({ xMm: parsed.motion.x, yMm: parsed.motion.y });
+    }
+    assert.deepEqual(moves, work.flatMap(({ points }) => points.slice(1).map(({ xMm, yMm }) => ({ xMm, yMm }))), algorithm);
+  }
+});
+
+test("decorative patterns handle detailed outlines without treating every segment as a possible intersection", () => {
+  const vertices = [];
+  for (let i = 0; i < 250; i += 1) vertices.push(`${i * 0.16} 0`);
+  for (let i = 0; i < 250; i += 1) vertices.push(`40 ${i * 0.16}`);
+  for (let i = 0; i < 250; i += 1) vertices.push(`${40 - i * 0.16} 40`);
+  for (let i = 0; i < 250; i += 1) vertices.push(`0 ${40 - i * 0.16}`);
+  for (const algorithm of ["squares", "zigzag", "hilbert"]) {
+    const plan = planGrblJob({
+      widthMm: 50, heightMm: 50,
+      layers: [{ id: "fill", operation: "fill", fillSpacingMm: 1, fillAlgorithm: algorithm }],
+      elements: [{ id: "detailed", type: "path", xMm: 5, yMm: 5, widthMm: 40, heightMm: 40, pathData: `M${vertices.join(" L")} Z`, layerId: "fill" }]
+    }, machineSettings);
+    assert.ok(plan.paths.some(({ kind }) => kind === "work"), algorithm);
+  }
+});
+
+test("zigzag adapts when the original path only touches the shape", () => {
+  const polygon = [[[0, 0], [0.1, 0.4], [0.5, 0.5], [0.2, 0.6]]];
+  const adapted = patternFillPaths({ id: "narrow" }, polygon, "zigzag", 1);
+  assert.ok(adapted.length);
+  assert.deepEqual(adapted, patternFillPaths({ id: "narrow" }, polygon, "zigzag", 0.5));
+});
+
+test("adaptive patterns stay outside holes", () => {
+  const polygons = [
+    [[0, 0], [3, 0], [3, 0.4], [0, 0.4]],
+    [[1, 0.1], [2, 0.1], [2, 0.3], [1, 0.3]]
+  ];
+  for (const algorithm of ["inset", "squares", "zigzag", "hilbert"]) {
+    const paths = patternFillPaths({ id: "frame" }, polygons, algorithm, 1);
+    assert.ok(paths.length, algorithm);
+    for (const path of paths) for (let i = 1; i < path.length; i += 1) {
+      for (let step = 0; step <= 20; step += 1) {
+        const x = path[i - 1][0] + (path[i][0] - path[i - 1][0]) * step / 20;
+        const y = path[i - 1][1] + (path[i][1] - path[i - 1][1]) * step / 20;
+        assert.ok(x >= -1e-6 && x <= 3 + 1e-6 && y >= -1e-6 && y <= 0.4 + 1e-6, algorithm);
+        assert.ok(!(x > 1 + 1e-6 && x < 2 - 1e-6 && y > 0.1 + 1e-6 && y < 0.3 - 1e-6), algorithm);
+      }
+    }
+  }
+});
+
+test("decorative clipping still rejects excessive spatially overlapping work", () => {
+  const polygon = Array.from({ length: 2000 }, (_, i) => [i * 0.02, i % 2 ? 40 : 0]);
+  assert.throws(() => patternFillPaths({ id: "complex" }, [polygon], "squares", 0.5), { code: "grbl.patternTooComplex" });
 });
 
 test("decorative patterns follow object rotation and relative job placement", () => {

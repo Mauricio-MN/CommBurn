@@ -114,6 +114,7 @@ export default Object.freeze({
       passes: "Passes",
       fillSpacing: "Espaçamento do preenchimento (mm)",
       fillAlgorithm: "Algoritmo de preenchimento",
+      adaptivePatternHint: "Contornos internos, quadrados, zigue-zague e Hilbert podem reduzir o espaçamento até 0,05 mm em objetos não alcançados, se o valor configurado for maior. Confira a prévia e ajuste a potência.",
       objectOrder: "Ordem dos objetos",
       enabled: "Incluir no envio",
       visible: "Visível no desenho",

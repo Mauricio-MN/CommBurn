@@ -114,6 +114,7 @@ export default Object.freeze({
       passes: "Passes",
       fillSpacing: "Fill spacing (mm)",
       fillAlgorithm: "Fill algorithm",
+      adaptivePatternHint: "Inset contours, squares, zigzag and Hilbert may reduce spacing to 0.05 mm for missed objects if the configured value is larger. Check the preview and adjust power.",
       objectOrder: "Object order",
       enabled: "Include in job",
       visible: "Visible on canvas",
