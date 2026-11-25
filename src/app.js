@@ -2198,10 +2198,13 @@ async function openImageEditor(file = null) {
     }
     const extension = file.name.toLowerCase().split(".").at(-1);
     const mimeByExtension = {
-      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
-      bmp: "image/bmp", avif: "image/avif", tif: "image/tiff", tiff: "image/tiff"
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", jfif: "image/jpeg", jpe: "image/jpeg",
+      gif: "image/gif", webp: "image/webp", bmp: "image/bmp", avif: "image/avif",
+      tif: "image/tiff", tiff: "image/tiff"
     };
-    if ((file.type && !file.type.startsWith("image/")) || (!file.type && !mimeByExtension[extension])) {
+    // JFIF é JPEG: alguns navegadores/SO reportam .jfif como image/pjpeg, vazio ou octet-stream.
+    const isJpegAlias = extension === "jfif" || extension === "jpe" || file.type === "image/pjpeg";
+    if (!isJpegAlias && ((file.type && !file.type.startsWith("image/")) || (!file.type && !mimeByExtension[extension]))) {
       throw new TypeError("Escolha um arquivo de imagem compatível com o navegador.");
     }
     let layer = currentDocument.layers.find((candidate) => candidate.id === activeLayerId);
@@ -2213,7 +2216,7 @@ async function openImageEditor(file = null) {
     }
     layerId = layer.id;
     target = { mode: "import", layerId };
-    sourceBlob = file.type ? file : new Blob([file], { type: mimeByExtension[extension] });
+    sourceBlob = file.type && !isJpegAlias ? file : new Blob([file], { type: isJpegAlias ? "image/jpeg" : mimeByExtension[extension] });
   } else {
     const source = currentDocument.elements.find((element) => element.id === selectedId);
     if (!source || source.type !== "image") throw new Error("Selecione uma imagem raster para editar.");
