@@ -172,6 +172,13 @@ span.origin-dot { display: block; width: 8px; height: 8px; border: 0; background
 @keyframes missing-font-blink {
   50% { filter: drop-shadow(0 0 3px #e53935) drop-shadow(0 0 6px rgb(229 57 53 / 80%)); }
 }
+.size-box { fill: none; stroke: #3978eb; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.size-edge { fill: transparent; pointer-events: all; }
+.size-grip { fill: #fff; stroke: #3978eb; stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: all; }
+.artboard [data-size-handle="n"], .artboard [data-size-handle="s"] { cursor: ns-resize; }
+.artboard [data-size-handle="e"], .artboard [data-size-handle="w"] { cursor: ew-resize; }
+.artboard [data-size-handle="nw"], .artboard [data-size-handle="se"] { cursor: nwse-resize; }
+.artboard [data-size-handle="ne"], .artboard [data-size-handle="sw"] { cursor: nesw-resize; }
 .selection-marquee { fill: #3978eb20; stroke: #3978eb; stroke-dasharray: 4 2; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .ruler { position: relative; color: #778398; font-size: 9px; user-select: none; }
 .ruler-top { grid-area: x; display: flex; align-items: end; border-bottom: 1px solid #cfd7e3; }

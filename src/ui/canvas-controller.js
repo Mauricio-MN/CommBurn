@@ -1,3 +1,5 @@
+import { resizeBounds, scaleElementPatch } from "./size-handles.js";
+
 function toCanvasPoint(svg, event) {
   const screenPoint = svg.createSVGPoint();
   screenPoint.x = event.clientX;
@@ -10,7 +12,7 @@ function getCenter(element) {
   return { xMm: element.xMm + element.widthMm / 2, yMm: element.yMm + element.heightMm / 2 };
 }
 
-function getSelectionBounds(elements) {
+export function getSelectionBounds(elements) {
   const bounds = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
   for (const element of elements) {
     const widthMm = element.widthMm ?? element.fontSizeMm;
@@ -52,8 +54,34 @@ export class CanvasController {
     this.callbacks.contextMenu?.({ id: node.dataset.id, clientX: event.clientX, clientY: event.clientY });
   }
 
+  beginHandleResize(event, handle) {
+    const document = this.callbacks.getDocument();
+    const selectedIds = new Set(this.callbacks.getSelectedIds());
+    const selected = document.elements.filter((candidate) => selectedIds.has(candidate.id));
+    if (selected.length === 0) return;
+    if (selected.some((candidate) => document.layers.find((layer) => layer.id === candidate.layerId)?.locked)) {
+      this.callbacks.notify("Desbloqueie todas as camadas selecionadas antes de transformar os objetos.");
+      return;
+    }
+    this.interaction = {
+      type: "resize",
+      pointerId: event.pointerId,
+      tool: "size",
+      handle,
+      selected,
+      startBounds: getSelectionBounds(selected)
+    };
+    this.svg.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  }
+
   onPointerDown(event) {
     if (event.button !== 0) return;
+    const handle = event.target.closest("[data-size-handle]")?.dataset?.sizeHandle;
+    if (handle && this.callbacks.getTool() === "size") {
+      this.beginHandleResize(event, handle);
+      return;
+    }
     const node = event.target.closest("[data-id]");
     const tool = this.callbacks.getTool();
     if (!node) {
@@ -167,6 +195,15 @@ export class CanvasController {
 
   applyPointerMove(action, event) {
     const point = toCanvasPoint(this.svg, event);
+    if (action.type === "resize") {
+      // Corners keep the proportions unless Shift is held; edges always stretch one axis.
+      const { bounds, sx, sy } = resizeBounds(action.startBounds, action.handle, { x: point.x, y: point.y }, { proportional: !event.shiftKey });
+      this.callbacks.updateMany(action.selected.map((element) => ({
+        id: element.id,
+        patch: scaleElementPatch(element, action.startBounds, bounds, sx, sy)
+      })), false);
+      return;
+    }
     const deltaX = point.x - action.startPoint.x;
     const deltaY = point.y - action.startPoint.y;
 

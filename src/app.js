@@ -5,7 +5,8 @@ import { isFontInstalled, missingFontFamilies } from "./font-availability.js";
 import { listSystemFontFamilies, showAllFontOptionsOnFocus } from "./ui/font-options.js";
 import { parseProject, serializeProject } from "./core/project.js";
 import { ImageEditor as RasterImageEditor } from "../node_modules/@jodit/image-editor/dist/jodit-image-editor.js";
-import { CanvasController } from "./ui/canvas-controller.js";
+import { CanvasController, getSelectionBounds } from "./ui/canvas-controller.js";
+import { renderSizeHandles } from "./ui/size-handles.js";
 import { RasterPreview } from "./ui/raster-preview.js";
 import { DocumentHistory } from "./ui/history.js";
 import { installShortcuts, SHORTCUTS } from "./ui/shortcuts.js";
@@ -216,6 +217,7 @@ const zoomOutButton = byId("zoom-out");
 const zoomInButton = byId("zoom-in");
 const zoomResetButton = byId("zoom-reset");
 const objects = byId("objects");
+const sizeHandles = byId("size-handles");
 const removeButton = byId("remove-selection");
 const selectionStatus = byId("selection-status");
 const notice = byId("notice");
@@ -405,6 +407,15 @@ function resizeBoard(widthMm = currentDocument.widthMm, heightMm = currentDocume
   const drawingWidth = Math.min(1100, availableWidth - 42, availableHeight * ratio) * viewZoom;
   boardFrame.style.width = `${Math.max(0, drawingWidth) + 42}px`;
   boardFrame.style.setProperty("--doc-ratio", `${widthMm} / ${heightMm}`);
+  drawSizeHandles();
+}
+
+// The size tool shows a box with grab handles around the selection; their size follows the zoom.
+function drawSizeHandles() {
+  const ids = new Set(selectedIds);
+  const selected = activeTool === "size" ? currentDocument.elements.filter((element) => ids.has(element.id)) : [];
+  const pixelsPerMm = artboard.getScreenCTM?.()?.a;
+  renderSizeHandles(sizeHandles, selected.length ? getSelectionBounds(selected) : null, pixelsPerMm > 0 ? 1 / pixelsPerMm : 1);
 }
 
 function syncInspector() {
@@ -1143,6 +1154,7 @@ function renderSelectionOnly() {
   for (const node of objects.children) node.classList.toggle("selected", selection.has(node.dataset.id));
   void rasterPreview.showSelection(selectedIds);
   updateSelectionControls();
+  drawSizeHandles();
 }
 
 function renderPreview() {
@@ -2336,7 +2348,7 @@ async function applyImageEdit() {
         widthMm,
         heightMm,
         imageDataUri,
-        preserveAspectRatio: "xMidYMid meet",
+        preserveAspectRatio: "none",
         rotationDeg: 0,
         skewXDeg: 0,
         skewYDeg: 0,
@@ -2832,6 +2844,8 @@ function updateSelectedFromInput(input) {
       && current.widthMm > 0 && current.heightMm > 0 && value > 0) {
       patch[other] = current[other] * value / current[property];
     }
+    // Resizing a raster image stretches it to the new box instead of centring it with empty margins.
+    if (current?.type === "image" && ["widthMm", "heightMm"].includes(property)) patch.preserveAspectRatio = "none";
     updateSelected(patch);
   } else if (input.id === "object-text") {
     updateSelected({ text: input.value }, true, false);
@@ -3373,6 +3387,7 @@ const toolbar = connectToolbar(byId("action-toolbar"), (toolId) => {
   byId("tool-status").textContent = i18n.t("ui.tools.status", { tool: label, description, shortcut: i18n.t("ui.tools.shortcut", { key }) });
   renderActiveToolStatus();
   artboard.dataset.tool = toolId;
+  drawSizeHandles();
 }, { t: i18n.t });
 
 new CanvasController(artboard, {

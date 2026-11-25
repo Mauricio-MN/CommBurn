@@ -483,7 +483,7 @@ export default Object.freeze({
     tools: {
       select: { label: "Select", description: "Click an object or drag a box; Shift-click adds or removes items." },
       move: { label: "Move", description: "Drag an object to reposition it in millimetres." },
-      size: { label: "Size", description: "Drag in or out to resize one or more objects proportionally." },
+      size: { label: "Size", description: "Drag the box handles to resize; corners keep proportions (hold Shift to free them)." },
       edit: { label: "Edit", description: "Select an object and edit its numeric properties." },
       rotate: { label: "Rotate", description: "Drag around the object to set its angle." },
       warp: { label: "Warp", description: "Drag to warp; use fields for precise adjustments." },

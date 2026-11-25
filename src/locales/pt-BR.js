@@ -484,7 +484,7 @@ export default Object.freeze({
     tools: {
       select: { label: "Selecionar", description: "Clique em um objeto ou arraste uma caixa; Shift+clique adiciona ou remove itens." },
       move: { label: "Mover", description: "Arraste um objeto para reposicioná-lo em milímetros." },
-      size: { label: "Tamanho", description: "Arraste para redimensionar um ou mais objetos proporcionalmente." },
+      size: { label: "Tamanho", description: "Arraste as alças da caixa para redimensionar; nos cantos a proporção é mantida (Shift libera)." },
       edit: { label: "Editar", description: "Selecione um objeto e edite suas propriedades numéricas." },
       rotate: { label: "Rotacionar", description: "Arraste ao redor do objeto para definir seu ângulo." },
       warp: { label: "Distorcer", description: "Arraste para distorcer; use os campos para ajustes precisos." },
