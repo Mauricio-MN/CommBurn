@@ -125,6 +125,7 @@ test("decorative fill choices generate the same preview and G-code as the saved 
   const page = await context.newPage();
   page.setDefaultTimeout(ACTION_TIMEOUT_MS);
   await page.goto(server.url, { waitUntil: "load" });
+  await page.locator("#language-select").selectOption("en");
   await page.locator("#svg-file-input").setInputFiles({
     name: "pattern.commburn.json", mimeType: "application/json",
     buffer: Buffer.from(serializeProject({
@@ -144,6 +145,9 @@ test("decorative fill choices generate the same preview and G-code as the saved 
     await page.locator("#machine-preview-dialog").waitFor({ state: "visible" });
     const gcode = await page.locator("#machine-preview-code").textContent();
     assert.ok(await page.locator("#machine-path-preview path").count() > 0, algorithm);
+    const time = await page.locator("#machine-preview-time").textContent();
+    assert.match(time, /Estimated total time:.*simulated limits, not measured/);
+    assert.match(time, /fill:.*travel:.*unknown initial travel excluded/);
     await page.locator("#machine-preview-dialog .dialog-close").click();
     const saved = await saveDocument(page);
     assert.equal(saved.layers[0].fillAlgorithm, algorithm);

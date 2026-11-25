@@ -18,6 +18,7 @@ import { ADJUSTABLE_PROPERTIES, computeAdjustedUpdates } from "./core/property-a
 import { loadDesktopPlugins } from "./ui/plugins.js";
 import { createNativeMachineApi, isNativeApp } from "./machine/native-machine.js";
 import { machineAreaFromSettings } from "./machine/grbl.js";
+import { estimateJobTime, usableMotionSettings } from "./machine/job-time.js";
 import { translateDom } from "./ui/dom-i18n.js";
 import { clampZoom, scrollDeltaToKeepAnchor, ZOOM_DEFAULT, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, zoomByFactor, zoomPercent } from "./ui/zoom.js";
 import {
@@ -733,6 +734,7 @@ function renderActiveToolStatus() {
 }
 
 let controllerLaserMode = null;
+let controllerMotionSettings = null;
 
 function controllerJobSettings() {
   return { laserPowerMode: byId("laser-power-mode").value };
@@ -741,6 +743,7 @@ function controllerJobSettings() {
 function applyControllerSettings(settings) {
   const maxSpindleSpeed = settings?.$30;
   controllerLaserMode = settings?.$32 === 0 || settings?.$32 === 1 ? settings.$32 : null;
+  controllerMotionSettings = usableMotionSettings(settings) ? settings : null;
   const rapidLimits = [settings?.$110, settings?.$111].filter((value) => typeof value === "number" && value > 0);
   setPlaybackRapidMmPerMinute(rapidLimits.length === 2 ? Math.min(...rapidLimits) : null);
   if (typeof maxSpindleSpeed !== "number" || !Number.isFinite(maxSpindleSpeed) || maxSpindleSpeed <= 0) return false;
@@ -905,6 +908,7 @@ async function pollMachineConnection() {
       machineSimulation = false;
       machineResetFailed = false;
       controllerLaserMode = null;
+      controllerMotionSettings = null;
       setPlaybackRapidMmPerMinute(null);
       setMachineState("ui.machine.disconnected");
       showNotice(i18n.t("ui.machine.disconnected"));
@@ -1362,7 +1366,7 @@ function updateMachinePreviewStats(plan) {
     `${stats.workPathCount} trajetórias de trabalho · ${stats.rapidMoveCount} saltos rápidos · `
     + `${stats.workDistanceMm.toFixed(1)} mm de trabalho · ${stats.travelDistanceMm.toFixed(1)} mm de deslocamento conhecido`;
   byId("machine-preview-time").textContent =
-    formatOperationTimeEstimates(stats.estimatedWorkTimeSecondsByOperation);
+    formatOperationTimeEstimates(estimateJobTime(plan, controllerMotionSettings), i18n.t.bind(i18n));
   byId("machine-preview-code").textContent = plan.gcode;
 }
 
@@ -1412,7 +1416,7 @@ function drawMachinePreview(machinePlan, documentModel = readDocument()) {
     path.append(title);
     svg.append(path);
   }
-  updateMachinePreviewStats(plan);
+  updateMachinePreviewStats(machinePlan);
 }
 
 function machineSimulationCanvasDimensions() {
@@ -1633,7 +1637,7 @@ function showMachineSimulation(machinePlan, documentModel, totalLines, { live = 
   byId("machine-simulation-job-controls").hidden = !live;
   stopTimelinePlayback();
   byId("machine-path-preview").toggleAttribute("hidden", true);
-  updateMachinePreviewStats(plan);
+  updateMachinePreviewStats(machinePlan);
   if (!dialog.open) dialog.showModal();
   renderMachineSimulationProgress(0, totalLines, "running");
 }
@@ -3606,6 +3610,7 @@ simulateMachineButton.addEventListener("click", async () => {
     const result = await machineApi("/api/simulate-connect", "POST", {});
     machineConnected = result.connected;
     machineSimulation = result.simulated;
+    controllerMotionSettings = null;
     machineResetFailed = false;
     setMachineState("ui.machine.simulatedConnected");
     updateMachineControls();
@@ -3621,6 +3626,7 @@ disconnectButton.addEventListener("click", async () => {
     machineSimulation = false;
     machineResetFailed = false;
     controllerLaserMode = null;
+    controllerMotionSettings = null;
     setPlaybackRapidMmPerMinute(null);
     setMachineState("ui.machine.disconnected");
     updateMachineControls();

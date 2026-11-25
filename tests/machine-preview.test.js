@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { planGrblJob } from "../src/core/document.js";
+import { createI18n } from "../src/core/i18n.js";
+import en from "../src/locales/en.js";
+import ptBr from "../src/locales/pt-BR.js";
 import {
   createMachinePlayback,
   createMachineTrack,
@@ -25,8 +28,11 @@ test("machine preview groups many work and travel paths into one SVG path per la
 });
 
 test("machine preview formats estimated work times by operation", () => {
-  assert.equal(formatOperationTimeEstimates({ engrave: 8.2, cut: 65, fill: 3661 }), "Tempo estimado: gravação: 9 s · corte: 2 min · preenchimento: 1 h 2 min");
-  assert.equal(formatOperationTimeEstimates({ engrave: 0, cut: 0, fill: 0 }), "Sem trajetórias de trabalho para estimar.");
+  const i18n = createI18n({ locale: "pt-BR", catalogs: { en, "pt-BR": ptBr } });
+  const estimate = { workSeconds: { engrave: 8.2, cut: 65, fill: 3661 }, travelSeconds: 30, totalSeconds: 3764.2, usingControllerSettings: true, initialTravelUnknown: true };
+  assert.equal(formatOperationTimeEstimates(estimate, i18n.t), "Tempo total estimado: 1 h 2 min 45 s (limites da controladora) · gravação: 9 s · corte: 1 min 5 s · preenchimento: 1 h 1 min 1 s · deslocamentos: 30 s · deslocamento inicial desconhecido não incluído");
+  i18n.setLocale("en");
+  assert.match(formatOperationTimeEstimates({ ...estimate, usingControllerSettings: false }, i18n.t), /simulated limits, not measured/);
 });
 
 test("machine simulation playback maps acknowledged G-code lines to work and rapid segments", () => {

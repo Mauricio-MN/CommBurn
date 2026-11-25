@@ -189,24 +189,19 @@ function nearestOnSegment(point, from, to) {
 }
 
 function formatDuration(seconds) {
-  const roundedSeconds = Math.ceil(seconds);
-  if (roundedSeconds < 60) return `${roundedSeconds} s`;
-  const totalMinutes = Math.ceil(roundedSeconds / 60);
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return hours > 0 ? `${hours} h ${minutes} min` : `${totalMinutes} min`;
+  const total = Math.ceil(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor(total % 3600 / 60);
+  const remaining = total % 60;
+  return [hours ? `${hours} h` : "", minutes ? `${minutes} min` : "", `${remaining} s`].filter(Boolean).join(" ");
 }
 
-export function formatOperationTimeEstimates(timesByOperation) {
-  const operationLabels = [
-    ["engrave", "gravação"],
-    ["cut", "corte"],
-    ["fill", "preenchimento"]
-  ];
-  const estimates = operationLabels
-    .filter(([operation]) => timesByOperation[operation] > 0)
-    .map(([operation, label]) => `${label}: ${formatDuration(timesByOperation[operation])}`);
-  return estimates.length > 0
-    ? `Tempo estimado: ${estimates.join(" · ")}`
-    : "Sem trajetórias de trabalho para estimar.";
+export function formatOperationTimeEstimates(estimate, t) {
+  const estimates = ["engrave", "cut", "fill"]
+    .filter((operation) => estimate.workSeconds[operation] > 0)
+    .map((operation) => `${t(`ui.dialogs.estimateOperation.${operation}`)}: ${formatDuration(estimate.workSeconds[operation])}`);
+  if (estimate.travelSeconds > 0) estimates.push(`${t("ui.dialogs.estimateTravel")}: ${formatDuration(estimate.travelSeconds)}`);
+  const source = t(estimate.usingControllerSettings ? "ui.dialogs.estimateController" : "ui.dialogs.estimateSimulated");
+  const initial = estimate.initialTravelUnknown ? ` · ${t("ui.dialogs.estimateInitialUnknown")}` : "";
+  return `${t("ui.dialogs.estimateTotal")}: ${formatDuration(estimate.totalSeconds)} (${source}) · ${estimates.join(" · ")}${initial}`;
 }
