@@ -1,0 +1,155 @@
+/* Camada mobile do CommBurn: só se aplica em telas estreitas ou touch.
+   Carregada depois de styles.css; não altera o layout de desktop. */
+
+@media (max-width: 620px), (hover: none) and (pointer: coarse) {
+  :root {
+    --mobile-accent: #ef9b35;
+    --mobile-accent-strong: #ff7a00;
+    --mobile-accent-text: #9a5b13;
+  }
+
+  /* Barra superior com gradiente escuro e textos claros, como na mockup */
+  .topbar {
+    background: linear-gradient(90deg, #5f6a7d 0%, #4a5568 100%);
+    border-bottom: 1px solid #3f4b60;
+  }
+  .topbar .brand { color: #ffffff; }
+  .topbar .button-secondary {
+    color: #ffffff;
+    background: rgb(255 255 255 / 8%);
+    border-color: rgb(255 255 255 / 25%);
+  }
+  .topbar .button-primary {
+    background: linear-gradient(135deg, #3978eb 0%, #2869df 100%);
+    box-shadow: 0 3px 10px rgb(40 105 223 / 35%);
+  }
+  .menu summary { color: #ffffff; }
+  .menu[open] summary, .menu summary:hover { background: rgb(255 255 255 / 12%); }
+
+  /* Botões com toque mais confortável e feedback de pressão */
+  .button, .tool-button, .zoom-button {
+    min-height: 44px;
+    transition: transform .12s ease, background-color .2s ease, box-shadow .2s ease;
+  }
+  .button:active, .tool-button:active, .zoom-button:active {
+    transform: scale(.95);
+  }
+
+  /* Ferramenta ativa: gradiente laranja e pulso único ao trocar */
+  .tool-button.is-active {
+    color: #9a5b13;
+    background: linear-gradient(180deg, rgb(239 155 53 / 28%) 0%, #fff 100%);
+    border-color: var(--mobile-accent);
+    box-shadow: inset 0 3px 0 var(--mobile-accent);
+    animation: mobile-tool-pulse .9s ease-out 1;
+  }
+  .tool-button.is-active > span:first-child { color: var(--mobile-accent-strong); }
+
+  /* Painel de camadas: cartão ativo com borda e brilho laranja */
+  .layer-card.is-active {
+    background: linear-gradient(90deg, rgb(239 155 53 / 18%) 0%, #f6f9ff 60%);
+    border-color: var(--mobile-accent);
+    border-left-color: var(--mobile-accent);
+    animation: mobile-layer-glow .9s ease-out 1;
+  }
+  .layer-card.is-active .layer-select > span:nth-child(2)::before { color: var(--mobile-accent-strong); }
+
+  /* Painel lateral vira bloco deslizante ao abrir */
+  .sidebar .panel {
+    animation: mobile-panel-in .42s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  .sidebar .panel:nth-child(2) { animation-delay: .05s; }
+  .sidebar .panel:nth-child(3) { animation-delay: .1s; }
+
+  /* Títulos de painel com barra laranja */
+  .panel-heading h1, .panel-heading h2 {
+    position: relative;
+    padding-left: 10px;
+  }
+  .panel-heading h1::before, .panel-heading h2::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    bottom: 2px;
+    width: 4px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, #ffb35c 0%, var(--mobile-accent) 100%);
+  }
+
+  /* Campos em foco com anel laranja */
+  .field input:focus, .field textarea:focus, .field select:focus,
+  .input-with-unit:focus-within {
+    border-color: var(--mobile-accent);
+    box-shadow: 0 0 0 3px rgb(239 155 53 / 35%);
+  }
+
+  .toggle input:checked + .toggle-track { background: linear-gradient(90deg, #4c83ec 0%, var(--mobile-accent) 100%); }
+  .layer-toggle input, .safety-check input { accent-color: var(--mobile-accent); }
+
+  /* Aviso da máquina com acento laranja à esquerda */
+  .machine-warning {
+    border-left: 4px solid var(--mobile-accent);
+    background: linear-gradient(90deg, #fff1dc 0%, #fff8ec 70%);
+  }
+
+  /* Status pulsa uma vez ao aparecer */
+  .machine-state {
+    color: var(--mobile-accent-text);
+    animation: mobile-status-pulse 1s ease-out 1;
+  }
+
+  /* Aviso do editor: entrada suave */
+  .notice.visible {
+    border-left: 4px solid var(--mobile-accent);
+    animation: mobile-notice-in .3s ease-out both;
+  }
+
+  /* Objetos selecionados no canvas recebem brilho laranja */
+  .artboard [data-id].selected {
+    filter: drop-shadow(0 0 1.5px var(--mobile-accent-strong)) drop-shadow(0 0 4px rgb(255 106 0 / 55%));
+  }
+
+  /* Rodapé: barra com gradiente sutil */
+  .statusbar {
+    background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
+  }
+
+  /* Movimento reduzido: respeita a preferência do sistema */
+  @media (prefers-reduced-motion: reduce) {
+    .tool-button.is-active,
+    .layer-card.is-active,
+    .sidebar .panel,
+    .machine-state,
+    .notice.visible {
+      animation: none;
+    }
+  }
+}
+
+@keyframes mobile-tool-pulse {
+  0% { box-shadow: inset 0 3px 0 var(--mobile-accent), 0 0 0 0 rgb(255 122 0 / 55%); }
+  100% { box-shadow: inset 0 3px 0 var(--mobile-accent), 0 0 0 14px rgb(255 122 0 / 0%); }
+}
+
+@keyframes mobile-layer-glow {
+  0% { box-shadow: 0 0 0 0 rgb(255 122 0 / 0%); }
+  35% { box-shadow: 0 0 6px 1px rgb(255 122 0 / 55%), 0 0 14px rgb(255 106 0 / 35%); }
+  100% { box-shadow: 0 0 0 0 rgb(255 122 0 / 0%); }
+}
+
+@keyframes mobile-panel-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes mobile-status-pulse {
+  0% { box-shadow: 0 0 0 0 rgb(255 122 0 / 0%); }
+  40% { box-shadow: 0 0 0 6px rgb(255 122 0 / 25%); }
+  100% { box-shadow: 0 0 0 0 rgb(255 122 0 / 0%); }
+}
+
+@keyframes mobile-notice-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
